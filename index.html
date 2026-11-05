@@ -1,0 +1,1986 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>永磁同步电机 FOC 量产工程实战教程</title>
+<meta name="description" content="从工程数学、矢量控制到车载 PMSM 嵌入式落地与台架标定：交互动画 + 题库 + 错题本">
+<meta name="theme-color" content="#1f6feb">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%2728%27 fill=%27none%27 stroke=%27%231f6feb%27 stroke-width=%276%27/%3E%3Cpath d=%27M32 32 L52 20%27 stroke=%27%23e08a00%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E">
+<!-- CDN 依赖：Tailwind CSS v3 Play CDN（https://cdn.tailwindcss.com）。
+     本页核心布局、组件、动画、习题全部使用下方内联 CSS + 原生 JS，CDN 不可用时页面仍完整可用。
+     【切换离线模式】：删除下面这一行 script 即可，其余零外部依赖。 -->
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#ffffff;--panel2:#f0f3f7;--fg:#1d2330;--muted:#5f6b7d;--line:#dde3ea;
+  --acc:#1f6feb;--acc2:#0e8a7a;--ok:#1a8f3c;--bad:#cf2a2a;--warn:#c27c00;
+  --pa:#d6402b;--pb:#2e9a3e;--pc:#2a64d6;--pd:#b0389f;--pq:#e08a00;
+  --cbg:#ffffff;--grid:#e9edf2;--axis:#9aa6b5;--code:#0f1724;--codefg:#dfe7f1;
+  --top:56px;--bot:40px;--navw:284px;--asidew:268px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f141b;--panel:#161d27;--panel2:#1c2531;--fg:#e3e9f1;--muted:#93a0b2;--line:#2a3442;
+    --acc:#5b9bff;--acc2:#33c2ad;--ok:#3fcf6b;--bad:#ff6b6b;--warn:#ffb13b;
+    --pa:#ff7a63;--pb:#5fd36f;--pc:#6f9dff;--pd:#e070cf;--pq:#ffb13b;
+    --cbg:#111821;--grid:#1f2935;--axis:#4f5d70;--code:#0a0f15;--codefg:#d6e2ef;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f141b;--panel:#161d27;--panel2:#1c2531;--fg:#e3e9f1;--muted:#93a0b2;--line:#2a3442;
+  --acc:#5b9bff;--acc2:#33c2ad;--ok:#3fcf6b;--bad:#ff6b6b;--warn:#ffb13b;
+  --pa:#ff7a63;--pb:#5fd36f;--pc:#6f9dff;--pd:#e070cf;--pq:#ffb13b;
+  --cbg:#111821;--grid:#1f2935;--axis:#4f5d70;--code:#0a0f15;--codefg:#d6e2ef;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:calc(var(--top) + 12px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif}
+a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
+/* ---------- 顶栏 ---------- */
+#topbar{position:fixed;top:0;left:0;right:0;height:var(--top);z-index:50;display:flex;align-items:center;gap:10px;padding:0 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+#topbar .ttl{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+#topbar .ttl small{font-weight:400;color:var(--muted);margin-left:8px}
+#searchWrap{position:relative;width:260px;max-width:40vw}
+#searchBox{width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--fg);font-size:14px}
+#searchRes{position:absolute;top:38px;right:0;width:min(420px,92vw);max-height:60vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.18);display:none;z-index:60}
+#searchRes a{display:block;padding:8px 12px;border-bottom:1px solid var(--line);color:var(--fg)}
+#searchRes a:hover{background:var(--panel2);text-decoration:none}
+#searchRes small{color:var(--muted);display:block}
+#searchRes mark{background:#ffe58a;color:#000}
+.btn{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--acc)}
+.btn-pri{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn-sm{padding:3px 8px;font-size:12px}.btn-xs{padding:1px 7px;font-size:12px;border-radius:6px}
+/* ---------- 左导航 ---------- */
+#sidenav{position:fixed;top:var(--top);bottom:var(--bot);left:0;width:var(--navw);overflow:auto;background:var(--panel);border-right:1px solid var(--line);padding:10px 8px 40px;z-index:40;transition:transform .2s}
+.nav-g{margin-bottom:6px}
+.nav-gh{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:13.5px;padding:6px 8px;border-radius:6px;cursor:pointer;user-select:none}
+.nav-gh:hover{background:var(--panel2)}
+.nav-g.closed .nav-items{display:none}
+.nav-g.closed .nav-gh .car{transform:rotate(-90deg)}
+.car{transition:transform .15s;color:var(--muted)}
+.nav-items a{display:flex;justify-content:space-between;gap:6px;font-size:13px;padding:4px 8px 4px 16px;border-radius:6px;color:var(--fg);border-left:3px solid transparent}
+.nav-items a:hover{background:var(--panel2);text-decoration:none}
+.nav-items a.active{border-left-color:var(--acc);background:var(--panel2);color:var(--acc);font-weight:600}
+.nav-items a.pending{color:var(--muted);pointer-events:none;opacity:.65}
+.nav-items a .done{color:var(--ok)}
+.pill{font-size:10.5px;border:1px solid var(--line);border-radius:10px;padding:0 6px;color:var(--muted);white-space:nowrap}
+/* ---------- 主区 / 右栏 / 底栏 ---------- */
+#main{margin:var(--top) var(--asidew) var(--bot) var(--navw);padding:24px 34px 80px}
+#main>*{max-width:960px;margin-left:auto;margin-right:auto}
+#rightbar{position:fixed;top:var(--top);bottom:var(--bot);right:0;width:var(--asidew);overflow:auto;background:var(--panel);border-left:1px solid var(--line);padding:12px;font-size:13px;z-index:30}
+#rightbar h4{margin:14px 0 6px;font-size:13px;color:var(--muted);text-transform:none}
+.fcard{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin-bottom:6px;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.5}
+.fcard b{font-family:inherit;color:var(--acc)}
+.rb-list button,.rb-list a{display:flex;width:100%;justify-content:space-between;margin-bottom:4px;text-align:left}
+#bottombar{position:fixed;left:0;right:0;bottom:0;height:var(--bot);display:flex;align-items:center;gap:10px;padding:0 12px;background:var(--panel);border-top:1px solid var(--line);z-index:45;font-size:13px}
+#progBar{flex:1;max-width:360px;height:8px;background:var(--panel2);border-radius:5px;overflow:hidden;border:1px solid var(--line)}
+#progFill{height:100%;width:0;background:var(--ok);transition:width .3s}
+body.nav-collapsed #sidenav{transform:translateX(-100%)}
+body.nav-collapsed #main{margin-left:0}
+@media (max-width:1279px){#rightbar{display:none}#main{margin-right:0}}
+@media (max-width:900px){
+  #sidenav{transform:translateX(-100%);box-shadow:0 0 30px rgba(0,0,0,.25)}
+  body.nav-open #sidenav{transform:none}
+  #main{margin-left:0;padding:16px 14px 80px}
+  #topbar .ttl small,.hide-sm{display:none}
+  #searchWrap{width:42vw}
+}
+/* ---------- 正文 ---------- */
+.chap{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 26px;margin-bottom:28px}
+@media (max-width:640px){.chap{padding:16px 14px}}
+.chap-h{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;font-size:22px;margin:0 0 6px;line-height:1.4}
+.chap-sub{color:var(--muted);margin:0 0 14px;font-size:14px}
+.part{border-top:1px dashed var(--line);padding-top:12px;margin-top:16px}
+.part>h3{font-size:16.5px;margin:0 0 8px;color:var(--acc)}
+h4.sub{font-size:15px;margin:14px 0 6px}
+p{margin:6px 0}
+ul,ol{margin:6px 0;padding-left:22px}
+li{margin:2px 0}
+.tg{display:inline-block;font-size:12px;font-weight:600;border-radius:5px;padding:0 5px;margin:0 2px;line-height:1.6;border:1px solid transparent;white-space:nowrap}
+.tg-theory{color:#1f5fcc;background:#e5efff}
+.tg-disc{color:#0d7a6c;background:#dff5f1}
+.tg-fix{color:#5b3cc4;background:#ece6ff}
+.tg-anim{color:#8a2aa5;background:#f6e4fb}
+.tg-bench{color:#a85a00;background:#fff0db}
+.tg-fault{color:#b4233a;background:#ffe5e9}
+.tg-red{color:#fff;background:#c81e1e}
+.tg-case{color:#4a5568;background:#e8ecf1}
+.tg-vendor{color:#17703a;background:#e0f5e7}
+.tg-check{color:#7a5d00;background:#fff6c7}
+.tg-quiz{color:#a01f6b;background:#ffe4f2}
+.tg-wb{color:#fff;background:#7a3fd1}
+.tg-none{color:#666;background:#eee}
+:root[data-theme="dark"] .tg,:root:not([data-theme="light"]) .tg{filter:none}
+.formula{font-family:"Cambria Math",ui-monospace,Consolas,monospace;background:var(--panel2);border-left:4px solid var(--acc);border-radius:6px;padding:8px 12px;margin:8px 0;white-space:pre-wrap;line-height:1.7;font-size:14.5px}
+.formula .fv{color:var(--pd);font-weight:600}
+.note{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0;font-size:14px}
+.note.red{border-color:#e6a3a3;background:rgba(200,30,30,.06)}
+.note.bench{border-color:#f0c58a;background:rgba(194,124,0,.07)}
+.three{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin:8px 0}
+.three>div{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px}
+.three b{display:block;color:var(--acc)}
+table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13.5px}
+.tbl-wrap{overflow-x:auto;position:relative}
+th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:var(--panel2)}
+pre{position:relative;background:var(--code);color:var(--codefg);border-radius:8px;padding:12px 14px;overflow:auto;font:12.8px/1.55 ui-monospace,"JetBrains Mono",Consolas,monospace;margin:8px 0}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.92em}
+p code,li code,td code{background:var(--panel2);padding:0 4px;border-radius:4px}
+.copy-btn{position:absolute;top:6px;right:6px;font-size:11px;padding:1px 7px;border-radius:5px;border:1px solid #445;background:#223;color:#cde;cursor:pointer;opacity:.85}
+.tbl-copy{position:static;margin:2px 0;border-color:var(--line);background:var(--panel2);color:var(--fg)}
+.issue{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:8px 0;background:var(--panel2)}
+.issue h5{margin:0 0 4px;font-size:14.5px}
+.issue dl{margin:0;display:grid;grid-template-columns:88px 1fr;gap:2px 8px;font-size:13.8px}
+.issue dt{color:var(--muted);font-weight:600}.issue dd{margin:0}
+@media (max-width:560px){.issue dl{grid-template-columns:1fr}}
+/* ---------- 动画 ---------- */
+.anim-box{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:10px 0;background:var(--panel)}
+.anim-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 10px;background:var(--panel2);border-bottom:1px solid var(--line);font-size:13.5px}
+.anim-bar b{flex:1;min-width:160px}
+.anim-canvas{width:100%;line-height:0}
+.anim-canvas canvas{display:block;width:100%}
+.anim-ctl{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:4px 16px;padding:8px 12px;border-top:1px solid var(--line);font-size:13px}
+.ctl-row{display:grid;grid-template-columns:minmax(90px,1.3fr) 2fr 82px;align-items:center;gap:8px}
+.ctl-row input[type=range]{width:100%}
+.ctl-val{font-family:ui-monospace,Consolas,monospace;text-align:right;font-size:12px}
+.ctl-tog{display:flex;align-items:center;gap:6px}
+.ctl-btns{display:flex;flex-wrap:wrap;gap:6px;grid-column:1/-1}
+.anim-note{font-size:13.5px;background:var(--panel2);border-radius:8px;padding:8px 12px;margin:6px 0 10px;border:1px dashed var(--line)}
+.anim-note b{color:var(--acc)}
+/* ---------- 习题 ---------- */
+.quiz-h{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center;margin:6px 0}
+.quiz-stat{font-size:13px;color:var(--muted)}
+.q{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;background:var(--panel)}
+.q-head{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;margin-bottom:4px}
+.q-type{font-weight:700}.q-num{color:var(--muted)}
+.q-head .sp{flex:1}
+.q-stem{font-size:14.5px}
+.q-opts{display:grid;gap:6px;margin-top:8px}
+.q-opt{text-align:left;border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:14px;line-height:1.55}
+.q-opt:hover{border-color:var(--acc)}
+.q-opt.sel{border-color:var(--acc);box-shadow:0 0 0 2px rgba(31,111,235,.25)}
+.q-opt.ok{border-color:var(--ok);background:rgba(26,143,60,.14)}
+.q-opt.bad{border-color:var(--bad);background:rgba(207,42,42,.14)}
+.q-exp{margin-top:8px;font-size:14px;background:var(--panel2);border-radius:8px;padding:8px 10px}
+.q-verdict{font-weight:700;margin-bottom:4px}.q-verdict.ok{color:var(--ok)}.q-verdict.bad{color:var(--bad)}
+.q-links{margin-top:4px;font-size:13px}
+.q-links a{margin-right:8px}
+details.q-ref{margin-top:8px;border:1px dashed var(--line);border-radius:8px;padding:6px 10px;background:var(--panel2)}
+details.q-ref summary{cursor:pointer;font-weight:600;color:var(--acc)}
+.q-ans{font-size:14px;margin-top:6px}
+.exam-res{border:2px solid var(--acc);border-radius:10px;padding:10px 14px;margin:10px 0;background:var(--panel2)}
+/* ---------- 弹窗 ---------- */
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:80;display:none;align-items:flex-start;justify-content:center;padding:4vh 10px}
+#modal.on{display:flex}
+#modalBox{background:var(--panel);border-radius:14px;width:min(900px,100%);max-height:92vh;display:flex;flex-direction:column;border:1px solid var(--line)}
+#modalHead{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);font-weight:700}
+#modalBody{padding:12px 16px;overflow:auto}
+.sim-msg{border-radius:10px;padding:8px 12px;margin:8px 0;font-size:14.5px}
+.sim-eng{background:rgba(194,124,0,.09);border:1px solid #e8c08a}
+.sim-you{background:rgba(31,111,235,.08);border:1px solid #9fc0f5;margin-left:12%}
+.sim-fb{background:var(--panel2);border:1px dashed var(--line)}
+.sim-opts{display:grid;gap:6px;margin:8px 0}
+.flow-svg{width:100%;min-width:760px}
+.flow-svg .bx{fill:var(--panel2);stroke:var(--axis)}
+.flow-svg .bx.math{stroke:var(--acc)}
+.flow-svg text{fill:var(--fg);font-size:12px;font-family:system-ui,sans-serif}
+.flow-svg .ln{stroke:var(--axis);stroke-width:1.5;fill:none;marker-end:url(#arw)}
+.flow-svg .sm{fill:var(--muted);font-size:10.5px}
+#toTop{margin-left:auto}
+/* ---------- 打印 ---------- */
+@media print{
+  #topbar,#sidenav,#rightbar,#bottombar,.anim-ctl,.anim-bar button,.copy-btn,.q-head button,#modal,.no-print{display:none!important}
+  #main{margin:0!important;padding:0!important}
+  .chap{break-inside:auto;border:none;padding:0}
+  body{background:#fff;color:#000}
+  pre{white-space:pre-wrap;background:#f4f4f4;color:#000}
+}
+</style>
+</head>
+<body>
+<header id="topbar">
+  <button class="btn" id="navToggle" title="折叠/展开目录">☰</button>
+  <div class="ttl">永磁同步电机 FOC 量产工程实战教程<small>从工程数学、矢量控制到车载 PMSM 嵌入式落地与台架标定</small></div>
+  <div id="searchWrap"><input id="searchBox" type="search" placeholder="全文搜索：Park、Q15、积分饱和…" autocomplete="off"><div id="searchRes"></div></div>
+  <button class="btn" id="btnWB" title="全局错题本"><span class="tg tg-wb">【错题本】</span><span id="wbCount">0</span></button>
+  <button class="btn hide-sm" id="btnSim" title="调试模拟">🛠 台架调试模拟</button>
+  <button class="btn hide-sm" id="btnTheme" title="明暗切换">◐</button>
+</header>
+
+<nav id="sidenav" aria-label="目录"></nav>
+
+<main id="main">
+
+<!-- ================= 课程导读 ================= -->
+<section class="chap" id="intro" data-title="课程导读与统一案例">
+<h2 class="chap-h">课程导读与统一 EPS 工程案例</h2>
+<p class="chap-sub">学习对象：嵌入式软件 / 电机控制算法 / MCU‑DSP 底层 / BMS‑OBC‑EPS‑EHB‑电驱电控开发工程师。前置：熟练 C 语言、结构体指针中断、定时器 ADC PWM。<b>数学从零补齐</b>，不假设预先掌握代数变换、三角、复数、微积分、拉普拉斯、PID。</p>
+
+<div class="part"><h3>一、如何使用本教程</h3>
+<ul>
+<li>每个小节固定十个部分：小节基础 → 前置条件 → 核心原理与公式（含交互动画）→ 嵌入式实现 → 仿真与波形预期 → EPS 案例实现 → 高频调试问题 → 工程踩坑 → 本章习题组 → 考核小结。</li>
+<li>每个知识点固定回答三问：<b>① 为什么需要</b>、<b>② 量产项目里怎么做</b>、<b>③ 如何证明它工作正常</b>。</li>
+<li>单选 / 判断即时判分，答错自动进入【错题本】；简答 / 工程分析题展开参考解答自查。模块末有章节综合自测卷，全文末有结业综合大试卷（随已交付模块自动扩充题库）。</li>
+<li>顶栏「台架调试模拟」为情景推演：资深标定工程师抛现象，你选排查动作，系统持续追问。</li>
+<li>每节标题右侧「标记已学」，底栏显示学习进度（保存在本机浏览器）。</li>
+</ul>
+<h4 class="sub">全局标记说明</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>标记</th><th>含义</th><th>标记</th><th>含义</th></tr>
+<tr><td><span class="tg tg-theory">【理论公式】</span></td><td>数学推导、连续域理想公式</td><td><span class="tg tg-disc">【离散实现】</span></td><td>嵌入式离散版本</td></tr>
+<tr><td><span class="tg tg-fix">【定点实现】</span></td><td>定点 / Q 格式落地</td><td><span class="tg tg-anim">【交互动画】</span></td><td>内嵌可拖动、启停演示</td></tr>
+<tr><td><span class="tg tg-bench">【台架重点】</span></td><td>台架标定、示波器观测点</td><td><span class="tg tg-fault">【高频故障】</span></td><td>量产高频问题</td></tr>
+<tr><td><span class="tg tg-red">【风险红线】</span></td><td>可能炸管、失步、损坏硬件</td><td><span class="tg tg-case">【案例假设】</span></td><td>EPS 教学电机假设参数</td></tr>
+<tr><td><span class="tg tg-vendor">【厂商参考】</span></td><td>芯片厂商参考方案（非唯一标准）</td><td><span class="tg tg-check">【待核对】</span></td><td>私有算法、未确认内容</td></tr>
+<tr><td><span class="tg tg-quiz">【习题】</span></td><td>单选 / 判断 / 简答 / 工程分析</td><td><span class="tg tg-wb">【错题本】</span></td><td>全局错题汇总入口</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>二、贯穿全文的统一工程案例：车载 EPS 助力 IPMSM</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>项目</th><th>数值</th><th>来源</th></tr>
+<tr><td>电机类型</td><td>内置式永磁同步电机 IPMSM（Ld &lt; Lq）</td><td>项目给定</td></tr>
+<tr><td>极对数 p</td><td>4</td><td>项目给定</td></tr>
+<tr><td>额定 / 最高转速</td><td>3000 rpm / 8000 rpm（电频率 200 Hz / 533.3 Hz）</td><td>项目给定</td></tr>
+<tr><td>额定相电流</td><td>25 A rms（峰值 ≈ 35.4 A）</td><td>项目给定</td></tr>
+<tr><td>母线电压</td><td>12 V 标称；工作范围 9 ~ 16 V</td><td>给定 / <span class="tg tg-case">【案例假设】</span>范围</td></tr>
+<tr><td>相电阻 Rs</td><td>12 mΩ（25 °C）</td><td><span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>Ld / Lq</td><td>45 µH / 75 µH</td><td><span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>永磁磁链 ψf</td><td>3.5 mWb</td><td><span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>PWM</td><td>20 kHz 中心对齐互补，Ts = 50 µs，FOC 主环每 PWM 周期执行一次</td><td><span class="tg tg-case">【案例假设】</span>频率</td></tr>
+<tr><td>电流采样</td><td>双电阻，PWM 中点采样；±50 A ↔ ADC 0 ~ 4095，零点 2048</td><td><span class="tg tg-case">【案例假设】</span>量程</td></tr>
+<tr><td>位置传感</td><td>旋变 + AD2S1210 解码（按 12 位分辨率配置）；无感备份</td><td>给定 / <span class="tg tg-case">【案例假设】</span>分辨率</td></tr>
+<tr><td>主控</td><td>NXP S32K146（Arm Cortex‑M4F，主频与外设细节以 NXP 数据手册为准）</td><td>项目给定</td></tr>
+<tr><td>电流环带宽目标</td><td>1 kHz（≈ PWM 频率 1/20）</td><td><span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>标幺基值</td><td>I_BASE = 50 A，V_BASE = 16 V，角度 uint16：0 ~ 65535 ↔ 0 ~ 2π</td><td><span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>标定 / 通信</td><td>CAN + XCP，CANape；MATLAB/Simulink 仿真 + 台架</td><td>项目给定</td></tr>
+</table></div>
+<div class="note">由上表可推出（后续章节反复使用）：基速 3000 rpm 时 ωe = 2π·200 = 1256.6 rad/s，反电动势峰值 ωe·ψf ≈ 4.40 V；SVPWM 线性区最大相电压矢量 Vdc/√3 = 6.93 V（12 V 时）；8000 rpm 反电动势 ≈ 11.7 V &gt; 6.93 V，<b>必须弱磁</b>。电气时间常数 τd = Ld/Rs = 3.75 ms，τq = 6.25 ms。</div>
+</div>
+
+<div class="part"><h3>三、全书统一约定（动画与代码严格一致）</h3>
+<ul>
+<li><b>Clarke 采用幅值不变形式（系数 2/3）</b>；α 轴与 A 相绕组轴线重合，β 轴超前 α 90°。</li>
+<li><b>正方向：逆时针为正</b>。A→B→C 正相序时电流空间矢量逆时针旋转，电角度 θe 增大，对应「正转」。</li>
+<li><b>Park</b>：id = iα·cosθ + iβ·sinθ；iq = −iα·sinθ + iβ·cosθ；复数写法 i_dq = i_αβ·e^(−jθ)。<b>反 Park</b>：vα = vd·cosθ − vq·sinθ；vβ = vd·sinθ + vq·cosθ。</li>
+<li>d 轴对准永磁体磁链方向，q 轴超前 d 轴 90°；iq &gt; 0 产生正向电磁转矩。</li>
+<li>相电流正方向：从逆变器流入电机为正。</li>
+<li>角度格式 uint16：16384 = 90°，32768 = 180°，加法溢出即自动取模 2π。</li>
+</ul>
+<h4 class="sub">统一命名（全书所有代码片段共用）</h4>
+<pre><code>/* ===== 全局 FOC 数据结构（模块 A 先出现的字段，后续章节扩充同一结构体） ===== */
+typedef int16_t q15_t;                 /* Q15：[-1, 1)                         */
+
+typedef struct {
+    uint16_t adcIa, adcIb;             /* 相电流 ADC 原始码值                   */
+    q15_t    ia, ib, ic;               /* 相电流 标幺 Q15，基值 FOC_I_BASE      */
+    q15_t    iAlpha, iBeta;            /* αβ 电流                               */
+    q15_t    id, iq;                   /* dq 电流                               */
+    q15_t    idRef, iqRef;             /* dq 电流给定                           */
+    q15_t    vd, vq, vAlpha, vBeta;    /* 电压，基值 FOC_V_BASE                 */
+    q15_t    vdcPu;                    /* 母线电压标幺                          */
+    uint16_t thetaE;                   /* 电角度 0..65535 ↔ 0..2π               */
+    uint16_t thetaM;                   /* 机械角度（旋变）                      */
+    int16_t  thetaEIncPerTs;           /* 每 Ts 电角度增量（uint16 单位）       */
+    q15_t    sinTh, cosTh;
+    int32_t  spdRpmFilt;               /* 机械转速 rpm（滤波后）                */
+    uint16_t thetaEInvPark;            /* 反 Park 用补偿后电角度（A03）         */
+} FOC_tst;
+
+extern FOC_tst gFoc;
+
+/* ===== 标定量：前缀 Cal_，通过 XCP 在 CANape 中在线修改 ===== */
+extern volatile int16_t Cal_IaOffset_cnt, Cal_IbOffset_cnt;   /* 偏移码值      */
+extern volatile q15_t   Cal_IaGainCorr_q15, Cal_IbGainCorr_q15; /* 增益修正    */
+extern volatile int16_t Cal_IdKp_q12, Cal_IqKp_q12;           /* 电流环 Kp     */
+extern volatile int16_t Cal_IdKiTs_q15, Cal_IqKiTs_q15;       /* 电流环 Ki·Ts  */
+extern volatile q15_t   Cal_SpdLpfK_q15;                      /* 速度低通系数  */
+
+#define FOC_I_BASE   (50.0f)   /* A   【案例假设】 */
+#define FOC_V_BASE   (16.0f)   /* V   【案例假设】 */
+#define FOC_TS       (50.0e-6f)/* s   【案例假设】 */
+#define FOC_POLE_PAIRS (4u)</code></pre>
+</div>
+
+<div class="part"><h3>四、证据等级：仿真 / 动画跑通 ≠ 台架可稳定运行</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>等级</th><th>证据</th><th>能证明</th><th>不能证明</th></tr>
+<tr><td>L0</td><td>本页交互动画</td><td>概念、方向、符号约定正确</td><td>任何实际性能</td></tr>
+<tr><td>L1</td><td>Simulink 浮点仿真</td><td>算法结构、理想参数下的稳定性</td><td>量化、延迟、死区、噪声、参数偏差</td></tr>
+<tr><td>L2</td><td>定点 MIL / SIL、PIL（MCU 在环）</td><td>溢出、Q 格式精度、执行时间</td><td>真实电机参数与逆变器非线性</td></tr>
+<tr><td>L3</td><td><span class="tg tg-bench">【台架重点】</span>台架实测：相电流、dq 电流、角度误差、阶跃响应、频谱</td><td>实质性能、标定结果</td><td>整车工况全覆盖（温度、电压、EMC）</td></tr>
+<tr><td>L4</td><td>整车 / 环境试验</td><td>量产可用</td><td>—</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>五、数学模块如何服务 FOC 主链路</h3>
+<p>下图是完整 FOC 数据流（静态总览），每个方框下方标注它依赖的模块 A 数学小节。点击方框跳转。<span class="tg tg-none">【暂无可交互动画】</span>端到端可交互数据流追踪动画在重点强化章节「X1 端到端数据流追踪」中提供。</p>
+<div class="tbl-wrap">
+<svg class="flow-svg" viewBox="0 0 980 190" role="img" aria-label="FOC 数据流">
+<defs><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker></defs>
+<g data-link="A01"><rect class="bx math" x="5" y="20" width="96" height="44" rx="6"/><text x="53" y="40" text-anchor="middle">ADC 原始码</text><text x="53" y="56" text-anchor="middle">偏移/增益</text><text class="sm" x="53" y="78" text-anchor="middle">A01 代数</text></g>
+<path class="ln" d="M101,42 L121,42"/>
+<g data-link="A02"><rect class="bx math" x="122" y="20" width="90" height="44" rx="6"/><text x="167" y="40" text-anchor="middle">Clarke</text><text x="167" y="56" text-anchor="middle">abc→αβ</text><text class="sm" x="167" y="78" text-anchor="middle">A02 A03</text></g>
+<path class="ln" d="M212,42 L232,42"/>
+<g data-link="A04"><rect class="bx math" x="233" y="20" width="90" height="44" rx="6"/><text x="278" y="40" text-anchor="middle">Park</text><text x="278" y="56" text-anchor="middle">αβ→dq</text><text class="sm" x="278" y="78" text-anchor="middle">A03 A04</text></g>
+<path class="ln" d="M323,42 L343,42"/>
+<g data-link="A08"><rect class="bx math" x="344" y="20" width="104" height="44" rx="6"/><text x="396" y="40" text-anchor="middle">dq 电流环 PI</text><text x="396" y="56" text-anchor="middle">解耦/抗饱和</text><text class="sm" x="396" y="78" text-anchor="middle">A06 A07 A08</text></g>
+<path class="ln" d="M448,42 L468,42"/>
+<g data-link="A02"><rect class="bx math" x="469" y="20" width="96" height="44" rx="6"/><text x="517" y="40" text-anchor="middle">电压限幅</text><text x="517" y="56" text-anchor="middle">|v|≤Vdc/√3</text><text class="sm" x="517" y="78" text-anchor="middle">A02 矢量</text></g>
+<path class="ln" d="M565,42 L585,42"/>
+<g data-link="A04"><rect class="bx math" x="586" y="20" width="90" height="44" rx="6"/><text x="631" y="40" text-anchor="middle">反 Park</text><text x="631" y="56" text-anchor="middle">dq→αβ</text><text class="sm" x="631" y="78" text-anchor="middle">A03 A04</text></g>
+<path class="ln" d="M676,42 L696,42"/>
+<g><rect class="bx" x="697" y="20" width="90" height="44" rx="6"/><text x="742" y="40" text-anchor="middle">SVPWM</text><text x="742" y="56" text-anchor="middle">扇区/时间</text><text class="sm" x="742" y="78" text-anchor="middle">C04</text></g>
+<path class="ln" d="M787,42 L807,42"/>
+<g><rect class="bx" x="808" y="20" width="96" height="44" rx="6"/><text x="856" y="40" text-anchor="middle">PWM 寄存器</text><text x="856" y="56" text-anchor="middle">占空比/死区</text><text class="sm" x="856" y="78" text-anchor="middle">B06 C13</text></g>
+<g data-link="A05"><rect class="bx math" x="233" y="120" width="120" height="44" rx="6"/><text x="293" y="140" text-anchor="middle">旋变角度/测速</text><text x="293" y="156" text-anchor="middle">差分+低通</text><text class="sm" x="293" y="178" text-anchor="middle">A03 A05</text></g>
+<g data-link="A06"><rect class="bx math" x="420" y="120" width="130" height="44" rx="6"/><text x="485" y="140" text-anchor="middle">开环角度/观测器</text><text x="485" y="156" text-anchor="middle">累加/积分</text><text class="sm" x="485" y="178" text-anchor="middle">A06 A07</text></g>
+<path class="ln" d="M293,120 L280,66"/><path class="ln" d="M330,120 L620,66"/>
+<g><rect class="bx" x="620" y="120" width="170" height="44" rx="6"/><text x="705" y="140" text-anchor="middle">速度环/位置环/MTPA/弱磁</text><text x="705" y="156" text-anchor="middle">→ idRef / iqRef</text><text class="sm" x="705" y="178" text-anchor="middle">C06 C07 C08</text></g>
+<path class="ln" d="M620,135 L420,64"/>
+</svg></div>
+</div>
+</section>
+
+<!-- ================= A01 ================= -->
+<section class="chap" id="A01" data-title="A01 基础代数">
+<h2 class="chap-h">A01 基础代数：线性映射、两点标定、标幺化与限幅</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 1 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>FOC 最前端：ADC 原始码值 → 物理电流 → 标幺 Q15；同样用于母线电压、温度、旋变角度换算</td></tr>
+<tr><th>输入 / 输出</th><td>输入：ADC 码值 N、标定偏移 N0、增益 K；输出：电流 A、标幺值、Q15 整数</td></tr>
+<tr><th>工程价值</th><td>所有后续计算都建立在「数值代表什么物理量」之上；换算错一处，Clarke/Park/PI 全部失真</td></tr>
+<tr><th>上下游依赖</th><td>下游：C01 电流采样校准、D02 定点实现、C05 PI 标幺参数</td></tr>
+<tr><th>适用角色</th><td>全部角色；MCU 底层与标定工程师必修</td></tr>
+<tr><th>前置数学依赖</th><td>无（本节为起点）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>MCU 只认识整数码值。不会线性映射与移项，就无法把 ADC 读数变成电流，也无法写出 di/dt = (v − R·i)/L 这类后续公式。</div>
+<div><b>② 量产怎么做</b>上电 PWM 关闭时做偏移校准，产线/台架做两点增益标定；中断内用整数乘加 + 移位完成换算，统一标幺基值。</div>
+<div><b>③ 如何证明</b>静止零电流时读数 &lt; 0.1 A；对比钳形表/功率分析仪，增益误差 &lt; 1%；满量程不削顶。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>信号：两相电流 ADC 码值；硬件：采样电阻 + 运放偏置在 ADC 中点。</li>
+<li>标定参数：<code>Cal_IaOffset_cnt</code>、<code>Cal_IaGainCorr_q15</code>（B 相同理）。</li>
+<li>不满足的现象：偏移未校准 → 静止有「假电流」，运行中 dq 电流出现电频率一次脉动；量程不足 → 波形削顶，过流保护失效或误报。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<p><span class="tg tg-theory">【理论公式】</span>线性映射（一次函数）：</p>
+<div class="formula">I = (<span class="fv">N</span> − <span class="fv">N0</span>) · <span class="fv">K</span>
+  N：ADC 码值；N0：零电流对应码值（偏移）；K：A/码值（增益）
+案例：±50 A ↔ 0~4095 → K = 100 A / 4096 = 0.024414 A/cnt，N0 理想 = 2048 <span class="tg tg-case">【案例假设】</span></div>
+<p><span class="tg tg-theory">【理论公式】</span>两点标定（二元一次方程组）：已知 (N1, I1)、(N2, I2) 两组实测点</p>
+<div class="formula">K  = (I2 − I1) / (N2 − N1)
+N0 = N1 − I1 / K</div>
+<p><span class="tg tg-theory">【理论公式】</span>移项求解（后续每章都在用）：由 RL 电压方程 v = R·i + L·di/dt</p>
+<div class="formula">di/dt = (v − R·i) / L        ← 「把要求的量单独放到等号一边」</div>
+<p><span class="tg tg-theory">【理论公式】</span>标幺化与 Q15：</p>
+<div class="formula">i_pu  = I / I_BASE                     （I_BASE = 50 A）
+i_q15 = round(i_pu · 32768)，范围 [−32768, 32767]
+案例巧合设计：每个 ADC 码对应 Q15 增量 = K·32768/I_BASE = 0.024414×32768/50 = 16（恰为 2⁴，可用移位）</div>
+<p><span class="tg tg-theory">【理论公式】</span>限幅（分段函数）：sat(x) = x_max（x &gt; x_max）；x_min（x &lt; x_min）；x（其他）。</p>
+
+<div id="anim-A01"></div>
+<div class="anim-note"><b>动画在演示什么：</b>一个真实正弦相电流经过「硬件零点」变成 ADC 码，再用「软件偏移 + 增益修正」换算回电流和 Q15。左图是换算直线（蓝）与真实直线（灰虚线），右图是时域对比。<br>
+<b>拖动滑块：</b>让「软件偏移」≠「硬件零点」，蓝线整体平移，时域出现直流偏置；增益修正 ≠ 1，峰值被放大/缩小；电流峰值 &gt; 50 A，ADC 卡在 0/4095，波形削顶。<br>
+<b>正常现象：</b>灰蓝重合，偏移误差显示绿色。<b>异常：</b>偏置、比例错误、削顶（红色提示）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol>
+<li><b>上电偏移校准</b>（目的：得到 N0）：PWM 输出关闭、运放上电稳定 ≥ 数十 ms 后，每 PWM 周期采样，累加 1024 次求平均（右移 10 位）。中断约束：只读 ADC，不运行电流环。标定量：结果写入 <code>Cal_IaOffset_cnt</code>，超出 2048 ± 100 视为采样电路故障。</li>
+<li><b>两点增益标定</b>（台架/产线）：直流注入已知电流（如 A 进 B 出 +20 A），用精密表计读 I，代入两点公式得增益修正，写入 <code>Cal_IaGainCorr_q15</code>。</li>
+<li><b>中断内换算</b>：<code>(adc − off)</code> 用 int32 运算 → 左移 4 位得 Q15 → 乘增益修正（Q15×Q15 &gt;&gt; 15）→ 饱和到 int16。</li>
+<li><b>溢出保护</b>：(adc − off) 范围约 ±2100，×16 后可达 ±33600，<b>超出 int16，必须先在 int32 中运算再饱和</b>。</li>
+<li><b>第三相</b>：星接无中线，ic = −ia − ib（A03 证明）。</li>
+</ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>正常：PWM 关闭时 ia、ib 在 0 附近，噪声峰峰值 ≤ 若干码；运行时三相正弦幅值一致、相差 120°。</li>
+<li>偏移误差：相电流中心线偏离 0；在 dq 中表现为<b>以电频率脉动的纹波</b>（直流量经 Park 变成一倍频交流）。</li>
+<li>增益不一致（A/B 相差几个 %）：dq 中出现 <b>2 倍电频率</b>纹波。</li>
+<li>削顶：波形顶部平直，过流判断失效。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<p><span class="tg tg-fix">【定点实现】</span>Q15 基础工具（全书共用，D02 会扩展）：</p>
+<pre><code>#include &lt;stdint.h&gt;
+typedef int16_t q15_t;
+
+#define Q15_MAX   ((int32_t)32767)
+#define Q15_MIN   ((int32_t)-32768)
+
+static inline q15_t Q15_Sat(int32_t x)
+{
+    if (x &gt; Q15_MAX) { return (q15_t)Q15_MAX; }
+    if (x &lt; Q15_MIN) { return (q15_t)Q15_MIN; }
+    return (q15_t)x;
+}
+
+/* Q15 × Q15：(-1)×(-1) = +1.0 超出 Q15，必须饱和 */
+static inline q15_t Q15_Mul(q15_t a, q15_t b)
+{
+    return Q15_Sat(((int32_t)a * (int32_t)b) &gt;&gt; 15);
+}</code></pre>
+<p><span class="tg tg-fix">【定点实现】</span>偏移校准与中断换算：</p>
+<pre><code>#define OFFS_CAL_SHIFT   (10u)            /* 1024 次平均 */
+#define OFFS_VALID_MIN   (1948)           /* 2048 - 100  【案例假设】 */
+#define OFFS_VALID_MAX   (2148)
+
+static uint32_t s_offAccA = 0u, s_offAccB = 0u;
+static uint16_t s_offCnt  = 0u;
+
+/* PWM 关闭状态下，在 PWM 中断中调用；返回 1 表示完成 */
+uint8_t FOC_OffsetCal_Isr(void)
+{
+    s_offAccA += gFoc.adcIa;
+    s_offAccB += gFoc.adcIb;
+    s_offCnt++;
+    if (s_offCnt &gt;= (1u &lt;&lt; OFFS_CAL_SHIFT)) {
+        int16_t offA = (int16_t)(s_offAccA &gt;&gt; OFFS_CAL_SHIFT);
+        int16_t offB = (int16_t)(s_offAccB &gt;&gt; OFFS_CAL_SHIFT);
+        if ((offA &gt;= OFFS_VALID_MIN) &amp;&amp; (offA &lt;= OFFS_VALID_MAX) &amp;&amp;
+            (offB &gt;= OFFS_VALID_MIN) &amp;&amp; (offB &lt;= OFFS_VALID_MAX)) {
+            Cal_IaOffset_cnt = offA;
+            Cal_IbOffset_cnt = offB;
+        } else {
+            Diag_SetFault(DIAG_ISENSE_OFFSET);   /* 采样电路异常 */
+        }
+        return 1u;
+    }
+    return 0u;
+}
+
+/* ADC → Q15：每码 = 16 LSB（±50 A 量程 / I_BASE 50 A） */
+static inline q15_t FOC_AdcToIq15(uint16_t adc, int16_t off, q15_t gainCorr)
+{
+    int32_t x = ((int32_t)adc - (int32_t)off) * 16;      /* 先在 int32 中运算 */
+    x = (x * (int32_t)gainCorr) &gt;&gt; 15;                   /* 增益修正 Q15     */
+    return Q15_Sat(x);
+}
+
+void FOC_CurrentConvert_Isr(void)
+{
+    gFoc.ia = FOC_AdcToIq15(gFoc.adcIa, Cal_IaOffset_cnt, Cal_IaGainCorr_q15);
+    gFoc.ib = FOC_AdcToIq15(gFoc.adcIb, Cal_IbOffset_cnt, Cal_IbGainCorr_q15);
+    gFoc.ic = Q15_Sat(-(int32_t)gFoc.ia - (int32_t)gFoc.ib);
+}</code></pre>
+<p class="note">说明：增益修正 Cal_IaGainCorr_q15 的标称值 32767（≈1.0）；若需要 &gt; 1.0 的修正，改用 Q14 格式。<code>Diag_SetFault</code> 属于 C12 诊断模块接口。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>静止时相电流读数不为零</h5><dl>
+<dt>现象</dt><dd>PWM 关闭，CANape 显示 ia ≈ +1.2 A，ib ≈ −0.4 A。</dd>
+<dt>可能根因</dt><dd>偏移校准时运放未稳定；校准时 PWM 已开（有真实电流）；NVM 中旧标定值覆盖了上电校准值。</dd>
+<dt>排查顺序</dt><dd>① 读 Cal_IaOffset_cnt 与 ADC 原始均值对比 → ② 查校准触发时序（与 PWM 使能、运放供电的先后）→ ③ 查是否有写覆盖。</dd>
+<dt>修复</dt><dd>校准延后至供电稳定；校准期间强制 PWM 关闭；增加有效范围判断。</dd>
+<dt>验证波形</dt><dd>静止 ia/ib 均值 &lt; 0.1 A；运行时 iq 频谱一倍电频率分量明显下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>大电流时波形削顶</h5><dl>
+<dt>现象</dt><dd>堵转大电流测试时相电流顶部平直，过流保护不动作。</dd>
+<dt>可能根因</dt><dd>运放输出饱和早于 ADC 满量程；量程设计不足；偏移偏离中点导致单边量程变小。</dd>
+<dt>排查顺序</dt><dd>示波器同时测运放输出与 ADC 码值 → 计算正负方向剩余量程。</dd>
+<dt>修复</dt><dd>量程至少覆盖最大保护阈值 × 1.2；软件增加「ADC 码值接近 0/4095」诊断。</dd>
+<dt>验证波形</dt><dd>阶跃到保护阈值，波形完整，保护按设定值触发。</dd></dl></div>
+<div class="issue"><h5>数学易错点：无符号减法回绕</h5><dl>
+<dt>现象</dt><dd>电流偶尔跳到 +2000 A 量级。</dd>
+<dt>可能根因</dt><dd>写成 <code>(uint32_t)adc - off</code>，adc &lt; off 时结果回绕成大正数。</dd>
+<dt>排查顺序</dt><dd>在电流为负的半周抓数据；静态代码检查（MISRA 本质类型规则）。</dd>
+<dt>修复</dt><dd>两个操作数都先转 int32 再相减。</dd>
+<dt>验证</dt><dd>负半周波形连续；单元测试覆盖 adc = 0、off = 2148。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li><b>整数除法截断</b>：先乘后除（<code>a*b/c</code>），并确认乘积不溢出。</li>
+<li><b>负数右移</b>：C 标准中负数右移是实现定义；Arm 编译器为算术右移，但需在编码规范中明确并做单元测试。</li>
+<li><b>基值混用</b>：电流环用 50 A 基值、保护模块用 100 A 基值，比较阈值时直接相比 → 保护点差一倍。全项目只用一套基值头文件。</li>
+<li><b>Q15 无法表示 +1.0</b>：最大 32767/32768；-1 × -1 必须饱和。</li>
+<li><b>温漂</b>：偏移随温度变化，长时间运行可考虑在零矢量/停机期间周期性重校准。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A01" id="quiz-A01"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：两点标定公式、偏移校准时序、Q15 换算与饱和、int32 中间运算。</li>
+<li>高频出现于：综合卷换算计算题、面试「为什么要标幺化」、台架「静止有电流」问题定位。</li></ul></div>
+</section>
+
+<!-- ================= A02 ================= -->
+<section class="chap" id="A02" data-title="A02 平面矢量">
+<h2 class="chap-h">A02 平面矢量：模长、角度、合成、投影与坐标旋转</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 2 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>Clarke（三相合成为一个空间矢量）、Park（投影到 dq）、电压矢量限幅、电流矢量限幅</td></tr>
+<tr><th>输入 / 输出</th><td>输入：分量 (x, y) 或模长 + 角度；输出：合成矢量、投影分量、模长、角度</td></tr>
+<tr><th>工程价值</th><td>FOC 的核心思想就是「把三相电流看成一根旋转的箭头」；不会矢量就看不懂任何坐标变换</td></tr>
+<tr><th>上下游依赖</th><td>上游 A01；下游 A03、A04、B03、C02、C03、C04、C07</td></tr>
+<tr><th>适用角色</th><td>算法工程师必修；底层工程师需理解限幅与 atan2</td></tr>
+<tr><th>前置数学依赖</th><td>A01（勾股定理在本节补齐）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>三相绕组产生的磁势是空间叠加的；只有把它们合成一个矢量，才能谈「电流方向对准 q 轴」。</div>
+<div><b>② 量产怎么做</b>中断内用乘加完成投影；电压矢量按 Vdc/√3 做圆限幅（d 轴优先）；角度用 atan2 查表或 CORDIC。</div>
+<div><b>③ 如何证明</b>CANape 画 iα–iβ XY 图应为圆；限幅生效时 √(vd²+vq²) 不超过 Vdc/√3。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A01 线性运算。本节补齐勾股定理：直角三角形斜边² = 两直角边平方和。</li>
+<li>信号：αβ 或 dq 分量；母线电压 Vdc（用于限幅）。</li>
+<li>不满足：方形限幅（vd、vq 各自限幅）导致合成电压超出 SVPWM 线性区，电流畸变。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+矢量 v = (x, y)；模长 |v| = √(x² + y²)；角度 θ = atan2(y, x)（四象限）
+合成：a + b = (ax + bx, ay + by)        ← 平行四边形法则
+点积：a · b = ax·bx + ay·by = |a||b|cos∠(a,b)
+投影：v 在单位矢量 e 方向上的分量 = v · e
+旋转坐标系（新轴 d 与 x 轴夹角 φ，q 超前 d 90°）：
+   vd =  x·cosφ + y·sinφ
+   vq = −x·sinφ + y·cosφ        ← 这就是 Park 变换的几何本质
+电压限幅（SVPWM 线性区内切圆）：√(vd² + vq²) ≤ Vdc/√3（12 V 时 6.93 V）</div>
+<div id="anim-A02"></div>
+<div class="anim-note"><b>动画在演示什么：</b>两个矢量 a、b 合成 a+b（平行四边形），并把合成矢量投影到一套旋转坐标轴 d、q 上。右图记录 d、q 分量随坐标轴旋转的变化。<br>
+<b>拖动滑块：</b>改变 a、b 的模长和角度，合成矢量随之改变；启动后坐标轴 φ 逆时针旋转，固定矢量在旋转坐标系里的分量变成正弦——这正是「静止矢量在旋转坐标系中看是交流」，反之旋转矢量在同步旋转坐标系中看是直流（A04）。<br>
+<b>正常：</b>投影垂足落在轴上，d²+q² 恒等于 |a+b|²。<b>异常判断：</b>若你的代码算出的 d²+q² 不守恒，说明 sin/cos 或符号写错。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>投影</b>：4 次 Q15 乘法 + 2 次加减，int32 累加后右移 15 位再饱和。</li>
+<li><b>模长</b>：平方和在 Q30（int32）中计算，整数开方得 Q15；仅在慢任务或限幅时使用，避免中断内频繁开方。</li>
+<li><b>角度</b>：atan2 用「八分区 + 查表」或 CORDIC；禁止 <code>atan(y/x)</code>（丢象限、x=0 除零）。</li>
+<li><b>电压限幅（d 轴优先）</b>：先限 vd，再按 √(Vmax² − vd²) 限 vq。Vmax 每周期由 Vdc 实时计算，标定量可设裕量系数。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>稳态 iα–iβ XY 图：圆；椭圆 → 两相增益不一致；圆心偏移 → 偏移误差。</li>
+<li>限幅生效时：vd、vq 的合成模长贴住 Vmax，iq 跟踪误差增大（进入弱磁前的典型现象）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<p><span class="tg tg-fix">【定点实现】</span>整数开方与电压圆限幅：</p>
+<pre><code>/* 输入 Q30（非负），输出 Q15：sqrt(x·2^30) = sqrt(x)·2^15 */
+static q15_t Q15_SqrtQ30(int32_t xQ30)
+{
+    uint32_t x = (xQ30 &gt; 0) ? (uint32_t)xQ30 : 0u;
+    uint32_t r = 0u;
+    uint32_t b = 1uL &lt;&lt; 30;
+    while (b &gt; x) { b &gt;&gt;= 2; }
+    while (b != 0u) {
+        if (x &gt;= (r + b)) { x -= (r + b); r = (r &gt;&gt; 1) + b; }
+        else              { r &gt;&gt;= 1; }
+        b &gt;&gt;= 2;
+    }
+    return (q15_t)((r &gt; 32767u) ? 32767u : r);
+}
+
+/* d 轴优先圆限幅；vMax = Vdc/√3 的标幺值（12 V 时 6.93/16 = 0.433 → 14189） */
+void FOC_VoltLimit(q15_t *vd, q15_t *vq, q15_t vMax)
+{
+    int32_t vqMax;
+    if (*vd &gt;  vMax) { *vd = vMax; }
+    if (*vd &lt; -vMax) { *vd = (q15_t)(-vMax); }
+    vqMax = Q15_SqrtQ30(((int32_t)vMax * vMax) - ((int32_t)(*vd) * (*vd)));
+    if (*vq &gt;  vqMax) { *vq = (q15_t)vqMax; }
+    if (*vq &lt; -vqMax) { *vq = (q15_t)(-vqMax); }
+}</code></pre>
+<p class="note">d 轴优先 vs 等比例缩放：EPS 力矩模式中，d 轴电压承担弱磁与解耦，优先保证 d 轴可维持磁场控制；等比例缩放保持电压方向不变，实现简单但弱磁区 id 控制易失效。两者均为业内常见做法，按项目验证选择。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速段电流出现 6 倍频畸变、噪声变大</h5><dl>
+<dt>现象</dt><dd>接近基速时相电流波形平顶化，电机啸叫。</dd>
+<dt>可能根因</dt><dd>vd、vq 各自限幅（方形），合成模长可达 √2·Vmax，进入过调制。</dd>
+<dt>排查顺序</dt><dd>记录 vd、vq，离线计算 √(vd²+vq²)，与 Vdc/√3 比较。</dd>
+<dt>修复</dt><dd>改为圆限幅；过调制需按 C04 明确设计，不能「意外进入」。</dd>
+<dt>验证</dt><dd>电流 FFT 中 5、7 次谐波下降；合成电压不超过限值。</dd></dl></div>
+<div class="issue"><h5>数学易错点：atan(y/x) 丢象限</h5><dl>
+<dt>现象</dt><dd>无感观测器估计角度在某半圈跳 180°。</dd>
+<dt>可能根因</dt><dd>atan 只返回 (−90°, 90°)。</dd>
+<dt>排查</dt><dd>构造 x &lt; 0 的测试矢量。</dd>
+<dt>修复</dt><dd>atan2 四象限实现。</dd>
+<dt>验证</dt><dd>匀速旋转时角度输出为连续锯齿波。</dd></dl></div>
+<div class="issue"><h5>数学易错点：限幅后积分器继续累积</h5><dl>
+<dt>现象</dt><dd>退出电压饱和时 iq 大超调。</dd>
+<dt>可能根因</dt><dd>电压限幅在 PI 之外，PI 不知道输出被截断。</dd>
+<dt>排查</dt><dd>观察限幅前后 vq 差值与积分器值。</dd>
+<dt>修复</dt><dd>把限幅结果反馈给 PI 做抗饱和（A08）。</dd>
+<dt>验证</dt><dd>阶跃退饱和超调 &lt; 10%。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>β 轴方向约定不统一（有的资料 β 指向 −120°）：全项目在一个头文件中写死约定，并用 XY 图验证正转为逆时针圆。</li>
+<li>平方和溢出：Q15² 为 Q30，两个相加可达 2³¹，需保证输入已限幅或用 uint32 / int64。</li>
+<li>Vmax 用标称 12 V 常量而不用实测 Vdc：低压 9 V 冷启动时实际可用电压下降 25%，限幅失真。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A02" id="quiz-A02"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：投影 = 点积、旋转坐标系分量公式、atan2、Vdc/√3 圆限幅。</li>
+<li>面试高频：「Park 变换的几何意义是什么？」答：把电流矢量投影到随转子旋转的 d、q 轴上。</li></ul></div>
+</section>
+
+<!-- ================= A03 ================= -->
+<section class="chap" id="A03" data-title="A03 三角函数">
+<h2 class="chap-h">A03 三角函数：单位圆、电角度、三相 120°、和差角与查表</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 3 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>所有坐标变换的 sin/cos；电角度与机械角度换算；角度延迟补偿</td></tr>
+<tr><th>输入 / 输出</th><td>输入：角度 θ（uint16）；输出：sinθ、cosθ（Q15）</td></tr>
+<tr><th>工程价值</th><td>Park 每周期要 sin、cos 各一次；查表精度、角度格式、延迟补偿直接决定 dq 解耦质量</td></tr>
+<tr><th>上下游依赖</th><td>上游 A02；下游 A04、C02、C03、C04、C09、C10</td></tr>
+<tr><th>适用角色</th><td>全部角色</td></tr>
+<tr><th>前置数学依赖</th><td>A02（单位矢量的 x、y 分量即 cos、sin）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>三相电流本身就是三条相差 120° 的余弦；Park 的「id 变直流」只能用和差角公式证明。</div>
+<div><b>② 量产怎么做</b>uint16 角度 + 1024 点正弦表 + 线性插值；cos 由 sin 移 90° 获得；高速时按 ωe·1.5Ts 做角度超前补偿。</div>
+<div><b>③ 如何证明</b>查表误差 &lt; 1 LSB 量级（离线对比）；正反转不同转速下 id 偏差基本不随转速变化。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A02 单位矢量。弧度：一整圈 = 2π rad = 360°。</li>
+<li>信号：旋变电角度 θe；电角速度 ωe（用于补偿）。</li>
+<li>不满足：角度格式混乱（度 / 弧度 / 码值）导致变换错误；忽略延迟导致高速力矩下降。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+单位圆：角度 θ 处单位矢量 = (cosθ, sinθ)；sin²θ + cos²θ = 1
+角频率：ω = 2πf；电角度 θe = p·θm，电角速度 ωe = p·ωm，电频率 fe = p·n/60
+   案例：3000 rpm → fe = 4×3000/60 = 200 Hz；8000 rpm → 533.3 Hz
+三相平衡电流：ia = I·cos(θ+γ)，ib = I·cos(θ+γ−120°)，ic = I·cos(θ+γ+120°)，ia+ib+ic = 0
+和差角公式：cos(a−b) = cos a·cos b + sin a·sin b
+            sin(a−b) = sin a·cos b − cos a·sin b
+用它证明 Park 的效果：设 iα = I·cos(θ+γ)，iβ = I·sin(θ+γ)
+   id =  iα·cosθ + iβ·sinθ = I·cos(θ+γ−θ) = I·cosγ   ← 与 θ 无关，直流！
+   iq = −iα·sinθ + iβ·cosθ = I·sin(θ+γ−θ) = I·sinγ</div>
+<div class="formula"><span class="tg tg-disc">【离散实现】</span>每 PWM 周期电角度增量 Δθ = ωe·Ts
+   案例 8000 rpm：Δθ = 2π·533.3·50 µs = 0.1676 rad ≈ 9.6°
+   采样→PWM 生效的等效延迟约 1.5Ts（中断计算 1Ts + PWM 中心对齐 0.5Ts）→ 约 14.4° 角度误差</div>
+<div id="anim-A03"></div>
+<div class="anim-note"><b>动画在演示什么：</b>左边单位圆上的矢量逆时针旋转（与全书正方向一致），它在水平轴的投影就是 cosθ（A 相电流形状），竖直投影是 sinθ。右边画出三相余弦及其和。<br>
+<b>拖动滑块：</b>「频率」改变旋转快慢；「C 相相位偏差」模拟三相不平衡——三相和不再为 0，这时「用 ic = −ia − ib 推算第三相」的假设失效。<br>
+<b>正常：</b>三相和曲线恒为 0。<b>异常：</b>和曲线出现正弦，提示相序/采样/硬件不平衡。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>角度格式</b>：uint16 表示 0~2π，16384 = 90°；加法溢出天然取模，无需判断。</li>
+<li><b>查表</b>：1024 点 sin 表（2 KB Flash，末尾多存 1 点便于插值）；高 10 位作索引，低 6 位线性插值。</li>
+<li><b>cos</b>：cosθ = sin(θ + 90°)，即索引 +16384。</li>
+<li><b>电角度</b>：θe = (θm × p) 在 uint16 上直接乘 4 截断（自动取模），再减零位偏移 <code>Cal_ThetaOffset</code>（C09）。</li>
+<li><b>延迟补偿</b>：反 Park 使用 θ + 1.5·Δθ；Park 使用采样时刻角度。补偿量用标定系数可调。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>查表 sin 与浮点 sin 差值曲线：周期性小锯齿，幅度 ≤ 数 LSB。</li>
+<li>恒定 iq 给定，转速从 500 rpm 扫到 6000 rpm：未补偿时实测 id 偏离给定、力矩常数下降；补偿后基本平直。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>#define SIN_LUT_BITS   (10u)                     /* 1024 点 */
+#define SIN_FRAC_BITS  (16u - SIN_LUT_BITS)      /* 6 位插值 */
+extern const q15_t c_SinLut[(1u &lt;&lt; SIN_LUT_BITS) + 1u];  /* 离线生成，90° 处取 32767 */
+
+static inline q15_t FOC_Sin(uint16_t th)
+{
+    uint32_t idx  = (uint32_t)th &gt;&gt; SIN_FRAC_BITS;
+    int32_t  frac = (int32_t)(th &amp; ((1u &lt;&lt; SIN_FRAC_BITS) - 1u));
+    int32_t  y0   = c_SinLut[idx];
+    int32_t  y1   = c_SinLut[idx + 1u];
+    return (q15_t)(y0 + (((y1 - y0) * frac) &gt;&gt; SIN_FRAC_BITS));
+}
+static inline q15_t FOC_Cos(uint16_t th) { return FOC_Sin((uint16_t)(th + 16384u)); }
+
+/* 每 PWM 中断：机械角 → 电角 → 延迟补偿 */
+void FOC_AngleUpdate_Isr(void)
+{
+    uint16_t thE  = (uint16_t)((uint16_t)(gFoc.thetaM * FOC_POLE_PAIRS) - Cal_ThetaOffset);
+    int16_t  dTh  = (int16_t)(uint16_t)(thE - gFoc.thetaE);      /* 每 Ts 增量 */
+    gFoc.thetaEIncPerTs = dTh;                                    /* 后续应用滤波 */
+    gFoc.thetaE = thE;
+    gFoc.sinTh  = FOC_Sin(thE);
+    gFoc.cosTh  = FOC_Cos(thE);
+    /* 反 Park 用补偿角：θ + Cal_AngCompK × Δθ，Cal_AngCompK 标称 1.5（Q8：384）【案例假设】 */
+    gFoc.thetaEInvPark = (uint16_t)(thE + (uint16_t)(((int32_t)dTh * Cal_AngCompK_q8) &gt;&gt; 8));
+}</code></pre>
+<p class="note">离线生成表：<code>round(32767·sin(2π·k/1024))</code>，k = 0…1024（Python / MATLAB 均可）。实际工程中 Δθ 应取滤波后的速度换算值，避免旋变噪声被放大（A05）。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速力矩下降、id 出现负偏移</h5><dl>
+<dt>现象</dt><dd>6000 rpm 以上（未进弱磁）iq 给定不变，实测力矩随转速下降。</dd>
+<dt>可能根因</dt><dd>未做角度延迟补偿：6000 rpm 时 fe = 400 Hz，1.5Ts 延迟 ≈ 10.8° 电角度。</dd>
+<dt>排查顺序</dt><dd>扫转速记录 id/iq 实测与给定；计算偏差角 atan2 与转速是否成正比。</dd>
+<dt>修复</dt><dd>反 Park 角度加 ωe·1.5Ts 补偿，标定系数微调。</dd>
+<dt>验证</dt><dd>不同转速力矩常数一致（台架扭矩传感器）。</dd></dl></div>
+<div class="issue"><h5>数学易错点：度 / 弧度 / 码值混用</h5><dl>
+<dt>现象</dt><dd>仿真正常，代码移植后电机不转或乱转。</dd>
+<dt>可能根因</dt><dd>Simulink 用弧度，C 代码用 uint16，中间换算漏乘 65536/2π。</dd>
+<dt>排查</dt><dd>固定角度 90°，检查 sin 输出是否为 32767。</dd>
+<dt>修复</dt><dd>接口统一 uint16，仅在模型边界换算。</dd>
+<dt>验证</dt><dd>PIL 测试：0°/90°/180°/270° 四点输出。</dd></dl></div>
+<div class="issue"><h5>数学易错点：电角度 = 机械角度 × 极对数的溢出</h5><dl>
+<dt>现象</dt><dd>电角度在机械一圈内跳变。</dd>
+<dt>可能根因</dt><dd>先转 int32 再乘没有取低 16 位，或结果写入 int16 后符号扩展。</dd>
+<dt>排查</dt><dd>匀速转动观察 θe 是否为 4 个完整锯齿/机械圈。</dd>
+<dt>修复</dt><dd>uint16 乘法后强制截断 uint16。</dd>
+<dt>验证</dt><dd>θe 锯齿连续，跳变仅发生在 65535→0。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>sin 表 90° 写 32768 溢出成 −32768：表项必须饱和到 32767。</li>
+<li>插值时 <code>idx+1</code> 越界：表长必须是 1025。</li>
+<li>三相和为零只适用于星接无中线；三角形接法或带中线时需重新推导。</li>
+<li>速度来源的 Δθ 直接用原始差分，噪声经补偿放大到角度上，低速电流噪声变大。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A03" id="quiz-A03"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：fe = p·n/60、每周期 Δθ、uint16 角度、和差角证明 Park、1.5Ts 延迟补偿。</li>
+<li>面试高频：「为什么高速时需要角度补偿？补多少？」</li></ul></div>
+</section>
+
+<!-- ================= A04 ================= -->
+<section class="chap" id="A04" data-title="A04 复数">
+<h2 class="chap-h">A04 复数：欧拉公式、乘法即旋转、空间矢量与 dq 方程</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 4 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>Clarke（空间矢量定义）、Park / 反 Park（乘 e^∓jθ）、dq 电压方程的交叉耦合项</td></tr>
+<tr><th>输入 / 输出</th><td>输入：iα、iβ（实部、虚部）与 θ；输出：id、iq</td></tr>
+<tr><th>工程价值</th><td>用一行复数式统一 Clarke/Park/电压方程；看懂解耦项 ωL·i 从哪来</td></tr>
+<tr><th>上下游依赖</th><td>上游 A02、A03；下游 B03、C02、C03、C05 解耦、C10 观测器</td></tr>
+<tr><th>适用角色</th><td>算法工程师必修</td></tr>
+<tr><th>前置数学依赖</th><td>A02、A03</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>不学复数，dq 方程里的 −ωLq·iq、+ωLd·id 只能死记；用复数一步推出，并知道 Park 写反符号会发生什么。</div>
+<div><b>② 量产怎么做</b>代码中复数就是两个 int16（实部、虚部）+ 4 次乘法；Park/反 Park 共用一组 sin/cos。</div>
+<div><b>③ 如何证明</b>稳态 id、iq 为直流；角度误差 → dq 常值偏移；速度失配 → dq 慢速旋转；写反 → 2 倍频振荡。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A02 矢量、A03 三角。只需接受一个定义：j² = −1，j 表示「逆时针转 90°」。</li>
+<li>不满足：无法理解 Park 方向、解耦前馈的正负号。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+复数 z = x + j·y = |z|·e^(jφ)；|z| = √(x²+y²)，φ = atan2(y, x)
+欧拉公式：e^(jθ) = cosθ + j·sinθ
+乘法：z1·z2 = |z1||z2|·e^(j(φ1+φ2))   ← 模相乘、角相加 → 乘 e^(jθ) 就是逆时针转 θ
+空间矢量（幅值不变）：i_s = (2/3)(ia + a·ib + a²·ic) = iα + j·iβ，a = e^(j120°)，1 + a + a² = 0
+Park：i_dq = id + j·iq = i_s · e^(−jθ)      反 Park：v_s = v_dq · e^(+jθ)</div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>dq 电压方程的来源（SPMSM 先令 Ld = Lq = L）
+静止坐标：v_s = R·i_s + dψ_s/dt，ψ_s = L·i_s + ψf·e^(jθ)
+代入 i_s = i_dq·e^(jθ)，对乘积求导：d(i_dq·e^(jθ))/dt = (di_dq/dt + jω·i_dq)·e^(jθ)
+两边约去 e^(jθ)：v_dq = R·i_dq + L·di_dq/dt + jω·L·i_dq + jω·ψf
+展开为 IPMSM 形式（Ld ≠ Lq）：
+   vd = R·id + Ld·did/dt − ω·Lq·iq
+   vq = R·iq + Lq·diq/dt + ω·Ld·id + ω·ψf
+来源：PMSM 矢量控制经典教材通用推导（如 R. Krishnan《Permanent Magnet Synchronous and Brushless DC Motor Drives》）</div>
+<div id="anim-A04"></div>
+<div class="anim-note"><b>动画在演示什么：</b>左图 αβ 平面中，电流矢量 i_s（橙）以电频率逆时针旋转；控制器使用的 dq 轴（紫 d̂ / 黄 q̂）按估计角 θ̂ 旋转，虚线是真实 d 轴。右图是 Park 输出 id、iq 的时间曲线。<br>
+<b>拖动滑块：</b>「角度偏差」使 dq 输出出现常值偏移（零位标定错误的典型）；「频率失配」使 dq 输出缓慢正弦摆动（速度估计不准）；勾选「Park 方向写反」，dq 变成 2 倍电频率振荡。<br>
+<b>正常：</b>id、iq 两条水平直线，数值 = I·cosγ、I·sinγ。<b>异常：</b>偏移、摆动、高频振荡分别对应三类根因。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>复数用结构体 {re, im} 表示，Q15。</li>
+<li>乘 e^(−jθ)：(re + j·im)(c − j·s) = (re·c + im·s) + j(im·c − re·s)，4 次乘、2 次加减。</li>
+<li>int32 累加，右移 15 位后饱和；输入矢量模长 ≤ 1 pu 时结果不会超限。</li>
+<li>Park 与反 Park 在同一中断里使用的角度可能不同（延迟补偿，A03），sin/cos 分别计算。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>正常稳态：id、iq 直流 + 小纹波（PWM 纹波、谐波）。</li>
+<li>纹波频率对应根因：1 倍 fe → 电流偏移；2 倍 fe → 两相增益不一致或 Park 写反；6 倍 fe → 死区 / 反电动势谐波。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>typedef struct { q15_t re; q15_t im; } CPLX_tst;
+
+/* z · e^(-jθ)：Park；|z| ≤ 1 pu 时结果不越界 */
+static inline CPLX_tst Cplx_RotNeg(CPLX_tst z, q15_t s, q15_t c)
+{
+    CPLX_tst r;
+    r.re = Q15_Sat(((int32_t)z.re * c + (int32_t)z.im * s) &gt;&gt; 15);
+    r.im = Q15_Sat(((int32_t)z.im * c - (int32_t)z.re * s) &gt;&gt; 15);
+    return r;
+}
+/* z · e^(+jθ)：反 Park */
+static inline CPLX_tst Cplx_RotPos(CPLX_tst z, q15_t s, q15_t c)
+{
+    CPLX_tst r;
+    r.re = Q15_Sat(((int32_t)z.re * c - (int32_t)z.im * s) &gt;&gt; 15);
+    r.im = Q15_Sat(((int32_t)z.im * c + (int32_t)z.re * s) &gt;&gt; 15);
+    return r;
+}
+
+void FOC_Park_Isr(void)
+{
+    CPLX_tst iab = { gFoc.iAlpha, gFoc.iBeta };
+    CPLX_tst idq = Cplx_RotNeg(iab, gFoc.sinTh, gFoc.cosTh);
+    gFoc.id = idq.re;
+    gFoc.iq = idq.im;
+}</code></pre>
+<p class="note">案例数值：iq = 20 A 给定、id = 0，3000 rpm 时 d 轴交叉耦合电压 ωLq·iq = 1256.6 × 75 µH × 20 A ≈ 1.88 V，约占 Vdc/√3 的 27%——这就是 C05 必须做解耦前馈的原因。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>正反转力矩 / 最高转速不对称</h5><dl>
+<dt>现象</dt><dd>正转最高转速 7500 rpm，反转只有 6200 rpm；同 iq 给定两方向力矩不同。</dd>
+<dt>可能根因</dt><dd>旋变零位偏差 ε：实际电流在真实 dq 中带 ±sinε 的 d 分量，一个方向增磁、一个方向去磁。</dd>
+<dt>排查顺序</dt><dd>① 对拖测反电动势过零与 θe 过零对比 → ② d 轴直流注入锁定转子读旋变 → ③ 比较正反转 vd 稳态值。</dd>
+<dt>修复</dt><dd>重新零位标定写入 Cal_ThetaOffset（C09）。</dd>
+<dt>验证</dt><dd>空载对拖时 id = 0 控制下 vd ≈ 0；正反转对称。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>dq 电流 2 倍频大幅振荡，电机反转或抖动</h5><dl>
+<dt>现象</dt><dd>开环角度下 id、iq 呈 2fe 正弦。</dd>
+<dt>可能根因</dt><dd>Park 写成乘 e^(+jθ)，或 β 轴符号与角度方向相反（相序接反）。</dd>
+<dt>排查</dt><dd>开环拖动，检查 iα–iβ XY 图旋转方向是否与 θ 增方向一致（应同为逆时针）。</dd>
+<dt>修复</dt><dd>修正 Park 符号或交换两相 / 角度方向。</dd>
+<dt>验证</dt><dd>dq 为直流。</dd></dl></div>
+<div class="issue"><h5>数学易错点：对 e^(jθ) 求导漏项</h5><dl>
+<dt>现象</dt><dd>自写模型缺少交叉耦合项，仿真与台架高速段差异大。</dd>
+<dt>根因</dt><dd>d(e^(jθ))/dt = jω·e^(jθ)，乘积求导两项都要。</dd>
+<dt>排查</dt><dd>对比教材方程。</dd>
+<dt>修复</dt><dd>补齐 ±ωL·i 与 ωψf。</dd>
+<dt>验证</dt><dd>仿真 vd、vq 稳态值与台架记录吻合。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>Park 用的角度与采样时刻不对应（用了上一周期角度）→ 隐性 1Ts 角度误差。</li>
+<li>空间矢量系数 2/3（幅值不变）与 √(2/3)（功率不变）混用 → 电流幅值差 22%，转矩公式系数随之改变。</li>
+<li>-32768 × -32768 的乘积溢出边界：输入先限幅到 ±32767。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A04" id="quiz-A04"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：欧拉公式、乘法即旋转、Park = ×e^(−jθ)、dq 方程交叉耦合项来源、三类 dq 异常与根因对应。</li>
+<li>高频出现于：零位标定、解耦前馈、面试「推导 dq 电压方程」。</li></ul></div>
+</section>
+
+<!-- ================= A05 ================= -->
+<section class="chap" id="A05" data-title="A05 微分与差分">
+<h2 class="chap-h">A05 微分与差分：变化率、测速、噪声放大与一阶低通</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 5 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>由角度求速度、电感压降 L·di/dt、反电动势 dψ/dt、PID 的 D 项、低通滤波</td></tr>
+<tr><th>输入 / 输出</th><td>输入：采样序列 x[k]；输出：差分 / 滤波后的变化率</td></tr>
+<tr><th>工程价值</th><td>速度反馈质量决定速度环上限；不懂差分噪声与延迟，就会盲目加大滤波导致环路振荡</td></tr>
+<tr><th>上下游依赖</th><td>上游 A01、A03；下游 A07、C08、C09、C10、D01</td></tr>
+<tr><th>适用角色</th><td>算法、标定工程师</td></tr>
+<tr><th>前置数学依赖</th><td>A01、A03</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>电机方程全是「变化率」：v = R·i + L·di/dt；速度 = dθ/dt。MCU 里只有离散采样，必须用差分近似。</div>
+<div><b>② 量产怎么做</b>角度差分（uint16 相减转 int16 处理过零）+ 适当窗口 + 一阶低通；低速用 M/T 法、PLL 或解码芯片速度输出。</div>
+<div><b>③ 如何证明</b>恒速对拖时速度信号纹波（rpm 峰峰）与延迟；对比台架转速计 / 编码器。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A01 斜率（Δy/Δx）、A03 正弦。导数 = 时间间隔趋近 0 时的斜率。</li>
+<li>信号：旋变机械角度 thetaM；采样周期确定（定时中断）。</li>
+<li>不满足：测速噪声大 → 速度环电流给定噪声 → 力矩脉动、噪声；滤波过重 → 速度环相位滞后振荡。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+导数：dx/dt = lim(Δt→0) [x(t) − x(t−Δt)] / Δt；d(sin ωt)/dt = ω·cos ωt
+<span class="tg tg-disc">【离散实现】</span>后向差分：x'[k] ≈ (x[k] − x[k−1]) / Ts
+  · 等效延迟约 Ts/2（相当于在两个采样点中间求斜率）
+  · 噪声放大：若采样噪声标准差 σ，差分噪声 ≈ √2·σ / Ts —— Ts 越小，噪声越大
+一阶低通（后向欧拉离散）：y[k] = y[k−1] + α·(x[k] − y[k−1])，α = Ts / (τf + Ts)，fc = 1/(2π·τf)
+  · α 越小越平滑，但延迟（相位滞后）越大
+测速分辨率（12 位旋变，窗口 Tw）：Δn = 60 / (4096·Tw) rpm
+  · Tw = 50 µs → 293 rpm/码；Tw = 1 ms → 14.6 rpm/码</div>
+<div id="anim-A05"></div>
+<div class="anim-note"><b>动画在演示什么：</b>上图：50 Hz 正弦被以 Ts 采样（点）并叠加噪声；下图：真实导数（灰，已除以 ω 归一化）、后向差分（红）与一阶低通后的差分（蓝）。<br>
+<b>拖动滑块：</b>减小 Ts 但保持噪声 → 红线噪声急剧变大（噪声 ∝ 1/Ts）；增大 Ts → 红线阶梯化、滞后；减小 α → 蓝线变平滑但明显滞后于灰线。<br>
+<b>正常折中：</b>蓝线贴近灰线、轻微滞后。<b>异常：</b>红线毛刺远大于信号（直接用差分做反馈会让速度环抖动）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>角度差分处理过零</b>：<code>(int16_t)(uint16_t)(θ[k] − θ[k−1])</code>，只要一个窗口内转过不足半圈即正确。8000 rpm、1 ms 窗口机械转 48°，安全。</li>
+<li><b>窗口选择</b>：快速中断里只记录角度，1 ms 任务里做差分（窗口 = 1 ms）。</li>
+<li><b>换算</b>：rpm = Δθ / 65536 × 60 / Tw，Tw = 1 ms → rpm = Δθ × 60000 / 65536。</li>
+<li><b>低通</b>：系数 <code>Cal_SpdLpfK_q15</code>，int32 状态；结果用于速度环（C08）。</li>
+<li><b>低速</b>：分辨率不足时改用 M/T 法、角度 PLL 观测器或解码芯片速度通道（AD2S1210 具有速度输出，具体格式以 ADI 数据手册为准 <span class="tg tg-check">【待核对】</span>）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>恒速 1000 rpm：原始差分以 ±1 码（±14.6 rpm）跳变，滤波后纹波明显减小。</li>
+<li>速度阶跃：滤波输出滞后于真实速度，延迟约 τf；若 τf 接近速度环带宽倒数，速度环超调增大。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 1 ms 任务：由旋变机械角度计算转速（Tw = 1 ms）【案例假设】 */
+void FOC_SpeedCalc_1ms(void)
+{
+    static uint16_t s_thPrev = 0u;
+    static int32_t  s_filt_q8 = 0;                 /* rpm × 256，提升滤波分辨率 */
+    int16_t dTh = (int16_t)(uint16_t)(gFoc.thetaM - s_thPrev);   /* 自动处理过零 */
+    int32_t rpmRaw_q8;
+
+    s_thPrev = gFoc.thetaM;
+    /* rpm = dTh × 60000 / 65536；×256 保留小数 → dTh × 60000 / 256 */
+    rpmRaw_q8 = ((int32_t)dTh * 60000) &gt;&gt; 8;
+    /* 一阶低通：y += α(x − y)，α = Cal_SpdLpfK_q15 / 32768 */
+    s_filt_q8 += (int32_t)(((int64_t)(rpmRaw_q8 - s_filt_q8) * Cal_SpdLpfK_q15) &gt;&gt; 15);
+    gFoc.spdRpmFilt = s_filt_q8 &gt;&gt; 8;
+}
+/* 例：期望 fc = 50 Hz → τf = 3.18 ms，α = 1/(3.18+1) = 0.239 → Cal_SpdLpfK_q15 ≈ 7838 */</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>低速速度环抖动</h5><dl>
+<dt>现象</dt><dd>30 rpm 速度模式下电机一顿一顿，速度反馈呈台阶。</dd>
+<dt>可能根因</dt><dd>测速量化：12 位、1 ms 窗口分辨率 14.6 rpm，30 rpm 只有约 2 码。</dd>
+<dt>排查顺序</dt><dd>① CANape 看原始 dTh 是否只在 1~3 之间跳 → ② 估算分辨率 → ③ 检查滤波设置。</dd>
+<dt>修复</dt><dd>低速段加长窗口 / M-T 法 / PLL；提升解码分辨率配置；速度环低速段降增益。</dd>
+<dt>验证</dt><dd>低速速度信号纹波 &lt; 2 rpm，电机平稳。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>加大滤波后速度环反而振荡</h5><dl>
+<dt>现象</dt><dd>为了降噪把 fc 从 50 Hz 降到 5 Hz，速度阶跃出现持续摆动。</dd>
+<dt>可能根因</dt><dd>低通引入的相位滞后吃掉了速度环相位裕度。</dd>
+<dt>排查</dt><dd>比较 fc 与速度环穿越频率；扫频测开环相位。</dd>
+<dt>修复</dt><dd>fc 至少为速度环带宽的 3~5 倍；从源头提升测速质量。</dd>
+<dt>验证</dt><dd>阶跃超调 &lt; 10%，无持续振荡。</dd></dl></div>
+<div class="issue"><h5>数学易错点：差分过零跳变</h5><dl>
+<dt>现象</dt><dd>每转一次速度信号出现一个巨大尖峰。</dd>
+<dt>根因</dt><dd>用 int32 直接相减，65535→0 时得到 −65535。</dd>
+<dt>排查</dt><dd>观察尖峰位置是否对应角度过零。</dd>
+<dt>修复</dt><dd>uint16 相减后转 int16。</dd>
+<dt>验证</dt><dd>匀速时速度曲线无尖峰。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>在 20 kHz 中断里对角度直接差分：分辨率 293 rpm/码，几乎不可用。</li>
+<li>滤波系数在不同执行周期的任务间复用：α 与 Ts 绑定，任务周期改了 α 必须重算。</li>
+<li>低通状态只存 int16：小增量被截断，滤波输出卡死在某值（「死区」现象）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A05" id="quiz-A05"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：后向差分延迟 Ts/2、噪声 ∝ 1/Ts、α = Ts/(τf+Ts)、测速分辨率计算、过零处理。</li>
+<li>台架高频：低速抖动、滤波导致振荡。</li></ul></div>
+</section>
+
+<!-- ================= A06 ================= -->
+<section class="chap" id="A06" data-title="A06 积分与累加">
+<h2 class="chap-h">A06 积分与累加：积分器、相位累加器、漂移与积分饱和</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 6 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>PI 的 I 项、开环角度发生器 θ = ∫ω dt、电压模型磁链观测 ψ = ∫(v − R·i)dt、电量/热模型累加</td></tr>
+<tr><th>输入 / 输出</th><td>输入：每周期增量；输出：累加状态</td></tr>
+<tr><th>工程价值</th><td>积分消除稳态误差，也带来漂移、溢出与饱和三大风险</td></tr>
+<tr><th>上下游依赖</th><td>上游 A01、A05；下游 A07、A08、C05、C10、D06</td></tr>
+<tr><th>适用角色</th><td>全部角色</td></tr>
+<tr><th>前置数学依赖</th><td>A01、A05（积分是微分的逆运算）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>开环拖动需要由频率「积」出角度；PI 需要累积误差消除稳态偏差；无感观测从电压「积」出磁链。</div>
+<div><b>② 量产怎么做</b>int32/uint32 累加器；相位累加器利用溢出自动取模；积分器有上下限；纯积分用低通/泄漏替代。</div>
+<div><b>③ 如何证明</b>长时间运行（数小时）累加量不漂移、不溢出；开环频率实测 = 设定。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A01 累加、A05 差分。积分 = 曲线下面积 = Σ x[k]·Ts。</li>
+<li>信号：输入的偏置必须尽量小（A01 偏移校准）。</li>
+<li>不满足：磁链观测随时间漂移；积分饱和导致超调；开环角度运行越久越抖（浮点精度丢失）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>y(t) = ∫₀ᵗ u(τ)dτ；∫ sin(ωt)dt = (1 − cos ωt)/ω（从 0 开始）
+<span class="tg tg-disc">【离散实现】</span>
+  前向矩形：y[k] = y[k−1] + Ts·u[k−1]
+  后向矩形：y[k] = y[k−1] + Ts·u[k]
+  梯形：    y[k] = y[k−1] + Ts·(u[k] + u[k−1])/2
+直流偏置的后果：u = 信号 + b → y 中多出 b·t，线性增长直到溢出
+泄漏积分（低通替代）：y[k] = (1 − λ)·y[k−1] + Ts·u[k]  ≈ 1/(s + λ/Ts)，偏置只造成有限误差 b·Ts/λ
+相位累加器：acc[k] = acc[k−1] + inc（uint32 自然回绕），inc = fe·2³²·Ts，θe = acc &gt;&gt; 16
+  案例：10 Hz 电频率 → inc = 10 × 4294967296 × 50 µs ≈ 2147484</div>
+<div id="anim-A06"></div>
+<div class="anim-note"><b>动画在演示什么：</b>输入为正弦 + 小直流偏置（类比带偏移的反电动势电压）。蓝线是数字积分器输出，灰虚线是无偏置时的理想积分。<br>
+<b>拖动滑块：</b>偏置 &gt; 0 时蓝线线性爬升（漂移）；开启「积分器限幅」后卡在上限（饱和）；增大泄漏系数 λ，漂移被抑制但积分结果幅值和相位出现误差（低通替代纯积分的代价）。<br>
+<b>正常：</b>偏置 0 时蓝灰重合。<b>异常：</b>持续爬升或长时间贴限幅。参数修改实时生效。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>累加器位宽</b>：状态至少 int32；增量远小于状态时，需更高的小数位（如 Q30），避免「增量 &lt; 1 LSB 被截断」。</li>
+<li><b>相位累加器</b>：uint32，溢出即取模，无需判断；高 16 位作为 uint16 电角度。</li>
+<li><b>限幅</b>：积分器上下限与输出限幅匹配（A08 抗饱和）。</li>
+<li><b>漂移抑制</b>：纯积分观测器改为低通 / 泄漏积分 + 幅相补偿（C10）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>开环 I/F 拖动：θe 为均匀锯齿，频率与设定一致；电流幅值稳定。</li>
+<li>纯积分磁链：有偏移时估计磁链轨迹圆心逐渐偏移；泄漏积分时圆心稳定。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 开环角度发生器（I/F 启动，D06 使用）*/
+static uint32_t s_phAcc = 0u;
+
+void FOC_OpenLoopAngle_Isr(uint32_t incPerTs)
+{
+    s_phAcc += incPerTs;                     /* 溢出回绕 = 自动对 2π 取模 */
+    gFoc.thetaE = (uint16_t)(s_phAcc &gt;&gt; 16);
+}
+/* fe(Hz) → inc：inc = fe × 2^32 × Ts = fe × 214748.36（Ts = 50 µs）*/
+static inline uint32_t FOC_FreqToInc(uint32_t fe_mHz)
+{
+    return (uint32_t)(((uint64_t)fe_mHz * 214748uLL) / 1000uLL);
+}
+
+/* 泄漏积分器（C10 磁链观测的基础单元），状态 Q30 */
+typedef struct { int32_t y_q30; int32_t leak_q30; } LEAKINT_tst;
+static inline q15_t LeakInt_Run(LEAKINT_tst *s, q15_t uTs_q15)
+{
+    int64_t y = (int64_t)s-&gt;y_q30;
+    y -= (y * s-&gt;leak_q30) &gt;&gt; 30;           /* (1 − λ)·y */
+    y += (int64_t)uTs_q15 &lt;&lt; 15;           /* + u·Ts    */
+    if (y &gt;  (int64_t)0x3FFFFFFF) { y =  0x3FFFFFFF; }
+    if (y &lt; -(int64_t)0x40000000) { y = -0x40000000; }
+    s-&gt;y_q30 = (int32_t)y;
+    return (q15_t)(s-&gt;y_q30 &gt;&gt; 15);
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>开环拖动「运行越久越抖」</h5><dl>
+<dt>现象</dt><dd>台架开环拖动几分钟后电流开始抖动，越来越严重。</dd>
+<dt>可能根因</dt><dd>角度用 float 弧度累加且不取模：θ 越来越大，float 24 位尾数精度下降，每步增量被量化。</dd>
+<dt>排查顺序</dt><dd>记录 θ 原始值；观察每周期增量是否出现「跳格」。</dd>
+<dt>修复</dt><dd>改用 uint32 相位累加器，或 float 每步对 2π 取模。</dd>
+<dt>验证</dt><dd>连续运行 1 小时，θ 增量恒定，电流稳定。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>PI 有稳态误差，积分「不动」</h5><dl>
+<dt>现象</dt><dd>iq 稳定在给定下方 0.5 A 不再收敛。</dd>
+<dt>可能根因</dt><dd>积分器用 Q15 int16 存储，Ki·Ts·e 小于 1 LSB 被截断为 0。</dd>
+<dt>排查</dt><dd>手算小误差下每步增量的 LSB 数。</dd>
+<dt>修复</dt><dd>积分状态 int32 Q30（A08 代码）。</dd>
+<dt>验证</dt><dd>稳态误差 → 0。</dd></dl></div>
+<div class="issue"><h5>数学易错点：矩形积分与梯形积分混用于离散化</h5><dl>
+<dt>现象</dt><dd>仿真与代码在高频下结果不同。</dd>
+<dt>根因</dt><dd>Simulink 积分器默认方法与手写代码不一致。</dd>
+<dt>排查</dt><dd>核对积分器方法设置。</dd>
+<dt>修复</dt><dd>统一离散化方法（D01）。</dd>
+<dt>验证</dt><dd>SIL 与模型逐点比对误差 &lt; 1 LSB。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li><span class="tg tg-red">【风险红线】</span>开环拖动无电流限制时积分角度过快，转子跟不上失步，电流冲击可损坏 MOS：开环必须带电流闭环（I/F）或严格限幅。</li>
+<li>积分器复位时机：模式切换（开环→闭环）时积分器初值不当导致电流跳变，需预置积分器（C05/D06）。</li>
+<li>uint32 乘法溢出：fe × 2³² 必须用 64 位中间量。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A06" id="quiz-A06"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：离散积分形式、偏置漂移、泄漏积分、相位累加器 inc 计算、积分位宽。</li>
+<li>高频出现于：I/F 启动、观测器漂移、PI 稳态误差问题。</li></ul></div>
+</section>
+
+<!-- ================= A07 ================= -->
+<section class="chap" id="A07" data-title="A07 拉普拉斯变换与传递函数">
+<h2 class="chap-h">A07 拉普拉斯变换与传递函数：RL 模型、时间常数、伯德图与延迟</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 7 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>电流环被控对象 1/(Ls+R)、PI 设计、滤波器设计、带宽与延迟评估</td></tr>
+<tr><th>输入 / 输出</th><td>输入：微分方程；输出：传递函数、阶跃响应、频率响应</td></tr>
+<tr><th>工程价值</th><td>把「调参靠试」变成「按带宽算参数」；解释为什么带宽受 PWM 频率和延迟限制</td></tr>
+<tr><th>上下游依赖</th><td>上游 A04~A06；下游 A08、C05、C08、C10、D01、D07</td></tr>
+<tr><th>适用角色</th><td>算法、标定工程师</td></tr>
+<tr><th>前置数学依赖</th><td>A04（jω）、A05、A06</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>在 s 域中微分变乘 s、积分变除 s，微分方程变成代数式，才能用「零极点对消」直接算出 PI 参数。</div>
+<div><b>② 量产怎么做</b>台架用电压阶跃测 τ 得 L；按目标带宽算 Kp、Ki；用扫频注入测闭环伯德图验收。</div>
+<div><b>③ 如何证明</b>阶跃 63.2% 时刻 = τ；闭环 −3 dB 频率 ≈ 设计带宽；相位裕度满足要求。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A05 导数、A06 积分、A04 中 j 的含义。</li>
+<li>只需掌握对应关系：d/dt ↔ s；∫dt ↔ 1/s；正弦稳态 s = jω。</li>
+<li>不满足：无法理解带宽、相位裕度；调参只能凭经验。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+RL 电路：v = R·i + L·di/dt  →（零初值拉氏变换）V(s) = (R + L·s)·I(s)
+传递函数：G(s) = I(s)/V(s) = 1/(L·s + R) = (1/R) / (τ·s + 1)，τ = L/R
+阶跃响应：i(t) = (V/R)·(1 − e^(−t/τ))；t = τ 时 63.2%，t = 3τ 时 95%，5τ 时 99.3%
+频率响应：|G(jω)| = 1/√(R² + (ωL)²)，∠G = −arctan(ωL/R)；转折频率 fc = R/(2πL)
+闭环：T(s) = C(s)G(s) / (1 + C(s)G(s))；带宽 ≈ |T| 下降 3 dB 的频率
+纯延迟 e^(−s·Td)：幅值不变，相位滞后 ω·Td（弧度）
+案例：τd = 45 µH/12 mΩ = 3.75 ms，fc,d = 42.4 Hz；τq = 6.25 ms <span class="tg tg-case">【案例假设】</span>
+     Td ≈ 1.5Ts = 75 µs → 1 kHz 处滞后 360°×1000×75e-6 = 27°</div>
+<div id="anim-A07"></div>
+<div class="anim-note"><b>动画在演示什么：</b>左（上）图：给 d 轴电感加电压阶跃时的电流响应，标出 τ 和 63.2%；右（下）图：同一对象的伯德图（幅值 dB、相位）。<br>
+<b>拖动滑块：</b>增大 L → τ 变大、响应变慢、转折频率左移；增大 R → 终值变小、响应变快。勾选「叠加 1.5Ts 延迟」，相位在高频急剧下跌——这就是电流环带宽不能无限提高的原因。<br>
+<b>正常：</b>一阶曲线无超调，相位从 0° 平滑趋向 −90°。<b>注意：</b>这是理想 RL 模型（L0 证据），实测存在逆变器死区和磁饱和，台架曲线会偏离。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>传递函数不能直接写进 MCU</b>：s 需离散化为 z 域差分方程（D01），例如低通 1/(τs+1) → A05 的 α 公式。</li>
+<li><b>台架电压阶跃法测 L</b>（标定模式，<span class="tg tg-bench">【台架重点】</span>）：转子锁定在 d 轴（先注入 id 对齐），在 d 轴施加小电压阶跃，记录 id，读 63.2% 时刻得 τ，由终值得 R = V/i∞，L = τ·R。</li>
+<li><b>扫频验收</b>：在 iq 给定叠加小幅正弦，扫 50 Hz ~ 3 kHz，记录幅值比与相位，得到闭环伯德图。</li>
+<li>结果写入标定表 <code>Cal_Ld_uH</code>、<code>Cal_Lq_uH</code>、<code>Cal_Rs_mOhm</code>（C11 参数辨识细化）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>理想阶跃：一阶指数，无超调。</li>
+<li>实测阶跃若开头有「台阶」或延迟：采样与 PWM 更新延迟、死区；若 τ 随电流幅值变化：电感饱和（Lq 随 iq 增大下降，IPMSM 常见）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 【伪代码】台架电压阶跃法辨识 Ld（标定模式下 1 kHz 后台处理，数据由 PWM 中断采集）*/
+#define STEP_N   (400u)              /* 400 × 50 µs = 20 ms ≥ 5τ */
+static q15_t s_idBuf[STEP_N];        /* PWM 中断中逐点写入 gFoc.id */
+
+void Ident_Ld_Process(float vStep_V)
+{
+    float iInf = Q15ToAmp(average(&amp;s_idBuf[STEP_N - 40u], 40u));   /* 取末尾均值作为终值 */
+    float i632 = 0.632f * iInf;
+    uint16_t k = first_index_ge(s_idBuf, STEP_N, AmpToQ15(i632));
+    float tau  = (float)k * FOC_TS;
+    float rEst = vStep_V / iInf;      /* 注意：含线缆 + MOS 导通电阻 + 死区影响 */
+    float lEst = tau * rEst;
+    Cal_Ld_uH  = lEst * 1.0e6f;
+    Cal_Rs_mOhm = rEst * 1.0e3f;
+}</code></pre>
+<p class="note">案例：施加 0.24 V，理论终值 20 A、τ = 3.75 ms（第 75 个采样点附近达 12.6 A）。电压给定 ≠ 实际电压：低压大电流时死区压降可达给定的相当比例，需死区补偿（C13）或改用更大电压并扣除。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>阶跃法测得 τ 远小于设计值</h5><dl>
+<dt>现象</dt><dd>测得 τ = 1.2 ms，设计 3.75 ms。</dd>
+<dt>可能根因</dt><dd>R 包含线缆、MOS、接插件电阻而偏大；死区导致实际电压偏低、终值偏小；转子未锁定（q 轴分量混入）；电感饱和。</dd>
+<dt>排查顺序</dt><dd>① LCR 表测线间电感对比 → ② 用示波器测实际相电压 → ③ 改变阶跃幅值看 τ 是否变化 → ④ 确认对齐。</dd>
+<dt>修复</dt><dd>死区补偿后重测；用 L = τ·R 时 R 取同一实验终值算出的总电阻；多幅值多次平均。</dd>
+<dt>验证</dt><dd>两种方法（阶跃 / 高频注入）结果差 &lt; 10%。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电流环带宽调不上去，一提高就振荡</h5><dl>
+<dt>现象</dt><dd>按 2 kHz 设计参数后 iq 振荡。</dd>
+<dt>可能根因</dt><dd>1.5Ts 延迟在 2 kHz 处滞后 54°，再加 PI 与滤波，相位裕度不足。</dd>
+<dt>排查</dt><dd>计算各环节相位滞后之和；扫频测开环。</dd>
+<dt>修复</dt><dd>带宽回到 PWM 频率 1/20 左右；减小采样滤波；改双采样双更新（需评估）。</dd>
+<dt>验证</dt><dd>阶跃超调 &lt; 10%，相位裕度 ≥ 45°。</dd></dl></div>
+<div class="issue"><h5>数学易错点：把 fc 与 ωc 混淆</h5><dl>
+<dt>现象</dt><dd>参数差 6.28 倍。</dd>
+<dt>根因</dt><dd>ωc = 2π·fc，单位 rad/s 与 Hz 混用。</dd>
+<dt>排查</dt><dd>检查所有公式单位。</dd>
+<dt>修复</dt><dd>代码注释写清单位。</dd>
+<dt>验证</dt><dd>实测带宽与设计一致。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>传递函数假设线性时不变：Ld、Lq 随电流饱和、Rs 随温度变化（铜电阻约 +0.39%/°C），参数需分工况标定。</li>
+<li>仿真模型忽略延迟：Simulink 连续模型的电流环带宽可以设很高，上台架即振荡——仿真必须加入 1.5Ts 延迟与 ZOH。</li>
+<li><span class="tg tg-red">【风险红线】</span>阶跃辨识电压过大：低阻电机 0.5 V 即可产生 40 A 以上电流，务必先小后大并开启过流保护。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A07" id="quiz-A07"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：G(s)=1/(Ls+R)、τ = L/R、63.2%、fc = R/(2πL)、延迟相位 ωTd。</li>
+<li>面试高频：「电流环带宽为什么取 PWM 频率的 1/10~1/20？」</li></ul></div>
+</section>
+
+<!-- ================= A08 ================= -->
+<section class="chap" id="A08" data-title="A08 PID 控制理论">
+<h2 class="chap-h">A08 PID 控制理论：PI 离散化、零极点对消、抗积分饱和与定点</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 8 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>dq 电流环、速度环、位置环、弱磁电压环、PLL</td></tr>
+<tr><th>输入 / 输出</th><td>输入：给定、反馈（误差 e）；输出：控制量（电压 / 电流给定）</td></tr>
+<tr><th>工程价值</th><td>FOC 中至少 2 个电流 PI + 1 个速度 PI；PI 的结构、限幅、抗饱和、定点精度决定控制品质</td></tr>
+<tr><th>上下游依赖</th><td>上游 A06、A07；下游 C05、C07、C08、D07</td></tr>
+<tr><th>适用角色</th><td>全部角色</td></tr>
+<tr><th>前置数学依赖</th><td>A05、A06、A07</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>电机参数不准、负载扰动、反电动势变化都需要闭环自动纠偏；I 项消除稳态误差。</div>
+<div><b>② 量产怎么做</b>位置式 PI + 条件积分抗饱和；参数按带宽 + 零极点对消计算后标定微调；标幺定点，Kp 用 Q12。</div>
+<div><b>③ 如何证明</b>台架 iq 阶跃：上升时间 ≈ 0.35/fbw、超调 &lt; 10%、无稳态误差；饱和退出无大超调。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A06 积分（I 项）、A05 微分（D 项）、A07 传递函数（参数计算）。</li>
+<li>标定参数：Cal_IdKp_q12 / Cal_IdKiTs_q15（q 轴同理）、电压限幅 Vmax（由 Vdc 实时算）。</li>
+<li>不满足：凭经验调参，换电机 / 换电压即失效；无抗饱和时低压大电流阶跃超调大。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+连续 PID：u(t) = Kp·e + Ki·∫e dt + Kd·de/dt
+零极点对消设计（电流环，对象 1/(Ls+R)）：
+   C(s) = Kp + Ki/s = Kp·(s + Ki/Kp)/s，令 Ki/Kp = R/L
+   开环 C·G = (Kp/L)/s → 闭环 T(s) = ωc/(s + ωc)，ωc = Kp/L
+   ⇒ Kp = ωc·L，Ki = ωc·R
+案例（ωc = 2π·1 kHz）<span class="tg tg-case">【案例假设】</span>：
+   d 轴 Kp = 0.283 V/A，Ki = 75.4 V/(A·s)；q 轴 Kp = 0.471 V/A，Ki = 75.4 V/(A·s)
+<span class="tg tg-disc">【离散实现】</span>位置式（后向矩形积分）：
+   I[k] = I[k−1] + Ki·Ts·e[k]，u[k] = sat(Kp·e[k] + I[k])
+增量式：Δu[k] = Kp·(e[k] − e[k−1]) + Ki·Ts·e[k]，u[k] = sat(u[k−1] + Δu[k])
+<span class="tg tg-fix">【定点实现】</span>标幺：Kp_pu = Kp·I_BASE/V_BASE，KiTs_pu = Ki·Ts·I_BASE/V_BASE
+   d：Kp_pu = 0.884 → Q12 = 3619；q：Kp_pu = 1.473 → Q12 = 6032（&gt; 1，不能用 Q15）
+   KiTs_pu = 75.4 × 50e-6 × 50/16 = 0.01178 → Q15 = 386
+抗积分饱和：① 积分器限幅 ② 条件积分（输出饱和且误差同向时冻结）③ 反算法 I += Kb·(u_sat − u)</div>
+<div id="anim-A08"></div>
+<div class="anim-note"><b>动画在演示什么：</b>离散 PI 控制案例 d 轴 RL 对象（Ts = 50 µs、可选 1 拍计算延迟），给定在 1 ms 阶跃到 20 A、10 ms 降到 5 A。上图电流，下图 PI 输出电压与限幅线。<br>
+<b>拖动滑块 / 按钮：</b>「零极点对消」恢复 1 kHz 设计值；「演示积分饱和」把电压限幅降到 1 V 并关闭抗饱和，可见大超调和下降沿拖尾，再勾选抗饱和对比；「演示延迟振荡」把 Kp 提高到 1.2，延迟使环路失稳并在限幅间持续振荡。<br>
+<b>正常：</b>超调 <b>正常：</b>上升约 0.35 ms、几乎无超调。lt; 5%，10→90% 上升时间在 0.35 ms 量级（连续一阶理论值 2.2/ωc = 0.35 ms；离散 + 量化步长下显示值会略小）。<b>异常：</b>超调 &gt; 20%、持续振荡、长时间贴限幅。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>误差</b>：e = ref − fb（Q15），注意 int32 计算防溢出。</li>
+<li><b>P 项</b>：Kp_q12 × e &gt;&gt; 12 → Q15，int32。</li>
+<li><b>I 项</b>：积分状态 int32 Q30，增量 KiTs_q15 × e（Q30），用 int64 求和再限幅。</li>
+<li><b>输出限幅</b>：限幅值来自电压圆（A02），每周期按实测 Vdc 更新。</li>
+<li><b>抗饱和</b>：输出饱和时只允许积分朝退饱和方向变化（条件积分）。</li>
+<li><b>中断约束</b>：PI 在 PWM 中断内执行；参数通过 XCP 修改时，Kp/Ki 写入需原子（int16 单次写入天然原子）。</li>
+<li><b>D 项</b>：电流环一般不用（采样含 PWM 纹波，D 放大噪声且相位已够）；速度/位置环如需 D，必须带低通（C08）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>设计值：iq 阶跃上升时间 ≈ 0.35/1 kHz = 0.35 ms，超调很小。</li>
+<li>Kp 过大：高频振荡（延迟引起）；Ki 过大（Ti 远小于 τ）：低频超调。</li>
+<li>电压饱和：电流上升斜率受限（di/dt = (Vmax − R·i)/L），无抗饱和时退出饱和后超调。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>typedef struct {
+    int16_t kp_q12;        /* Kp 标幺，Q12（范围 ±8）       */
+    int16_t kiTs_q15;      /* Ki·Ts 标幺，Q15              */
+    int32_t integ_q30;     /* 积分状态，Q30                 */
+    q15_t   outMax;        /* 输出上限（正数）              */
+    q15_t   outMin;        /* 输出下限（负数）              */
+} PI_tst;
+
+q15_t PI_Run(PI_tst *pi, q15_t err)
+{
+    int32_t p    = ((int32_t)pi-&gt;kp_q12 * (int32_t)err) &gt;&gt; 12;            /* Q15 */
+    int64_t iNew = (int64_t)pi-&gt;integ_q30 + ((int64_t)pi-&gt;kiTs_q15 * err);  /* Q30 */
+    int64_t iMax = (int64_t)pi-&gt;outMax &lt;&lt; 15;
+    int64_t iMin = (int64_t)pi-&gt;outMin &lt;&lt; 15;
+    int32_t u;
+
+    if (iNew &gt; iMax) { iNew = iMax; }          /* ① 积分器自身限幅 */
+    if (iNew &lt; iMin) { iNew = iMin; }
+
+    u = p + (int32_t)(iNew &gt;&gt; 15);
+
+    if (u &gt; pi-&gt;outMax) {                      /* ② 条件积分 */
+        u = pi-&gt;outMax;
+        if (err &lt; 0) { pi-&gt;integ_q30 = (int32_t)iNew; }   /* 只允许退饱和方向 */
+    } else if (u &lt; pi-&gt;outMin) {
+        u = pi-&gt;outMin;
+        if (err &gt; 0) { pi-&gt;integ_q30 = (int32_t)iNew; }
+    } else {
+        pi-&gt;integ_q30 = (int32_t)iNew;
+    }
+    return (q15_t)u;
+}
+
+/* 案例初始值（1 kHz 带宽，零极点对消）【案例假设】 */
+volatile int16_t Cal_IdKp_q12   = 3619;   /* 0.283 V/A */
+volatile int16_t Cal_IqKp_q12   = 6032;   /* 0.471 V/A */
+volatile int16_t Cal_IdKiTs_q15 = 386;    /* 75.4 V/(A·s) × 50 µs */
+volatile int16_t Cal_IqKiTs_q15 = 386;</code></pre>
+<p class="note">积分器初值预置（开环→闭环切换）与 dq 解耦前馈在 C05 中实现；此处 PI 为通用单元，速度环复用同一结构。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>低压冷启动 iq 阶跃大超调 + 啸叫</h5><dl>
+<dt>现象</dt><dd>9 V 母线下 30 A 阶跃首次超调约 50%，随后衰减振荡。</dd>
+<dt>可能根因</dt><dd>电压饱和期间积分持续累积（无抗饱和）；限幅值用 12 V 常量，实际电压更低；Kp 偏大叠加延迟。</dd>
+<dt>排查顺序</dt><dd>① 记录 vq 与限幅值、饱和时长 → ② 记录积分器状态 → ③ 不同 Vdc 下重复。</dd>
+<dt>修复</dt><dd>条件积分 / 反算抗饱和；Vmax 由实测 Vdc 计算；Kp 按实测 L 重标。</dd>
+<dt>验证</dt><dd>9~16 V 全电压范围阶跃超调 &lt; 10%。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>q 轴 Kp 标定后反而变小</h5><dl>
+<dt>现象</dt><dd>标定工程师把 Kp_q 改为 1.47 pu，电流环响应变得极慢。</dd>
+<dt>可能根因</dt><dd>变量是 Q15 存储，1.47 溢出成负数或被饱和为 0.99。</dd>
+<dt>排查</dt><dd>查 A2L 中变量的换算公式与数据类型。</dd>
+<dt>修复</dt><dd>改用 Q12，A2L 中 COMPU_METHOD 同步更新。</dd>
+<dt>验证</dt><dd>CANape 显示物理值与代码一致。</dd></dl></div>
+<div class="issue"><h5>数学易错点：Ki 单位与离散 KiTs 混淆</h5><dl>
+<dt>现象</dt><dd>积分作用强 20000 倍，电流环剧烈振荡。</dd>
+<dt>根因</dt><dd>把 Ki（V/(A·s)）直接当每拍增益使用，漏乘 Ts。</dd>
+<dt>排查</dt><dd>检查标定变量命名是否带 Ts。</dd>
+<dt>修复</dt><dd>命名强制 <code>KiTs</code>，A2L 换算中乘 Ts。</dd>
+<dt>验证</dt><dd>阶跃响应与仿真一致。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>运行中修改 Kp：位置式 PI 输出跳变；可在修改时重算积分器保证输出连续（bumpless）。</li>
+<li>d、q 两个 PI 共用限幅值：d 轴优先限幅后 q 轴的限幅是动态的，必须传入圆限幅后的实际剩余量。</li>
+<li>速度环 PI 的输出是 iq 给定，限幅为电流极限；电流环输出是电压——不同环的抗饱和信号不能混用。</li>
+<li><span class="tg tg-red">【风险红线】</span>积分器在故障关管后未清零，重新使能 PWM 瞬间输出满电压 → 过流冲击。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A08" id="quiz-A08"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：Kp = ωcL、Ki = ωcR、标幺换算与 Q12、条件积分抗饱和、为何电流环不用 D。</li>
+<li>综合卷 / 面试 / 标定三处都会出现：「按带宽算电流环参数」「低压超调怎么查」。</li></ul></div>
+</section>
+
+<!-- ================= 模块 A 综合自测 ================= -->
+<section class="chap" id="A-test" data-title="模块 A 章节综合自测卷">
+<h2 class="chap-h">模块 A 章节综合自测卷</h2>
+<p class="chap-sub">从 A01~A08 题库随机抽取 16 道客观题 + 2 道主观题。客观题作答后点「交卷」统一判分，错题自动进入错题本；主观题展开参考解答自评。</p>
+<div class="exam" data-scope="A" data-nobj="16" data-nsub="2" data-key="examA"></div>
+</section>
+
+<!--SEGMENT_INSERT_POINT: 后续分段的 section 插入到此注释之前，结业试卷保持在全文最末 -->
+
+<!-- ================= 结业综合大试卷 ================= -->
+<section class="chap" id="final" data-title="结业综合大试卷">
+<h2 class="chap-h">结业综合大试卷</h2>
+<p class="chap-sub">覆盖全部已交付模块的题库（随分段交付自动扩充）：随机 30 道客观题 + 4 道工程分析 / 简答题。建议在全部模块完成后作为完整自测。</p>
+<div class="exam" data-scope="ALL" data-nobj="30" data-nsub="4" data-key="examFinal"></div>
+</section>
+
+</main>
+
+<aside id="rightbar">
+  <h4>快速公式卡片</h4>
+  <div class="fcard"><b>线性换算</b><br>I = (N − N0)·K；每码 = 16 LSB(Q15)</div>
+  <div class="fcard"><b>电频率</b><br>fe = p·n/60；Δθ = ωe·Ts</div>
+  <div class="fcard"><b>Park</b><br>id = iα·c + iβ·s<br>iq = −iα·s + iβ·c</div>
+  <div class="fcard"><b>欧拉</b><br>e^(jθ) = cosθ + j·sinθ</div>
+  <div class="fcard"><b>电压上限</b><br>|v| ≤ Vdc/√3 = 6.93 V @12 V</div>
+  <div class="fcard"><b>一阶低通</b><br>α = Ts/(τf + Ts)</div>
+  <div class="fcard"><b>RL 对象</b><br>G = 1/(Ls+R)，τ = L/R</div>
+  <div class="fcard"><b>PI 对消</b><br>Kp = ωc·L，Ki = ωc·R</div>
+  <div class="fcard"><b>延迟相位</b><br>φ = 360°·f·Td（Td≈1.5Ts）</div>
+  <h4>调试提示</h4>
+  <div class="fcard" style="font-family:inherit">dq 纹波 1×fe → 电流偏移<br>2×fe → 两相增益差 / Park 写反<br>6×fe → 死区 / 反电动势谐波<br>正反转不对称 → 零位偏差</div>
+  <h4>动画快捷启停</h4>
+  <div class="rb-list" id="rbAnims"></div>
+  <h4>习题快捷跳转</h4>
+  <div class="rb-list" id="rbQuiz"></div>
+</aside>
+
+<footer id="bottombar">
+  <span id="progTxt">已学 0 / 0 节</span>
+  <div id="progBar"><div id="progFill"></div></div>
+  <button class="btn btn-sm hide-sm" id="btnPrint">🖨 打印</button>
+  <button class="btn btn-sm" id="toTop">↑ 返回顶部</button>
+</footer>
+
+<div id="modal" role="dialog" aria-modal="true">
+  <div id="modalBox">
+    <div id="modalHead"><span id="modalTitle"></span><button class="btn btn-sm" id="modalClose">✕ 关闭</button></div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+<script>
+/* ===================== FOC 教程 核心脚本（导航 / 搜索 / 进度 / 习题 / 错题本 / 试卷 / 调试模拟 / 动画框架） ===================== */
+window.FOC_Q = window.FOC_Q || [];
+window.FOC_ANIM_SPECS = window.FOC_ANIM_SPECS || [];
+window.FOC_SIM = window.FOC_SIM || [];
+(function(){
+'use strict';
+const LS={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch(e){return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
+const $=(s,r)=>(r||document).querySelector(s), $$=(s,r)=>Array.from((r||document).querySelectorAll(s));
+function el(tag,cls,html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e;}
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* ---------------- 导航数据（未交付章节自动置灰，交付后自动启用） ---------------- */
+const NAV=[
+ {g:'导读',items:[['intro','课程导读与统一案例']]},
+ {g:'模块 A：前置工程数学',items:[['A01','A01 基础代数'],['A02','A02 平面矢量'],['A03','A03 三角函数'],['A04','A04 复数'],['A05','A05 微分与差分'],['A06','A06 积分与累加'],['A07','A07 拉普拉斯与传递函数'],['A08','A08 PID 控制理论'],['A-test','模块 A 综合自测卷']]},
+ {g:'模块 B：基础扫盲',items:[['B01','B01 为什么用 FOC'],['B02','B02 PMSM 基础'],['B03','B03 坐标系'],['B04','B04 矢量控制思想'],['B05','B05 控制环层级'],['B06','B06 PWM/ADC/中断时序'],['B07','B07 常用信号'],['B-test','模块 B 综合自测卷']]},
+ {g:'模块 C：核心 FOC 链路',items:[['C01','C01 电流采样与校准'],['C02','C02 Clarke 变换'],['C03','C03 Park / 反 Park'],['C04','C04 SVPWM'],['C05','C05 电流环 PID'],['C06','C06 MTPA'],['C07','C07 弱磁控制'],['C08','C08 速度环 / 位置环'],['C09','C09 角度传感方案'],['C10','C10 无感观测'],['C11','C11 参数辨识'],['C12','C12 保护与诊断'],['C13','C13 扰动补偿'],['C-test','模块 C 综合自测卷']]},
+ {g:'模块 D：嵌入式落地实战',items:[['D01','D01 离散化'],['D02','D02 定点实现'],['D03','D03 中断架构'],['D04','D04 代码架构'],['D05','D05 Simulink 仿真'],['D06','D06 台架上电流程'],['D07','D07 标定实战'],['D08','D08 标定变量与 XCP'],['D-test','模块 D 综合自测卷']]},
+ {g:'模块 E：故障与调试实战',items:[['E01','E01 故障根因库'],['E02','E02 示波器抓取要点'],['E03','E03 仿真 vs 台架差异'],['E04','E04 定位流程'],['E-test','模块 E 综合自测卷']]},
+ {g:'模块 F：拓展对比',items:[['F01','F01 FOC vs DTC'],['F02','F02 有感 vs 无感'],['F03','F03 SPMSM vs IPMSM'],['F04','F04 主驱 vs EPS 辅驱'],['F05','F05 厂商方案特点'],['F-test','模块 F 综合自测卷']]},
+ {g:'重点强化',items:[['X1','X1 端到端数据流追踪'],['X2','X2 浮点 vs 定点'],['X3','X3 仿真证据 vs 台架证据'],['X4','X4 参数表模板']]},
+ {g:'考核',items:[['final','结业综合大试卷'],['#wb','【错题本】全局错题'],['#sim','台架调试模拟']]}
+];
+function buildNav(){
+  const nav=$('#sidenav'); nav.innerHTML='';
+  const closed=LS.get('foc_navclosed',{});
+  NAV.forEach((g,gi)=>{
+    const box=el('div','nav-g'+(closed[gi]?' closed':''));
+    const h=el('div','nav-gh','<span>'+g.g+'</span><span class="car">▾</span>');
+    h.onclick=()=>{box.classList.toggle('closed');closed[gi]=box.classList.contains('closed');LS.set('foc_navclosed',closed);};
+    const list=el('div','nav-items');
+    g.items.forEach(([id,t])=>{
+      const a=el('a');
+      if(id==='#wb'){a.href='javascript:void(0)';a.textContent=t;a.onclick=e=>{e.preventDefault();openWB();};}
+      else if(id==='#sim'){a.href='javascript:void(0)';a.textContent=t;a.onclick=e=>{e.preventDefault();openSim();};}
+      else{
+        a.href='#'+id;a.dataset.id=id;
+        const ok=!!document.getElementById(id);
+        a.innerHTML='<span>'+t+'</span>'+(ok?'<span class="done"></span>':'<span class="pill">后续分段</span>');
+        if(!ok)a.classList.add('pending');
+        a.addEventListener('click',()=>document.body.classList.remove('nav-open'));
+      }
+      list.append(a);
+    });
+    box.append(h,list); nav.append(box);
+  });
+}
+
+/* ---------------- 进度 ---------------- */
+function learnable(){return $$('section.chap').filter(s=>s.id&&s.id!=='final');}
+function refreshProgress(){
+  const done=LS.get('foc_done',{}); const secs=learnable();
+  const n=secs.filter(s=>done[s.id]).length;
+  $('#progTxt').textContent='已学 '+n+' / '+secs.length+' 节';
+  $('#progFill').style.width=(secs.length?n/secs.length*100:0)+'%';
+  $$('#sidenav a[data-id]').forEach(a=>{const d=a.querySelector('.done');if(d)d.textContent=done[a.dataset.id]?'✓':'';});
+  $$('.btn-learn').forEach(b=>{const on=!!done[b.dataset.id];b.textContent=on?'✓ 已学':'标记已学';b.classList.toggle('btn-pri',on);});
+}
+function addLearnButtons(){
+  learnable().forEach(s=>{
+    const h=$('.chap-h',s); if(!h||$('.btn-learn',h))return;
+    const b=el('button','btn btn-sm btn-learn no-print'); b.dataset.id=s.id;
+    b.onclick=()=>{const d=LS.get('foc_done',{});d[s.id]=!d[s.id];LS.set('foc_done',d);refreshProgress();};
+    h.append(b);
+  });
+}
+
+/* ---------------- 当前章节高亮 ---------------- */
+function watchActive(){
+  if(!('IntersectionObserver' in window))return;
+  const io=new IntersectionObserver(ents=>{ents.forEach(en=>{if(en.isIntersecting){$$('#sidenav a.active').forEach(a=>a.classList.remove('active'));const a=$('#sidenav a[data-id="'+en.target.id+'"]');if(a){a.classList.add('active');}}});},{rootMargin:'-35% 0px -60% 0px'});
+  $$('section.chap').forEach(s=>io.observe(s));
+}
+
+/* ---------------- 搜索 ---------------- */
+let IDX=[];
+function buildIndex(){IDX=$$('section.chap').map(s=>({id:s.id,title:s.dataset.title||s.id,text:(s.innerText||'').replace(/\s+/g,' ')}));}
+function doSearch(q){
+  const box=$('#searchRes'); q=q.trim();
+  if(!q){box.style.display='none';return;}
+  const ql=q.toLowerCase(); const res=[];
+  IDX.forEach(it=>{
+    let from=0,cnt=0; const tl=it.text.toLowerCase();
+    while(cnt<3){const i=tl.indexOf(ql,from);if(i<0)break;res.push({it,i});from=i+ql.length;cnt++;}
+  });
+  box.innerHTML='';
+  if(!res.length){box.innerHTML='<a href="javascript:void(0)">未找到「'+esc(q)+'」</a>';}
+  res.slice(0,20).forEach(r=>{
+    const s=Math.max(0,r.i-24), snip=r.it.text.substr(s,70);
+    const hi=esc(snip).replace(new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'),m=>'<mark>'+m+'</mark>');
+    const a=el('a',null,'<b>'+esc(r.it.title)+'</b><small>…'+hi+'…</small>'); a.href='#'+r.it.id;
+    a.onclick=()=>{box.style.display='none';};
+    box.append(a);
+  });
+  box.style.display='block';
+}
+
+/* ---------------- 复制按钮 ---------------- */
+function copyText(t,btn){
+  const done=()=>{if(btn){const o=btn.textContent;btn.textContent='已复制';setTimeout(()=>btn.textContent=o,1200);}};
+  if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(done,()=>fallback());}else fallback();
+  function fallback(){const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.append(ta);ta.select();try{document.execCommand('copy');}catch(e){}ta.remove();done();}
+}
+function addCopy(){
+  $$('pre').forEach(p=>{if($('.copy-btn',p))return;const b=el('button','copy-btn','复制');b.onclick=()=>copyText(p.querySelector('code')?p.querySelector('code').innerText:p.innerText,b);p.append(b);});
+  $$('table.copyable').forEach(t=>{if(t.previousElementSibling&&t.previousElementSibling.classList.contains('tbl-copy'))return;const b=el('button','copy-btn tbl-copy','复制表格');b.onclick=()=>copyText($$('tr',t).map(r=>$$('th,td',r).map(c=>c.innerText.trim()).join('\t')).join('\n'),b);t.parentNode.insertBefore(b,t);});
+}
+
+/* ---------------- 弹窗 ---------------- */
+function openModal(title,node){$('#modalTitle').textContent=title;const b=$('#modalBody');b.innerHTML='';b.append(node);$('#modal').classList.add('on');}
+function closeModal(){$('#modal').classList.remove('on');}
+
+/* ---------------- 习题 ---------------- */
+const TN={single:'单选题',tf:'判断题',short:'简答题',analysis:'工程分析题'};
+const isObj=q=>q.type==='single'||q.type==='tf';
+const getWB=()=>LS.get('foc_wb',[]);
+function inWB(id){return getWB().indexOf(id)>=0;}
+function addWB(id){const w=getWB();if(w.indexOf(id)<0){w.push(id);LS.set('foc_wb',w);}updWB();}
+function rmWB(id){LS.set('foc_wb',getWB().filter(x=>x!==id));updWB();}
+function updWB(){const c=$('#wbCount');if(c)c.textContent=getWB().filter(id=>FOC_Q.some(q=>q.id===id)).length;}
+function secTitle(id){const s=document.getElementById(id);return s?(s.dataset.title||id):id;}
+function linksHtml(q){return (q.links||[q.sec]).map(id=>document.getElementById(id)?'<a href="#'+id+'" data-jump="1">→ '+esc(secTitle(id))+'</a>':'<span class="pill">'+id+'（后续分段）</span>').join(' ');}
+function bumpStat(sec,right){const s=LS.get('foc_qstat',{});s[sec]=s[sec]||{n:0,r:0};s[sec].n++;if(right)s[sec].r++;LS.set('foc_qstat',s);const c=$('#quiz-'+sec+' .quiz-stat');if(c)c.textContent=statTxt(sec);}
+function statTxt(sec){const s=(LS.get('foc_qstat',{})[sec])||{n:0,r:0};return '本节累计作答 '+s.n+' 次，正确 '+s.r+' 次'+(s.n?'（'+Math.round(s.r/s.n*100)+'%）':'');}
+
+function buildQ(q,num,mode){
+  const box=el('div','q'); box.dataset.qid=q.id;
+  const head=el('div','q-head','<span class="tg tg-quiz">【习题】</span><span class="q-type">'+TN[q.type]+'</span><span class="q-num">#'+num+(mode!=='inline'?' · '+esc(secTitle(q.sec)):'')+'</span><span class="sp"></span>');
+  const wb=el('button','btn btn-xs'); const rw=()=>{wb.textContent=inWB(q.id)?'★ 已在错题本':'☆ 加入错题本';};
+  wb.onclick=()=>{inWB(q.id)?rmWB(q.id):addWB(q.id);rw();}; rw(); head.append(wb);
+  box.append(head, el('div','q-stem',q.q));
+  const st={sel:null,graded:false,right:false}; box._st=st;
+  if(isObj(q)){
+    const opts=q.type==='tf'?['正确','错误']:q.opts, ans=q.type==='tf'?(q.ans?0:1):q.ans;
+    const list=el('div','q-opts'); const exp=el('div','q-exp'); exp.hidden=true;
+    opts.forEach((o,i)=>{const b=el('button','q-opt',(q.type==='single'?String.fromCharCode(65+i)+'. ':'')+o);
+      b.onclick=()=>{if(st.graded)return; if(mode==='exam'){st.sel=i;$$('.q-opt',list).forEach((x,j)=>x.classList.toggle('sel',j===i));return;} grade(i);};
+      list.append(b);});
+    function grade(i){
+      st.sel=i; st.graded=true; st.right=(i===ans);
+      $$('.q-opt',list).forEach((x,j)=>{x.classList.remove('sel');if(j===ans)x.classList.add('ok');if(j===i&&i!==ans)x.classList.add('bad');});
+      if(i!==null&&!st.right){addWB(q.id);rw();}
+      if(mode!=='exam')bumpStat(q.sec,st.right);
+      exp.innerHTML='<div class="q-verdict '+(st.right?'ok':'bad')+'">'+(i===null?'未作答':(st.right?'✔ 回答正确':'✘ 回答错误，已自动加入错题本'))+'</div><b>解析：</b>'+q.exp+'<div class="q-links">关联章节：'+linksHtml(q)+'</div>';
+      exp.hidden=false;
+      if(mode!=='exam'){const r=el('button','btn btn-xs','↺ 重做');r.onclick=()=>box.replaceWith(buildQ(q,num,mode));exp.append(' ',r);}
+    }
+    box._grade=()=>{grade(st.sel);return st.right;};
+    box.append(list,exp);
+  }else{
+    const d=el('details','q-ref','<summary>查看参考解答（自查，不自动判分）</summary><div class="q-ans">'+q.ans+'<div class="q-exp"><b>评分要点：</b>'+q.exp+'<div class="q-links">关联章节：'+linksHtml(q)+'</div></div></div>');
+    box.append(d);
+  }
+  if(mode==='wb'){const bar=el('div','q-links');bar.innerHTML='<a href="#'+q.sec+'" data-jump="1">↗ 跳转原章节</a> ';const rm=el('button','btn btn-xs','移出错题本');rm.onclick=()=>{rmWB(q.id);box.remove();};bar.append(rm);box.append(bar);}
+  return box;
+}
+const ORDER={single:0,tf:1,short:2,analysis:3};
+function renderQuizzes(){
+  $$('.quiz[data-sec]').forEach(c=>{
+    const sec=c.dataset.sec; const qs=FOC_Q.filter(q=>q.sec===sec).sort((a,b)=>ORDER[a.type]-ORDER[b.type]);
+    c.innerHTML='';
+    const h=el('div','quiz-h','<span>共 '+qs.length+' 题：单选 / 判断即时判分，简答 / 工程分析题展开参考解答。</span><span class="quiz-stat">'+statTxt(sec)+'</span>');
+    c.append(h); qs.forEach((q,i)=>c.append(buildQ(q,i+1,'inline')));
+  });
+}
+
+/* ---------------- 试卷 ---------------- */
+function buildExam(c){
+  const scope=c.dataset.scope, nObj=+c.dataset.nobj, nSub=+c.dataset.nsub, key=c.dataset.key;
+  const pool=FOC_Q.filter(q=>scope==='ALL'||q.sec.indexOf(scope)===0);
+  const objs=shuffle(pool.filter(isObj)).slice(0,nObj), subs=shuffle(pool.filter(q=>!isObj(q))).slice(0,nSub);
+  c.innerHTML='';
+  const hist=LS.get('foc_'+key,{times:0,best:null,last:null});
+  const info=el('div','note','题库规模：客观题 '+pool.filter(isObj).length+'、主观题 '+pool.filter(q=>!isObj(q)).length+'。本卷客观题 '+objs.length+' 道、主观题 '+subs.length+' 道。历史：已交卷 '+hist.times+' 次'+(hist.best!=null?'，最高 '+hist.best+' 分，上次 '+hist.last+' 分':'')+'。');
+  const bar=el('div','quiz-h'); const re=el('button','btn','↺ 重新组卷'); re.onclick=()=>buildExam(c); bar.append(re);
+  c.append(info,bar);
+  const boxes=[];
+  c.append(el('h4','sub','一、客观题（每题 '+(objs.length?(100/objs.length).toFixed(1):0)+' 分）'));
+  objs.forEach((q,i)=>{const b=buildQ(q,i+1,'exam');boxes.push(b);c.append(b);});
+  if(subs.length){c.append(el('h4','sub','二、主观题（自评，不计分）'));subs.forEach((q,i)=>c.append(buildQ(q,i+1,'exam')));}
+  const sub=el('button','btn btn-pri','✔ 交卷判分'); const res=el('div');
+  sub.onclick=()=>{
+    if(sub.disabled)return; sub.disabled=true;
+    let r=0,un=0; boxes.forEach(b=>{if(b._st.sel===null)un++; if(b._grade())r++;});
+    const score=objs.length?Math.round(r/objs.length*100):0;
+    const h=LS.get('foc_'+key,{times:0,best:null,last:null}); h.times++; h.last=score; h.best=h.best==null?score:Math.max(h.best,score); LS.set('foc_'+key,h);
+    res.innerHTML='<div class="exam-res"><b>得分：'+score+' / 100</b>　正确 '+r+' / '+objs.length+'，未作答 '+un+'。错题已加入错题本。'+(score>=80?' 掌握良好。':' 建议回到对应章节复习后重新组卷。')+'</div>';
+    res.scrollIntoView({behavior:'smooth',block:'center'});
+  };
+  const sbar=el('div','quiz-h'); sbar.append(sub); c.append(sbar,res);
+}
+
+/* ---------------- 错题本 ---------------- */
+function openWB(){
+  const wrap=el('div'); const ids=getWB(); const qs=ids.map(id=>FOC_Q.find(q=>q.id===id)).filter(Boolean);
+  const top=el('div','quiz-h','<span>共 '+qs.length+' 题。答错的单选 / 判断题会自动加入；也可手动加入任意题。可在此重做。</span>');
+  const clr=el('button','btn btn-sm','清空错题本'); clr.onclick=()=>{if(confirm('确定清空错题本？')){LS.set('foc_wb',[]);updWB();openWB();}}; top.append(clr);
+  wrap.append(top);
+  if(!qs.length)wrap.append(el('p',null,'错题本为空。'));
+  qs.forEach((q,i)=>wrap.append(buildQ(q,i+1,'wb')));
+  openModal('【错题本】全局错题汇总',wrap);
+}
+
+/* ---------------- 台架调试模拟 ---------------- */
+function openSim(){
+  const wrap=el('div');
+  wrap.append(el('p',null,'情景推演：资深标定工程师描述台架现象，你选择下一步排查动作，工程师会根据你的选择追问或纠正，直到给出根因、修复方案与验证信号。与习题独立，不计分。'));
+  FOC_SIM.forEach(sc=>{const b=el('button','btn','▶ '+sc.title);b.style.margin='4px';b.onclick=()=>runSim(sc,wrap);wrap.append(b);});
+  openModal('台架调试模拟',wrap);
+}
+function runSim(sc,wrap){
+  wrap.innerHTML=''; const log=el('div'); wrap.append(el('h4','sub',sc.title),log);
+  const back=el('button','btn btn-sm','← 返回场景列表'); back.onclick=openSim; wrap.prepend(back);
+  function show(nid){
+    const n=sc.nodes[nid];
+    log.append(el('div','sim-msg sim-eng','<b>标定工程师：</b>'+n.text));
+    if(!n.opts||!n.opts.length){log.append(el('div','sim-msg sim-fb','<b>场景结束。</b> 关联复习：'+(n.links||[]).map(id=>'<a href="#'+id+'" data-jump="1">'+esc(secTitle(id))+'</a>').join('、')));return;}
+    const box=el('div','sim-opts');
+    n.opts.forEach(o=>{const b=el('button','q-opt',o.t);b.onclick=()=>{box.remove();log.append(el('div','sim-msg sim-you','<b>你：</b>'+o.t));if(o.fb)log.append(el('div','sim-msg sim-fb',o.fb));show(o.next);setTimeout(()=>log.lastElementChild&&log.lastElementChild.scrollIntoView({behavior:'smooth',block:'nearest'}),30);};box.append(b);});
+    log.append(box);
+  }
+  show(sc.start);
+}
+
+/* ===================== 动画框架 ===================== */
+const ANIMS=[]; let COL={};
+function readCol(){const cs=getComputedStyle(document.documentElement);const g=k=>cs.getPropertyValue(k).trim();
+  COL={cbg:g('--cbg'),fg:g('--fg'),muted:g('--muted'),grid:g('--grid'),axis:g('--axis'),acc:g('--acc'),acc2:g('--acc2'),ok:g('--ok'),bad:g('--bad'),warn:g('--warn'),a:g('--pa'),b:g('--pb'),c:g('--pc'),d:g('--pd'),q:g('--pq'),panel:g('--panel2')};
+  window.FOC_COL=COL;}
+function makeAnim(spec){
+  const host=document.getElementById(spec.host); if(!host)return null;
+  const st={t:0,running:false,p:{},tog:{},w:600,h:300};
+  (spec.params||[]).forEach(q=>st.p[q.k]=q.v); (spec.toggles||[]).forEach(q=>st.tog[q.k]=!!q.v);
+  host.className='anim-box'; host.innerHTML='';
+  const bar=el('div','anim-bar','<span class="tg tg-anim">【交互动画】</span><b>'+spec.title+'</b>');
+  const bp=el('button','btn btn-sm','▶ 启动'), br=el('button','btn btn-sm','↺ 复位'); bar.append(bp,br);
+  const wrap=el('div','anim-canvas'), cv=document.createElement('canvas'); wrap.append(cv);
+  const ctl=el('div','anim-ctl'); host.append(bar,wrap,ctl);
+  const ins={}, tgs={};
+  (spec.params||[]).forEach(q=>{const row=el('label','ctl-row');const nm=el('span',null,q.label);const r=document.createElement('input');r.type='range';r.min=q.min;r.max=q.max;r.step=q.step;r.value=q.v;const val=el('span','ctl-val');
+    const show=()=>{val.textContent=(+st.p[q.k]).toFixed(q.dp!=null?q.dp:2)+(q.unit?' '+q.unit:'');};show();
+    r.addEventListener('input',()=>{st.p[q.k]=parseFloat(r.value);show();render();});row.append(nm,r,val);ctl.append(row);ins[q.k]={r,show};});
+  (spec.toggles||[]).forEach(q=>{const row=el('label','ctl-tog');const c=document.createElement('input');c.type='checkbox';c.checked=!!q.v;c.onchange=()=>{st.tog[q.k]=c.checked;render();};row.append(c,el('span',null,q.label));ctl.append(row);tgs[q.k]=c;});
+  const ctx=cv.getContext('2d');
+  function render(){ctx.setTransform(window.devicePixelRatio||1,0,0,window.devicePixelRatio||1,0,0);ctx.clearRect(0,0,st.w,st.h);ctx.fillStyle=COL.cbg;ctx.fillRect(0,0,st.w,st.h);try{spec.draw(ctx,st.w,st.h,st,COL);}catch(e){if(window.console)console.error(spec.host,e);}}
+  function resize(){const w=Math.max(280,Math.floor(wrap.clientWidth||600));const h=typeof spec.h==='function'?spec.h(w):spec.h;const d=window.devicePixelRatio||1;cv.width=Math.round(w*d);cv.height=Math.round(h*d);cv.style.height=h+'px';st.w=w;st.h=h;render();}
+  const api={host:spec.host,title:spec.title,st,render,resize,vis:true,
+    setRun(v){st.running=v;bp.textContent=v?'⏸ 暂停':'▶ 启动';refreshRbAnims();},
+    setP(k,v){st.p[k]=v;if(ins[k]){ins[k].r.value=v;ins[k].show();}},
+    setT(k,v){st.tog[k]=v;if(tgs[k])tgs[k].checked=v;}};
+  if(spec.buttons&&spec.buttons.length){const bb=el('div','ctl-btns');spec.buttons.forEach(b=>{const x=el('button','btn btn-sm',b.label);x.onclick=()=>{b.fn(api);render();};bb.append(x);});ctl.append(bb);}
+  bp.onclick=()=>api.setRun(!st.running);
+  br.onclick=()=>{st.t=0;(spec.params||[]).forEach(q=>api.setP(q.k,q.v));(spec.toggles||[]).forEach(q=>api.setT(q.k,!!q.v));render();};
+  ANIMS.push(api); resize(); return api;
+}
+function refreshRbAnims(){const box=$('#rbAnims');if(!box)return;box.innerHTML='';ANIMS.forEach(a=>{const b=el('button','btn btn-sm','<span>'+a.host.replace('anim-','')+' '+a.title.slice(0,12)+'…</span><span>'+(a.st.running?'⏸':'▶')+'</span>');b.onclick=()=>a.setRun(!a.st.running);box.append(b);});
+  const all=el('button','btn btn-sm','<span>全部暂停</span><span>■</span>');all.onclick=()=>ANIMS.forEach(a=>a.setRun(false));box.append(all);}
+let lastTs=null;
+function loop(ts){const dt=lastTs==null?0:Math.min(0.05,(ts-lastTs)/1000);lastTs=ts;ANIMS.forEach(a=>{if(a.st.running&&a.vis){a.st.t+=dt;a.render();}});requestAnimationFrame(loop);}
+
+/* ---------------- 初始化 ---------------- */
+function init(){
+  readCol(); buildNav(); addLearnButtons(); refreshProgress(); watchActive();
+  renderQuizzes(); $$('.exam').forEach(buildExam); updWB();
+  FOC_ANIM_SPECS.forEach(makeAnim); refreshRbAnims();
+  const rq=$('#rbQuiz'); if(rq){$$('.quiz[data-sec]').forEach(c=>{const a=el('a','btn btn-sm',c.dataset.sec+' 习题组');a.href='#'+c.id;rq.append(a);});$$('.exam').forEach(c=>{const s=c.closest('section');const a=el('a','btn btn-sm',esc(s.dataset.title));a.href='#'+s.id;rq.append(a);});}
+  if('IntersectionObserver' in window){const io=new IntersectionObserver(es=>es.forEach(e=>{const a=ANIMS.find(x=>x.host===e.target.id);if(a)a.vis=e.isIntersecting;}));ANIMS.forEach(a=>io.observe(document.getElementById(a.host)));}
+  addCopy(); buildIndex();
+  let rt=null; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>ANIMS.forEach(a=>a.resize()),150);});
+  const mq=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null; if(mq&&mq.addEventListener)mq.addEventListener('change',()=>{readCol();ANIMS.forEach(a=>a.render());});
+  $('#navToggle').onclick=()=>{if(window.innerWidth<=900)document.body.classList.toggle('nav-open');else document.body.classList.toggle('nav-collapsed');};
+  const sb=$('#searchBox'); sb.addEventListener('input',()=>doSearch(sb.value)); sb.addEventListener('focus',()=>doSearch(sb.value));
+  document.addEventListener('click',e=>{if(!e.target.closest('#searchWrap'))$('#searchRes').style.display='none';
+    if(e.target.closest('a[data-jump]'))closeModal();
+    const g=e.target.closest('.flow-svg g[data-link]'); if(g){location.hash='#'+g.dataset.link;}});
+  $('#btnWB').onclick=openWB; $('#btnSim').onclick=openSim; $('#modalClose').onclick=closeModal;
+  $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal();});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+  $('#toTop').onclick=()=>window.scrollTo({top:0,behavior:'smooth'});
+  $('#btnPrint').onclick=()=>window.print();
+  window.addEventListener('beforeprint',()=>$$('details').forEach(d=>d.open=true));
+  $('#btnTheme').onclick=()=>{const r=document.documentElement;const cur=r.getAttribute('data-theme');const dark=cur?cur==='dark':(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);r.setAttribute('data-theme',dark?'light':'dark');LS.set('foc_theme',r.getAttribute('data-theme'));readCol();ANIMS.forEach(a=>a.render());};
+  requestAnimationFrame(loop);
+}
+const th=LS.get('foc_theme',null); if(th)document.documentElement.setAttribute('data-theme',th);
+window.FOC_INIT=init;
+})();
+</script>
+<script>
+/* ===================== 模块 A 题库（后续分段向 FOC_Q 追加，结业试卷自动覆盖） ===================== */
+FOC_Q.push(
+/* ---------- A01 ---------- */
+{id:'A01-s1',sec:'A01',type:'single',q:'案例中相电流 ±50 A 对应 ADC 0~4095，Q15 电流基值 50 A。每 1 个 ADC 码对应多少 Q15 LSB？',opts:['8','16','32','0.0244'],ans:1,exp:'K = 100 A/4096 = 0.024414 A/cnt；换成 Q15：0.024414 × 32768 / 50 = 16，可直接左移 4 位。',links:['A01']},
+{id:'A01-s2',sec:'A01',type:'single',q:'两点标定：0 A 时读到 N1 = 2060，+20 A 时读到 N2 = 2879。增益 K 与零点 N0 为？',opts:['K = 0.02442 A/cnt，N0 = 2060','K = 0.0244 A/cnt，N0 = 2048','K = 40.95 A/cnt，N0 = 2060','K = 0.02442 A/cnt，N0 = 2879'],ans:0,exp:'K = (20 − 0)/(2879 − 2060) = 20/819 = 0.02442；N0 = N1 − I1/K = 2060。理想值 2048 只是设计值，实测零点以标定为准。',links:['A01']},
+{id:'A01-t1',sec:'A01',type:'tf',q:'上电偏移校准可以在 PWM 正常开关、电机运行时进行，只要平均次数足够多即可。',ans:false,exp:'运行时存在真实相电流，平均值不等于零点。偏移校准必须在 PWM 关闭（无电流）且运放供电稳定后进行。',links:['A01','C01']},
+{id:'A01-t2',sec:'A01',type:'tf',q:'表达式 (uint32_t)adc − off 在 adc 小于 off 时会得到一个负数。',ans:false,exp:'无符号运算回绕，得到接近 2³² 的大正数，表现为电流偶发巨大跳变。两个操作数应先转 int32 再相减。',links:['A01','D02']},
+{id:'A01-sa',sec:'A01',type:'short',q:'为什么要把电流、电压先换算为标幺值，再用 Q15 存储？',ans:'① 定点数只能表示有限范围，标幺化把物理量映射到 [−1, 1) 附近，充分利用 16 位精度；② 不同电机 / 不同电压平台只需改基值，算法代码不变；③ PI 参数、限幅、保护阈值统一在同一尺度下，便于比较和标定；④ 选择合适基值（如本例 50 A）可让换算变成移位，节省中断时间。',exp:'答到「精度/范围」「参数可移植」「统一尺度」三点即合格。',links:['A01','D02']},
+{id:'A01-an',sec:'A01',type:'analysis',q:'台架：EPS 电机静止、PWM 关闭时 CANape 显示 gFoc.ia ≈ +1.2 A、ib ≈ −0.4 A；运行时 1000 rpm 下手感有明显「一顿一顿」，iq 频谱中 67 Hz 分量突出。请给出排查路径、可能根因、验证手段与修复方案。',ans:'<b>分析：</b>1000 rpm × 4 / 60 = 66.7 Hz 即电频率一倍频，典型的电流偏移误差特征（相电流中的直流偏置经 Park 变成一倍电频率交流）。<br><b>排查路径：</b>① 读取 Cal_IaOffset_cnt / Cal_IbOffset_cnt 与当前 ADC 原始均值对比；② 检查偏移校准触发时刻：是否在运放 / 采样电源稳定之前、是否 PWM 已使能；③ 检查是否有 NVM / 标定数据覆盖上电校准值；④ 冷态与热态分别测零点，确认温漂。<br><b>根因候选：</b>校准时序过早、校准期间有电流、标定值被覆盖、采样电路温漂。<br><b>修复：</b>延后校准并强制关管；增加有效范围诊断；必要时停机周期重校准。<br><b>验证：</b>静止均值 &lt; 0.1 A；运行时 iq 一倍频分量下降到底噪水平，手感顿挫消失。',exp:'关键是从 67 Hz 反推出「一倍电频率」并联系到偏移误差。',links:['A01','A04','C01']},
+/* ---------- A02 ---------- */
+{id:'A02-s1',sec:'A02',type:'single',q:'电流矢量 iα = −20 A、iβ = −20 A，用 atan2 计算的角度是？',opts:['45°','135°','−135°','−45°'],ans:2,exp:'位于第三象限，atan2(−20, −20) = −135°（即 225°）。若误用 atan(y/x) 会得到 45°，丢失象限信息。',links:['A02']},
+{id:'A02-s2',sec:'A02',type:'single',q:'12 V 母线下，SVPWM 线性调制区可输出的最大相电压矢量模长约为？',opts:['12 V','6 V','6.93 V','8.49 V'],ans:2,exp:'线性区最大内切圆半径 = Vdc/√3 = 6.93 V（幅值不变 Clarke 约定下）。',links:['A02','C04']},
+{id:'A02-t1',sec:'A02',type:'tf',q:'两个电流矢量模长分别为 20 A 和 15 A，它们的合成矢量模长一定是 35 A。',ans:false,exp:'矢量合成要考虑方向：同向 35 A，反向 5 A，垂直 25 A。',links:['A02']},
+{id:'A02-t2',sec:'A02',type:'tf',q:'矢量 v 与单位矢量 e 的点积，等于 v 在 e 方向上的投影分量，这正是 Park 变换的几何本质。',ans:true,exp:'id = i·ed，iq = i·eq，ed、eq 是随转子旋转的单位矢量。',links:['A02','C03']},
+{id:'A02-sa',sec:'A02',type:'short',q:'电压矢量超出限幅圆时，「等比例缩放」与「d 轴优先」两种策略有何区别？各适合什么场景？',ans:'等比例缩放：vd、vq 同比例缩小，保持电压矢量方向，实现简单，适合低速/不弱磁场景；d 轴优先：先保证 vd（承担弱磁、解耦），剩余电压分给 vq，弱磁区可维持对 id 的控制，但 q 轴跟踪能力在饱和时下降，适合需要深度弱磁的场景。两者均需把限幅结果反馈给 PI 做抗饱和。',exp:'答出「方向保持 vs d 轴控制能力」及「与弱磁的关系」即可。',links:['A02','C07']},
+{id:'A02-an',sec:'A02',type:'analysis',q:'台架：EPS 电机接近 3000 rpm 时相电流出现明显平顶畸变，电机啸叫加剧，电流 FFT 中 5、7 次谐波突出。代码审查发现电流环输出处为：vd = sat(vd, ±Vmax); vq = sat(vq, ±Vmax);。请分析根因并给出修复与验证。',ans:'<b>根因：</b>方形限幅。vd、vq 各自限幅到 Vmax，合成模长最大可达 √2·Vmax = 9.8 V（12 V 母线），远超线性区 6.93 V，SVPWM 被迫进入过调制，输出电压畸变产生 6k±1 次谐波（5、7 次）。<br><b>排查：</b>记录 vd、vq，离线计算 √(vd²+vq²) 与 Vdc/√3 对比；确认 SVPWM 是否出现占空比钳位。<br><b>修复：</b>改为圆限幅（d 轴优先或等比例），Vmax 用实测 Vdc 计算；限幅结果反馈 PI 抗饱和；若需要过调制，按 C04 明确设计。<br><b>验证：</b>合成电压不超过限值；5、7 次谐波明显下降；噪声主观评价改善。',exp:'核心：方形限幅 → 合成超线性区 → 过调制谐波。',links:['A02','A08','C04']},
+/* ---------- A03 ---------- */
+{id:'A03-s1',sec:'A03',type:'single',q:'EPS 电机极对数 4，最高转速 8000 rpm 时电频率为？',opts:['133.3 Hz','533.3 Hz','2133 Hz','33.3 Hz'],ans:1,exp:'fe = p·n/60 = 4 × 8000 / 60 = 533.3 Hz。',links:['A03']},
+{id:'A03-s2',sec:'A03',type:'single',q:'20 kHz FOC 中断，8000 rpm 时每个 PWM 周期电角度增量约为？',opts:['0.6°','2.4°','9.6°','38.4°'],ans:2,exp:'Δθ = 360° × 533.3 Hz × 50 µs = 9.6°；1.5Ts 延迟对应约 14.4°，高速必须补偿。',links:['A03']},
+{id:'A03-t1',sec:'A03',type:'tf',q:'星形连接无中线时三相电流之和恒为零，因此双电阻采样可由 ic = −ia − ib 得到第三相。',ans:true,exp:'基尔霍夫电流定律；若存在中线或采样不同步、增益不一致，推算会引入误差。',links:['A03','C01']},
+{id:'A03-t2',sec:'A03',type:'tf',q:'用 uint16 表示 0~2π 电角度时，角度加法溢出后需要手动对 65536 取模。',ans:false,exp:'uint16 加法天然对 65536 取模（无符号溢出在 C 中是定义行为），无需判断，这正是使用 uint16 角度的好处。',links:['A03']},
+{id:'A03-sa',sec:'A03',type:'short',q:'为什么量产代码普遍用 uint16 表示电角度，而不是 float 弧度？',ans:'① 溢出即自动取模，无需判断和取余；② 分辨率均匀（2π/65536 ≈ 0.0055°）且长时间运行不丢精度；③ 高位直接作为 sin 表索引，低位用于插值，查表高效；④ 无浮点运算开销，适合无 FPU 或对中断时间敏感的场合；⑤ 角度差分 (int16)(a−b) 自动处理过零。',exp:'至少答出取模、精度、查表三点。',links:['A03','A06']},
+{id:'A03-an',sec:'A03',type:'analysis',q:'台架：EPS 电机在 1000 rpm 时 iq = 20 A 对应力矩正常，转速升到 6000 rpm（尚未进入弱磁）时同样 iq 给定力矩下降约 2%，同时 CANape 显示的 id 正常为 0，但用功率分析仪反推的实际 id 为负。请分析。',ans:'<b>分析：</b>控制器内的 id/iq 是基于「采样时刻角度」计算的，但电压在约 1.5Ts 后才真正施加，期间转子又转过 Δθ·1.5。6000 rpm：fe = 400 Hz，1.5Ts 对应 360 × 400 × 75 µs ≈ 10.8°。实际电压/电流矢量相对真实 dq 轴有角度误差，力矩下降约 1 − cos10.8° ≈ 1.8%，并出现实际 d 轴分量。<br><b>排查：</b>扫转速记录力矩常数；计算误差角与转速是否成正比；检查反 Park 是否使用补偿角。<br><b>修复：</b>反 Park 使用 θ + Kc·ωe·Ts（Kc 标称 1.5，标定微调），ωe 用滤波后的速度。<br><b>验证：</b>500~6000 rpm 力矩常数一致（扭矩传感器）；正反转对称。',exp:'识别「误差与转速成正比 → 时间延迟」是关键。',links:['A03','B06','C03']},
+/* ---------- A04 ---------- */
+{id:'A04-s1',sec:'A04',type:'single',q:'复数 z = 3 + 4j 乘以 e^(−j90°) 的结果是？',opts:['4 − 3j','−4 + 3j','−3 + 4j','3 − 4j'],ans:0,exp:'e^(−j90°) = −j；(3 + 4j)(−j) = −3j − 4j² = 4 − 3j，即顺时针转 90°。',links:['A04']},
+{id:'A04-s2',sec:'A04',type:'single',q:'Park 变换误写成乘 e^(+jθ)，稳态 dq 电流表现为？',opts:['直流常值','以 ωe 振荡','以 2ωe 振荡','恒为零'],ans:2,exp:'i_αβ 角度为 θ+γ，再乘 e^(+jθ) 得角度 2θ+γ，dq 以 2 倍电频率旋转。',links:['A04','C03']},
+{id:'A04-t1',sec:'A04',type:'tf',q:'空间矢量算子 a = e^(j120°) 满足 1 + a + a² = 0。',ans:true,exp:'三个单位矢量互差 120°，矢量和为零；这也是三相平衡时 ia+ib+ic=0 的复数表达。',links:['A04']},
+{id:'A04-t2',sec:'A04',type:'tf',q:'在 dq 坐标系中稳态正弦电流变为直流量，所以 dq 电压方程中不存在与转速 ω 相关的项。',ans:false,exp:'旋转坐标系求导多出 jω 项：vd 中有 −ωLq·iq，vq 中有 +ωLd·id + ωψf。这就是解耦前馈和反电动势补偿的来源。',links:['A04','C05']},
+{id:'A04-sa',sec:'A04',type:'short',q:'为什么复数乘法可以表示「旋转」？Park 变换用复数如何一行写出？',ans:'复数写成极坐标 |z|e^(jφ)，两个复数相乘时模长相乘、角度相加；乘以单位模长的 e^(jθ) 只改变角度不改变模长，即逆时针旋转 θ。Park：i_dq = (iα + j·iβ)·e^(−jθ)，展开实部为 iα·cosθ + iβ·sinθ（id），虚部为 −iα·sinθ + iβ·cosθ（iq）。',exp:'答出「模相乘、角相加」和展开式即合格。',links:['A04']},
+{id:'A04-an',sec:'A04',type:'analysis',q:'台架：EPS 电机正转最高转速 7500 rpm，反转只能到 6200 rpm；同样 |iq| = 20 A 给定时，正反转输出力矩相差约 6%。电流环跟踪正常。请给出排查路径与根因。',ans:'<b>判断：</b>正反转不对称 + 电流环本身正常 → 首先怀疑角度零位偏差 ε。控制器认为电流在 q 轴，但真实 dq 中电流矢量偏 ε：一个方向产生 −|i|sinε 的去磁 id（可达更高转速），另一个方向产生 +|i|sinε 的增磁 id（电压更早饱和）。20 A、ε = 20° 时 d 分量约 6.8 A。<br><b>排查：</b>① 对拖电机，PWM 关闭测线反电动势过零，与 θe 过零比较；② 或 id 直流注入锁定转子，读取旋变角度；③ 比较正反转稳态 vd：零位正确时 id=0 控制下 vd ≈ −ωLq·iq 对称。<br><b>修复：</b>重新零位标定，写入 Cal_ThetaOffset；检查旋变安装与解码相位补偿。<br><b>验证：</b>正反转最高转速、力矩常数对称；反电动势与 θe 过零对齐（误差 &lt; 1° 电角度）。',exp:'关键：「正反转不对称」→ 零位偏差 → 增磁/去磁不对称。',links:['A04','C09']},
+/* ---------- A05 ---------- */
+{id:'A05-s1',sec:'A05',type:'single',q:'对含噪声的采样信号做后向差分求导，噪声会怎样？',opts:['被平均而降低','被放大，量级约 √2·σ/Ts','不受影响','只引入延迟不改变幅值'],ans:1,exp:'差分是高通特性；两次独立噪声相减再除以 Ts，Ts 越小放大越严重。',links:['A05']},
+{id:'A05-s2',sec:'A05',type:'single',q:'旋变按 12 位分辨率（4096 码/机械转）配置，在单个 50 µs 周期内差分测速，速度分辨率约为？',opts:['1 rpm','29 rpm','293 rpm','2930 rpm'],ans:2,exp:'1 码 / 50 µs = 1/4096 转 / 50 µs → 60/(4096 × 50e-6) ≈ 293 rpm。必须加长窗口或用 PLL。',links:['A05','C09']},
+{id:'A05-t1',sec:'A05',type:'tf',q:'后向差分 (x[k] − x[k−1])/Ts 相对真实导数存在约半个采样周期的延迟。',ans:true,exp:'差分结果实际是两点中间时刻的斜率，等效延迟 Ts/2。',links:['A05','D01']},
+{id:'A05-t2',sec:'A05',type:'tf',q:'uint16 角度相减后强制转为 int16，可以正确处理角度过零（只要两次采样间转过不足半圈）。',ans:true,exp:'例如 10 − 65530 在 uint16 下为 16，转 int16 仍为 16，正确。',links:['A05','A03']},
+{id:'A05-sa',sec:'A05',type:'short',q:'一阶低通 y[k] = y[k−1] + α(x[k] − y[k−1]) 中 α 如何由截止频率 fc 计算？α 取小有什么代价？',ans:'τf = 1/(2π·fc)，后向欧拉离散 α = Ts/(τf + Ts)；当 Ts ≪ τf 时 α ≈ 2π·fc·Ts。α 越小滤波越强，但相位滞后越大（低频近似延迟 τf），放在闭环反馈通道中会降低相位裕度，导致超调或振荡；且 α 与任务周期绑定，改周期须重算。',exp:'公式 + 相位滞后代价。',links:['A05','A07','C08']},
+{id:'A05-an',sec:'A05',type:'analysis',q:'台架：EPS 速度模式 30 rpm 运行时电机一顿一顿，CANape 中 gFoc.spdRpmFilt 呈台阶状在 15~45 rpm 之间跳动。标定工程师已尝试把速度环 Kp 降低一半，抖动略减但响应明显变慢。请给出分析与方案。',ans:'<b>分析：</b>当前 1 ms 窗口、12 位旋变，测速分辨率 = 60/(4096 × 1 ms) ≈ 14.6 rpm；30 rpm 时每窗口只有约 2 个码，反馈本身就是 ±14.6 rpm 台阶，速度环把量化噪声放大为 iq 跳变。降 Kp 只是掩盖问题。<br><b>排查：</b>记录原始 dTh，确认只在 1~3 之间跳；计算分辨率；检查旋变解码分辨率配置。<br><b>方案：</b>① 低速段加长测速窗口或用 M/T 法；② 角度 PLL 观测器获得平滑速度；③ 提高解码分辨率配置（以芯片手册为准）；④ 可选使用解码芯片速度通道；⑤ 低通截止频率仍需高于速度环带宽 3~5 倍。<br><b>验证：</b>30 rpm 速度纹波 &lt; 2 rpm，iq 给定平滑，阶跃响应不变慢。',exp:'关键：算出分辨率 → 量化是根因，而非 PI 参数。',links:['A05','C08','C09']},
+/* ---------- A06 ---------- */
+{id:'A06-s1',sec:'A06',type:'single',q:'用电压模型 ψ = ∫(v − R·i)dt 估计磁链，电流采样存在微小直流偏置，长时间运行后估计磁链会？',opts:['不受影响','线性漂移直至饱和/溢出','以电频率振荡','收敛为零'],ans:1,exp:'纯积分对直流偏置没有衰减，误差 = b·t 线性增长。实际观测器用低通 / 泄漏积分替代。',links:['A06','C10']},
+{id:'A06-s2',sec:'A06',type:'single',q:'32 位相位累加器、Ts = 50 µs，要生成 10 Hz 电频率，每周期增量应约为？',opts:['2147484','21475','8590','32768'],ans:0,exp:'inc = fe × 2³² × Ts = 10 × 4294967296 × 50e-6 ≈ 2147484。',links:['A06']},
+{id:'A06-t1',sec:'A06',type:'tf',q:'PI 积分器在输出饱和期间继续积分，会导致退出饱和后出现较大超调。',ans:true,exp:'即积分饱和（windup），需抗饱和措施。',links:['A06','A08']},
+{id:'A06-t2',sec:'A06',type:'tf',q:'电流环积分器用 int16 Q15 累加 Ki·Ts·e 就足够了，因为每步增量很小。',ans:false,exp:'正因为增量很小，小误差时增量可能 &lt; 1 LSB 被截断为 0，产生稳态误差。积分状态应使用 int32（如 Q30）。',links:['A06','A08']},
+{id:'A06-sa',sec:'A06',type:'short',q:'为什么纯积分器不能直接用于实际磁链观测？常见替代方案有哪些？',ans:'实际反电动势/电压信号含偏置（采样偏移、逆变器压降误差）且积分初值未知，纯积分会出现直流漂移和初值偏差，长时间后饱和。替代：① 一阶低通（泄漏积分）代替积分，并在已知频率处做幅值/相位补偿；② 带反馈校正的改进积分器；③ 闭环观测器（SMO、龙伯格、MRAS），由误差反馈自动修正漂移（C10）。',exp:'漂移原因 + 至少两种替代。',links:['A06','C10']},
+{id:'A06-an',sec:'A06',type:'analysis',q:'台架：EPS 开环 I/F 拖动（20 Hz 电频率）运行，刚开始电流平稳，运行十几分钟后相电流开始出现越来越明显的抖动，复位后恢复正常。代码中角度为 float theta += omega*Ts。请分析。',ans:'<b>分析：</b>「越久越差、复位恢复」指向累加状态问题。float 只有 24 位尾数，theta 未取模持续增大（十几分钟后约 1e5 rad 量级），可表示的最小间隔约为 theta × 2⁻²³ ≈ 0.01 rad，与每步增量 2π×20×50e-6 ≈ 0.0063 rad 相当，增量被严重量化，角度每步跳变不均匀，电压矢量抖动。<br><b>排查：</b>记录 theta 原始值及每周期增量序列；用 float 精度估算 ULP。<br><b>修复：</b>改为 uint32 相位累加器（溢出自动取模）；或 float 每步对 2π 取模。<br><b>验证：</b>连续运行 ≥ 1 小时，每周期增量恒定，电流波形稳定。',exp:'关键：浮点精度随数值增大而下降。',links:['A06','D02','D06']},
+/* ---------- A07 ---------- */
+{id:'A07-s1',sec:'A07',type:'single',q:'案例 d 轴 Ld = 45 µH、Rs = 12 mΩ，电气时间常数为？',opts:['0.27 ms','3.75 ms','37.5 ms','266 ms'],ans:1,exp:'τ = L/R = 45e-6/0.012 = 3.75 ms。',links:['A07']},
+{id:'A07-s2',sec:'A07',type:'single',q:'采样到 PWM 生效的总延迟约 1.5Ts = 75 µs，它在 1 kHz 处引入的相位滞后约为？',opts:['2.7°','27°','54°','0.27°'],ans:1,exp:'φ = 360° × f × Td = 360 × 1000 × 75e-6 = 27°，直接吃掉电流环相位裕度。',links:['A07','B06']},
+{id:'A07-t1',sec:'A07',type:'tf',q:'一阶系统阶跃响应在 t = τ 时达到终值的 63.2%。',ans:true,exp:'1 − e^(−1) = 0.632；台架上可据此直接读出 τ。',links:['A07']},
+{id:'A07-t2',sec:'A07',type:'tf',q:'传递函数 1/(Ls+R) 中的 s 可以在 MCU 中直接实现为一次求导运算。',ans:false,exp:'s 域表达式需离散化为差分方程（D01）；直接数值求导噪声大且不等价。',links:['A07','D01']},
+{id:'A07-sa',sec:'A07',type:'short',q:'为什么电流环带宽通常取 PWM 频率的 1/10 ~ 1/20？',ans:'① 采样+计算+PWM 更新总延迟约 1.5Ts，延迟相位滞后 = 360°·f·1.5Ts，在 fpwm/10 处约 54°，在 fpwm/20 处约 27°，带宽再高相位裕度不足；② 采样含 PWM 纹波和噪声，带宽过高放大噪声；③ 离散化误差在接近奈奎斯特频率时变大；④ 参数（L 饱和、R 温漂）不确定性需要裕量。',exp:'延迟相位是核心理由。',links:['A07','C05']},
+{id:'A07-an',sec:'A07',type:'analysis',q:'台架：用电压阶跃法辨识 EPS 电机 Ld，d 轴锁定后施加 0.24 V 阶跃，测得 id 终值 12 A、63.2% 时刻 1.2 ms，计算得 Ld = 24 µH，远小于设计 45 µH。请分析可能原因与改进的测量方法。',ans:'<b>分析：</b>由终值得 R = 0.24/12 = 20 mΩ（大于电机 12 mΩ），L = τ·R = 24 µH。可能原因：① 回路电阻包含线缆、MOS 导通电阻、接插件，R 偏大；② 死区与管压降使实际电压低于 0.24 V，终值偏小 → R 计算偏大，但 τ 本身不受电压比例影响，因此还要看 τ；③ τ 偏小可能是电感饱和、转子未真正锁定在 d 轴（混入 q 轴）、或采样/延迟导致读点误差；④ 低压小信号下逆变器非线性严重。<br><b>改进：</b>做死区补偿或用示波器测实际相电压；多个阶跃幅值重复，看 τ 是否变化（判断饱和）；用高频方波/正弦注入法辨识电感；与 LCR 表线间电感（÷2 得相电感量级）交叉验证；确认对齐角度。<br><b>验证：</b>两种方法结果差 &lt; 10%，按新 L 设计的电流环阶跃响应与预期一致。',exp:'关键：实际电压 ≠ 给定，R 含回路电阻，需交叉验证。',links:['A07','C11','C13']},
+/* ---------- A08 ---------- */
+{id:'A08-s1',sec:'A08',type:'single',q:'零极点对消设计，带宽 ωc = 2π·1 kHz，Lq = 75 µH，q 轴 Kp 应为？',opts:['0.283 V/A','0.471 V/A','75.4 V/A','0.075 V/A'],ans:1,exp:'Kp = ωc·L = 6283 × 75e-6 = 0.471 V/A；Ki = ωc·R = 75.4 V/(A·s)。',links:['A08']},
+{id:'A08-s2',sec:'A08',type:'single',q:'电流环通常不使用 D 项，最主要原因是？',opts:['电流环没有动态','电流采样含 PWM 纹波与噪声，D 项放大噪声，且一阶对象用 PI 已足够','D 项会降低带宽','MCU 算力不足'],ans:1,exp:'RL 对象为一阶，PI 零极点对消即可得到一阶闭环；D 项主要带来噪声放大。',links:['A08','A05']},
+{id:'A08-t1',sec:'A08',type:'tf',q:'增量式 PI 对输出做限幅时，天然具有一定的抗积分饱和能力。',ans:true,exp:'增量式状态就是输出本身，输出被限幅即不再累积；但 P 项变化仍可能造成问题，需配合合理限幅。',links:['A08']},
+{id:'A08-t2',sec:'A08',type:'tf',q:'Kp 的标幺值若大于 1（如 1.47），仍可直接用 Q15 变量存储。',ans:false,exp:'Q15 范围 [−1, 1)，1.47 会溢出或被饱和。应改用 Q12（范围 ±8）等格式，并同步更新 A2L 换算。',links:['A08','D02']},
+{id:'A08-sa',sec:'A08',type:'short',q:'列出至少三种抗积分饱和方法，并说明区别。',ans:'① 积分器限幅：积分状态限制在输出范围内，简单但饱和期间仍会积到上限；② 条件积分（钳位法）：输出饱和且误差与输出同向时冻结积分，退饱和快，量产常用；③ 反算法（back-calculation）：I += Kb·(u_sat − u_unsat)，按饱和量平滑回拉，需整定 Kb；④ 增量式 PI + 输出限幅。多环级联时还需把内环饱和信息传给外环。',exp:'至少三种 + 机制区别。',links:['A08']},
+{id:'A08-an',sec:'A08',type:'analysis',q:'台架：EPS 在 9 V 低压冷启动工况下，iq 从 0 阶跃到 30 A，首次超调约 50% 并伴随啸叫，12 V 下同样阶跃超调仅 5%。请给出排查顺序、可能根因、修复与验证。',ans:'<b>排查顺序：</b>① 同时记录 vq、电压限幅值、积分器状态与 iq；② 统计电压饱和时长；③ 核对 Vmax 计算是否使用实测 Vdc；④ 检查低温下 R、L 变化。<br><b>可能根因：</b>9 V 时可用电压下降 25%，阶跃初期电压饱和；若无抗饱和，饱和期间积分器持续累积，退饱和后大超调；若 Vmax 仍按 12 V 常量计算，PI 以为没饱和而实际 SVPWM 已饱和，抗饱和失效；冷态 R 降低进一步改变动态。<br><b>修复：</b>条件积分 / 反算抗饱和；Vmax = k·Vdc_meas/√3 每周期更新；给定斜率限制；必要时按 Vdc 调度参数。<br><b>验证：</b>9~16 V、−40~+85 °C 阶跃超调 &lt; 10%，无啸叫，饱和退出平滑。',exp:'关键：低压 → 电压饱和 → 积分饱和 / 限幅值未随 Vdc 更新。',links:['A08','A02','C05']}
+);
+
+/* ===================== 台架调试模拟场景 ===================== */
+FOC_SIM.push(
+{title:'场景 1：上电后无法切入电流闭环，切入瞬间抖动过流',start:'n1',nodes:{
+ n1:{text:'EPS 台架，I/F 开环拖动（id = 5 A）电机转得很平稳。一切到旋变角度 + 电流闭环，电机瞬间剧烈抖动，0.2 s 内报过流关管。你第一步做什么？',opts:[
+  {t:'先把电流环 Kp、Ki 都降到一半再试',next:'n1',fb:'工程师：参数问题通常表现为振荡或响应慢，而不是「一切就失控」。降参数可能让过流晚一点出现，但会掩盖根因。请从信号链本身开始查。'},
+  {t:'静止状态检查相电流采样：偏移、符号、三相关系',next:'n2'},
+  {t:'改用无感观测器切入，绕开旋变',next:'n1',fb:'工程师：无感在低速本来就弱，而且你还没证明问题在角度。先别换方案。'}]},
+ n2:{text:'PWM 关闭时 ia ≈ 0.05 A、ib ≈ 0.03 A，偏移正常。开环拖动下抓 ia、ib 波形：幅值相同，但 ib 相对 ia 只差 60°，而不是 120°。这说明什么？下一步？',opts:[
+  {t:'ib 信号符号反了（−ib 与 ia 相差 60°），检查 B 相采样极性 / 软件换算符号',next:'n3'},
+  {t:'旋变零位不对，先做零位标定',next:'n2',fb:'工程师：这是开环拖动下的相电流波形，与旋变无关。相差 60° 是一个非常具体的线索，想想 cos(θ−120°) 取负号后是多少度。'},
+  {t:'电流环带宽不够',next:'n2',fb:'工程师：开环时电流环根本没参与控制相位关系。'}]},
+ n3:{text:'查到 B 相运放为反相放大，而软件按同相换算，Cal_IbGainCorr 符号缺失。修正后开环下 ia+ib+ic ≈ 0，iα–iβ XY 图为逆时针圆。再次切入闭环：不再过流了，但正转力矩正常，反转同 |iq| 力矩明显偏小，且反转高速段电压先饱和。你怀疑什么？',opts:[
+  {t:'旋变零位偏差，正反转一个增磁一个去磁',next:'n4'},
+  {t:'q 轴 Kp 太小',next:'n3',fb:'工程师：电流环跟踪本身是好的（iq 跟住了给定），问题在「同样的 iq 力矩不同」，说明 dq 坐标本身歪了。'},
+  {t:'母线电压不稳',next:'n3',fb:'工程师：正反转对称工况下 Vdc 一样，不能解释不对称。'}]},
+ n4:{text:'正确思路。你会如何确认并修复？',opts:[
+  {t:'d 轴直流注入锁定转子读旋变；再用对拖测反电动势过零与 θe 过零对比，重写 Cal_ThetaOffset',next:'n5'},
+  {t:'把正反转 iq 给定分别乘不同系数补偿',next:'n4',fb:'工程师：这是在用标定掩盖传感器零位问题，换一台电机就失效，量产不可接受。'}]},
+ n5:{text:'<b>根因：</b>① B 相电流采样符号错误（导致闭环瞬间失控过流）；② 旋变零位偏差约 15° 电角度（导致正反转不对称）。<br><b>修复：</b>修正 B 相换算符号；零位重新标定。<br><b>验证信号：</b>开环 ia+ib+ic ≈ 0、iα–iβ 逆时针圆；闭环切入无电流冲击；正反转力矩常数与最高转速对称；对拖时反电动势与 θe 过零误差 &lt; 1°。',links:['A01','A03','A04','C01','C09']}}},
+{title:'场景 2：低速速度模式抖动，调 PI 无效',start:'m1',nodes:{
+ m1:{text:'EPS 速度模式 30 rpm，电机一顿一顿。前一位同事已经把速度环 Kp 降了一半，抖动略减但响应慢到不可接受。你先看什么？',opts:[
+  {t:'看速度反馈信号本身的质量（原始差分值、滤波后值）',next:'m2'},
+  {t:'继续降 Kp、加大 Ki',next:'m1',fb:'工程师：调参前先确认反馈是否可信。'},
+  {t:'检查电流环',next:'m1',fb:'工程师：电流环可以查，但 30 rpm 的「一顿一顿」频率很低，更像速度反馈问题。'}]},
+ m2:{text:'原始 dTh 每 1 ms 只在 1、2、3 之间跳，换算后速度在 15/30/45 rpm 三个台阶跳动。原因？',opts:[
+  {t:'测速量化：12 位旋变 + 1 ms 窗口分辨率约 14.6 rpm',next:'m3'},
+  {t:'旋变信号噪声大',next:'m2',fb:'工程师：噪声会让值随机抖动，而这里是整齐的三个台阶，典型量化特征。算一下分辨率。'}]},
+ m3:{text:'对。你的改进方案？',opts:[
+  {t:'低速段加长测速窗口或 M/T 法，或用角度 PLL 观测速度；评估提高解码分辨率；滤波截止仍高于速度环带宽 3~5 倍',next:'m4'},
+  {t:'把速度低通截止频率降到 2 Hz',next:'m3',fb:'工程师：台阶会被抹平，但 2 Hz 低通的相位滞后会让速度环振荡。从源头提升测速分辨率。'}]},
+ m4:{text:'<b>根因：</b>测速量化分辨率不足（14.6 rpm/码），量化噪声经速度环放大。<br><b>修复：</b>PLL 测速 / 变窗口；恢复原速度环参数。<br><b>验证：</b>30 rpm 速度纹波 &lt; 2 rpm，iq 给定平滑，速度阶跃响应满足要求。',links:['A05','C08','C09']}}}
+);
+</script>
+<script>
+/* ===================== 模块 A 交互动画（方向约定：逆时针为正，α 轴 = A 相，与全书代码一致） ===================== */
+(function(){
+'use strict';
+const D2R=Math.PI/180, TAU=2*Math.PI;
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+const HH=w=>w>=620?340:620;
+function fmt(v){const a=Math.abs(v);if(a===0)return'0';if(a>=100)return v.toFixed(0);if(a>=10)return v.toFixed(0);if(a>=1)return v.toFixed(1);return v.toFixed(2);}
+function split(w,h){if(w>=620){const lw=Math.round(w*0.42);return{L:{x:0,y:0,w:lw,h},R:{x:lw,y:0,w:w-lw,h}};}const lh=Math.round(h*0.46);return{L:{x:0,y:0,w,h:lh},R:{x:0,y:lh,w,h:h-lh}};}
+function inset(r,l,t,rr,b){return{x:r.x+l,y:r.y+t,w:r.w-l-rr,h:r.h-t-b};}
+function plotBox(ctx,C,b,xr,yr,o){o=o||{};
+  const X=v=>b.x+(v-xr[0])/(xr[1]-xr[0])*b.w, Y=v=>b.y+b.h-(v-yr[0])/(yr[1]-yr[0])*b.h;
+  ctx.save();ctx.lineWidth=1;ctx.font='10px ui-monospace,Consolas,monospace';
+  const nx=o.nx||5, ny=o.ny||4;
+  for(let i=0;i<=nx;i++){const v=xr[0]+(xr[1]-xr[0])*i/nx,px=X(v);ctx.strokeStyle=C.grid;ctx.beginPath();ctx.moveTo(px,b.y);ctx.lineTo(px,b.y+b.h);ctx.stroke();ctx.fillStyle=C.muted;ctx.textAlign='center';ctx.fillText(o.xf?o.xf(v):fmt(v),px,b.y+b.h+12);}
+  for(let i=0;i<=ny;i++){const v=yr[0]+(yr[1]-yr[0])*i/ny,py=Y(v);ctx.strokeStyle=C.grid;ctx.beginPath();ctx.moveTo(b.x,py);ctx.lineTo(b.x+b.w,py);ctx.stroke();ctx.fillStyle=C.muted;ctx.textAlign='right';ctx.fillText(o.yf?o.yf(v):fmt(v),b.x-4,py+3);}
+  ctx.strokeStyle=C.axis;if(yr[0]<0&&yr[1]>0){ctx.beginPath();ctx.moveTo(b.x,Y(0));ctx.lineTo(b.x+b.w,Y(0));ctx.stroke();}
+  ctx.strokeRect(b.x,b.y,b.w,b.h);
+  ctx.fillStyle=C.fg;ctx.font='11.5px system-ui,sans-serif';ctx.textAlign='left';if(o.title)ctx.fillText(o.title,b.x,b.y-6);
+  if(o.xl){ctx.textAlign='right';ctx.fillStyle=C.muted;ctx.fillText(o.xl,b.x+b.w,b.y+b.h+24);}
+  ctx.restore();return{X,Y,b};}
+function pline(ctx,P,xs,ys,col,lw,dash){ctx.save();ctx.beginPath();ctx.rect(P.b.x,P.b.y,P.b.w,P.b.h);ctx.clip();ctx.strokeStyle=col;ctx.lineWidth=lw||1.6;if(dash)ctx.setLineDash(dash);ctx.beginPath();for(let i=0;i<xs.length;i++){const px=P.X(xs[i]),py=P.Y(ys[i]);if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);}ctx.stroke();ctx.restore();}
+function pfn(ctx,P,f,x0,x1,n,col,lw,dash){const xs=[],ys=[];for(let i=0;i<=n;i++){const x=x0+(x1-x0)*i/n;xs.push(x);ys.push(f(x));}pline(ctx,P,xs,ys,col,lw,dash);}
+function hl(ctx,P,xr,y,col){pline(ctx,P,[xr[0],xr[1]],[y,y],col,1,[4,4]);}
+function vl(ctx,P,yr,x,col){pline(ctx,P,[x,x],[yr[0],yr[1]],col,1,[4,4]);}
+function arrow(ctx,x0,y0,x1,y1,col,lw,label){ctx.save();ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=lw||2;ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();const a=Math.atan2(y1-y0,x1-x0),L=Math.hypot(x1-x0,y1-y0);if(L>5){const hs=Math.min(10,L*0.35);ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x1-hs*Math.cos(a-0.4),y1-hs*Math.sin(a-0.4));ctx.lineTo(x1-hs*Math.cos(a+0.4),y1-hs*Math.sin(a+0.4));ctx.closePath();ctx.fill();}if(label){ctx.font='bold 12px system-ui,sans-serif';ctx.textAlign='left';ctx.fillText(label,x1+8*Math.cos(a)-4,y1+8*Math.sin(a)+4);}ctx.restore();}
+function dline(ctx,x0,y0,x1,y1,col,lw){ctx.save();ctx.strokeStyle=col;ctx.lineWidth=lw||1;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.restore();}
+function info(ctx,C,arr,x,y){ctx.save();ctx.font='12px ui-monospace,Consolas,monospace';let w=0;arr.forEach(s=>{const t=Array.isArray(s)?s[0]:s;w=Math.max(w,ctx.measureText(t).width);});ctx.globalAlpha=0.88;ctx.fillStyle=C.panel;ctx.fillRect(x-4,y-13,w+10,arr.length*16+6);ctx.globalAlpha=1;arr.forEach((s,i)=>{ctx.fillStyle=Array.isArray(s)?s[1]:C.fg;ctx.textAlign='left';ctx.fillText(Array.isArray(s)?s[0]:s,x,y+i*16);});ctx.restore();}
+function legend(ctx,C,items,x,y){ctx.save();ctx.font='11px system-ui,sans-serif';let cx=x;items.forEach(([t,c])=>{ctx.fillStyle=c;ctx.fillRect(cx,y-8,14,3);ctx.fillStyle=C.fg;ctx.textAlign='left';ctx.fillText(t,cx+18,y-3);cx+=ctx.measureText(t).width+32;});ctx.restore();}
+function hr(k){const x=Math.sin(k*12.9898+78.233)*43758.5453;return(x-Math.floor(x))*2-1;}
+function plane(ctx,C,r,maxv,labels){const cx=r.x+r.w/2,cy=r.y+r.h/2+4,R=Math.min(r.w,r.h)*0.43,k=R/maxv;ctx.save();ctx.strokeStyle=C.grid;ctx.lineWidth=1;ctx.beginPath();ctx.arc(cx,cy,R,0,TAU);ctx.stroke();ctx.strokeStyle=C.axis;ctx.beginPath();ctx.moveTo(cx-R-8,cy);ctx.lineTo(cx+R+8,cy);ctx.moveTo(cx,cy+R+8);ctx.lineTo(cx,cy-R-8);ctx.stroke();ctx.fillStyle=C.muted;ctx.font='11px system-ui,sans-serif';ctx.fillText(labels[0],cx+R+2,cy-4);ctx.fillText(labels[1],cx+4,cy-R-2);ctx.restore();return{cx,cy,R,k,S:(x,y)=>[cx+x*k,cy-y*k]};}
+
+const SPECS=window.FOC_ANIM_SPECS;
+
+/* ---------- A01 ---------- */
+SPECS.push({host:'anim-A01',title:'ADC 码值 → 相电流 → Q15：线性映射、偏移与削顶',h:HH,
+ params:[{k:'amp',label:'真实电流峰值',min:5,max:70,step:1,v:30,unit:'A',dp:0},
+  {k:'hw',label:'硬件实际零点',min:1980,max:2120,step:1,v:2078,unit:'cnt',dp:0},
+  {k:'off',label:'软件偏移 Cal_IaOffset_cnt',min:1980,max:2120,step:1,v:2048,unit:'cnt',dp:0},
+  {k:'gc',label:'增益修正 Cal_IaGainCorr',min:0.9,max:1.1,step:0.005,v:1.0,dp:3}],
+ draw(ctx,w,h,st,C){const p=st.p,t=st.t,G=100/4096,S=split(w,h);
+  const iT=x=>p.amp*Math.sin(TAU*0.5*x), adc=i=>clamp(Math.round(p.hw+i/G),0,4095), meas=N=>(N-p.off)*G*p.gc;
+  const P1=plotBox(ctx,C,inset(S.L,44,22,12,30),[0,4096],[-60,60],{nx:4,ny:6,title:'换算直线 I = (N − N0)·K',xl:'ADC 码值 N'});
+  hl(ctx,P1,[0,4096],50,C.warn);hl(ctx,P1,[0,4096],-50,C.warn);
+  pfn(ctx,P1,N=>(N-p.hw)*G,0,4096,2,C.muted,1.4,[5,4]);pfn(ctx,P1,meas,0,4096,2,C.acc,2.2);
+  const i=iT(t),N=adc(i),im=meas(N);
+  ctx.fillStyle=C.bad;ctx.beginPath();ctx.arc(P1.X(N),P1.Y(im),4.5,0,TAU);ctx.fill();
+  const P2=plotBox(ctx,C,inset(S.R,40,22,10,30),[-4,0],[-75,75],{nx:4,ny:6,title:'时域：真实电流（灰）vs 软件测量（蓝）',xl:'时间 s（右端 = 当前）'});
+  hl(ctx,P2,[-4,0],50,C.warn);hl(ctx,P2,[-4,0],-50,C.warn);
+  pfn(ctx,P2,x=>iT(t+x),-4,0,300,C.muted,1.6);pfn(ctx,P2,x=>meas(adc(iT(t+x))),-4,0,300,C.acc,2);
+  const q15=clamp(Math.round(im/50*32768),-32768,32767), clip=(N===0||N===4095), oe=(p.hw-p.off)*G;
+  info(ctx,C,['i_true = '+i.toFixed(2)+' A','ADC N  = '+N,'i_meas = '+im.toFixed(2)+' A','Q15    = '+q15,['偏移误差 = '+oe.toFixed(2)+' A',Math.abs(oe)>0.1?C.bad:C.ok],[clip?'⚠ ADC 削顶（超量程）':'量程内',clip?C.bad:C.ok]],P2.b.x+8,P2.b.y+16);}});
+
+/* ---------- A02 ---------- */
+SPECS.push({host:'anim-A02',title:'矢量合成与投影：a + b 投影到旋转坐标轴 d、q',h:HH,
+ params:[{k:'ma',label:'|a|',min:0,max:40,step:1,v:30,unit:'A',dp:0},{k:'ta',label:'∠a',min:0,max:360,step:1,v:30,unit:'°',dp:0},
+  {k:'mb',label:'|b|',min:0,max:40,step:1,v:15,unit:'A',dp:0},{k:'tb',label:'∠b',min:0,max:360,step:1,v:120,unit:'°',dp:0},
+  {k:'phi',label:'坐标轴角 φ（启动后自转）',min:0,max:360,step:1,v:0,unit:'°',dp:0}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),G=plane(ctx,C,inset(S.L,8,10,8,8),45,['x','y']);
+  const ph=(x)=>(p.phi+(st.t+x)*30)*D2R, phN=ph(0);
+  const ax=p.ma*Math.cos(p.ta*D2R),ay=p.ma*Math.sin(p.ta*D2R),bx=p.mb*Math.cos(p.tb*D2R),by=p.mb*Math.sin(p.tb*D2R),sx=ax+bx,sy=ay+by;
+  const O=G.S(0,0),A=G.S(ax,ay),B=G.S(bx,by),Sm=G.S(sx,sy);
+  const ed=[Math.cos(phN),Math.sin(phN)],eq=[-Math.sin(phN),Math.cos(phN)];
+  const dE=G.S(48*ed[0],48*ed[1]),dE2=G.S(-48*ed[0],-48*ed[1]),qE=G.S(48*eq[0],48*eq[1]),qE2=G.S(-48*eq[0],-48*eq[1]);
+  dline(ctx,dE2[0],dE2[1],dE[0],dE[1],C.d,1.2);dline(ctx,qE2[0],qE2[1],qE[0],qE[1],C.q,1.2);
+  ctx.fillStyle=C.d;ctx.font='bold 12px system-ui';ctx.fillText('d',dE[0]+3,dE[1]);ctx.fillStyle=C.q;ctx.fillText('q',qE[0]+3,qE[1]);
+  const dv=sx*ed[0]+sy*ed[1],qv=sx*eq[0]+sy*eq[1];
+  const Fd=G.S(dv*ed[0],dv*ed[1]),Fq=G.S(qv*eq[0],qv*eq[1]);
+  dline(ctx,Sm[0],Sm[1],Fd[0],Fd[1],C.d);dline(ctx,Sm[0],Sm[1],Fq[0],Fq[1],C.q);
+  arrow(ctx,O[0],O[1],Fd[0],Fd[1],C.d,4);arrow(ctx,O[0],O[1],Fq[0],Fq[1],C.q,4);
+  dline(ctx,A[0],A[1],Sm[0],Sm[1],C.b);dline(ctx,B[0],B[1],Sm[0],Sm[1],C.a);
+  arrow(ctx,O[0],O[1],A[0],A[1],C.a,2,'a');arrow(ctx,O[0],O[1],B[0],B[1],C.b,2,'b');arrow(ctx,O[0],O[1],Sm[0],Sm[1],C.acc,3,'a+b');
+  const P=plotBox(ctx,C,inset(S.R,40,22,10,30),[-12,0],[-80,80],{nx:4,ny:4,title:'合成矢量在旋转轴上的分量（坐标轴以 30°/s 旋转）',xl:'时间 s'});
+  const comp=(x,which)=>{const a=ph(x);return which?(-sx*Math.sin(a)+sy*Math.cos(a)):(sx*Math.cos(a)+sy*Math.sin(a));};
+  pfn(ctx,P,x=>comp(x,0),-12,0,240,C.d,2);pfn(ctx,P,x=>comp(x,1),-12,0,240,C.q,2);
+  legend(ctx,C,[['d 分量',C.d],['q 分量',C.q]],P.b.x+8,P.b.y+P.b.h-8);
+  const mag=Math.hypot(sx,sy);
+  info(ctx,C,['a+b = ('+sx.toFixed(1)+', '+sy.toFixed(1)+')','|a+b| = '+mag.toFixed(2)+' A','∠(a+b) = '+(Math.atan2(sy,sx)/D2R).toFixed(1)+'°  (atan2)','φ = '+((phN/D2R)%360).toFixed(1)+'°','d = '+dv.toFixed(2)+'  q = '+qv.toFixed(2),['√(d²+q²) = '+Math.hypot(dv,qv).toFixed(2)+'（守恒）',C.ok]],P.b.x+8,P.b.y+16);}});
+
+/* ---------- A03 ---------- */
+SPECS.push({host:'anim-A03',title:'单位圆旋转与三相余弦（ia+ib+ic）',h:HH,
+ params:[{k:'f',label:'旋转频率（演示）',min:0.1,max:1.5,step:0.05,v:0.3,unit:'Hz',dp:2},{k:'dev',label:'C 相相位偏差',min:0,max:40,step:1,v:0,unit:'°',dp:0}],
+ toggles:[{k:'three',label:'显示三相（否则显示 cos/sin）',v:true}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),G=plane(ctx,C,inset(S.L,8,10,8,8),1.15,['α (A相)','β']);
+  const th=TAU*p.f*st.t, c=Math.cos(th), s=Math.sin(th);
+  if(st.tog.three){[[0,'A',C.a],[120,'B',C.b],[240,'C',C.c]].forEach(([a,n,col])=>{const E=G.S(1.12*Math.cos(a*D2R),1.12*Math.sin(a*D2R));dline(ctx,G.cx,G.cy,E[0],E[1],col);ctx.fillStyle=col;ctx.font='11px system-ui';ctx.fillText(n+' 轴',E[0]+2,E[1]);});}
+  const Pt=G.S(c,s),Px=G.S(c,0),Py=G.S(0,s);
+  ctx.save();ctx.strokeStyle=C.muted;ctx.beginPath();ctx.arc(G.cx,G.cy,18,0,-((th%TAU)),true);ctx.stroke();ctx.restore();
+  dline(ctx,Pt[0],Pt[1],Px[0],Px[1],C.q);dline(ctx,Pt[0],Pt[1],Py[0],Py[1],C.a);
+  arrow(ctx,G.cx,G.cy,Px[0],Px[1],C.a,4);arrow(ctx,G.cx,G.cy,Py[0],Py[1],C.q,4);arrow(ctx,G.cx,G.cy,Pt[0],Pt[1],C.acc,2.5,'θ');
+  const P=plotBox(ctx,C,inset(S.R,40,22,10,30),[-3,0],[-2,2],{nx:6,ny:4,title:st.tog.three?'三相余弦与三相之和（黑虚线）':'cosθ（A 相投影）与 sinθ（β 投影）',xl:'时间 s（右端 = 当前）'});
+  const T=x=>TAU*p.f*(st.t+x);
+  if(st.tog.three){const fa=x=>Math.cos(T(x)),fb=x=>Math.cos(T(x)-TAU/3),fc=x=>Math.cos(T(x)+TAU/3+p.dev*D2R);
+    pfn(ctx,P,fa,-3,0,300,C.a,1.8);pfn(ctx,P,fb,-3,0,300,C.b,1.8);pfn(ctx,P,fc,-3,0,300,C.c,1.8);pfn(ctx,P,x=>fa(x)+fb(x)+fc(x),-3,0,300,C.fg,1.6,[5,3]);
+    legend(ctx,C,[['ia',C.a],['ib',C.b],['ic',C.c],['和',C.fg]],P.b.x+8,P.b.y+P.b.h-8);
+    const sum=Math.cos(th)+Math.cos(th-TAU/3)+Math.cos(th+TAU/3+p.dev*D2R);
+    info(ctx,C,['θ = '+((th/D2R)%360).toFixed(1)+'°','cosθ = '+c.toFixed(3)+'  sinθ = '+s.toFixed(3),[ 'ia+ib+ic = '+sum.toFixed(3),Math.abs(sum)>0.02?C.bad:C.ok],[p.dev>0?'三相不平衡：ic = −ia−ib 不成立':'平衡：可由两相推第三相',p.dev>0?C.bad:C.ok]],P.b.x+8,P.b.y+16);
+  }else{pfn(ctx,P,x=>Math.cos(T(x)),-3,0,300,C.a,2);pfn(ctx,P,x=>Math.sin(T(x)),-3,0,300,C.q,2);legend(ctx,C,[['cosθ',C.a],['sinθ',C.q]],P.b.x+8,P.b.y+P.b.h-8);
+    info(ctx,C,['θ = '+((th/D2R)%360).toFixed(1)+'°','cos²+sin² = '+(c*c+s*s).toFixed(3),'p=4 时：机械 1 圈 = 电角度 4 圈'],P.b.x+8,P.b.y+16);}}});
+
+/* ---------- A04 ---------- */
+SPECS.push({host:'anim-A04',title:'复数旋转与 Park：i_dq = i_αβ · e^(−jθ̂)',h:HH,
+ params:[{k:'I',label:'电流幅值 |i|',min:5,max:40,step:1,v:30,unit:'A',dp:0},{k:'gam',label:'电流角 γ（相对真实 d）',min:0,max:180,step:1,v:100,unit:'°',dp:0},
+  {k:'err',label:'角度偏差 θ̂ − θ',min:-60,max:60,step:1,v:0,unit:'°',dp:0},{k:'dw',label:'频率失配',min:-0.2,max:0.2,step:0.01,v:0,unit:'Hz',dp:2}],
+ toggles:[{k:'wrong',label:'Park 方向写反（误用 e^(+jθ̂)）',v:false}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),G=plane(ctx,C,inset(S.L,8,10,8,8),45,['α (Re)','β (Im)']);const f=0.25;
+  const th=x=>TAU*f*(st.t+x), dl=x=>p.err*D2R+TAU*p.dw*(st.t+x), thh=x=>th(x)+dl(x);
+  const ang=x=>st.tog.wrong?(th(x)+p.gam*D2R+thh(x)):(p.gam*D2R-dl(x));
+  const t0=th(0),th0=thh(0),ia=p.I*Math.cos(t0+p.gam*D2R),ib=p.I*Math.sin(t0+p.gam*D2R);
+  const Dt=G.S(46*Math.cos(t0),46*Math.sin(t0));dline(ctx,G.cx,G.cy,Dt[0],Dt[1],C.muted,1.2);ctx.fillStyle=C.muted;ctx.font='11px system-ui';ctx.fillText('d真',Dt[0]+2,Dt[1]);
+  const Dh=G.S(44*Math.cos(th0),44*Math.sin(th0)),Qh=G.S(44*Math.cos(th0+Math.PI/2),44*Math.sin(th0+Math.PI/2));
+  arrow(ctx,G.cx,G.cy,Dh[0],Dh[1],C.d,1.5,'d̂');arrow(ctx,G.cx,G.cy,Qh[0],Qh[1],C.q,1.5,'q̂');
+  const Ip=G.S(ia,ib);arrow(ctx,G.cx,G.cy,Ip[0],Ip[1],C.warn,3.2,'i_s');
+  const P=plotBox(ctx,C,inset(S.R,40,22,10,30),[-8,0],[-45,45],{nx:4,ny:6,title:'Park 输出 id、iq',xl:'时间 s（右端 = 当前）'});
+  pfn(ctx,P,x=>p.I*Math.cos(ang(x)),-8,0,320,C.d,2);pfn(ctx,P,x=>p.I*Math.sin(ang(x)),-8,0,320,C.q,2);
+  legend(ctx,C,[['id',C.d],['iq',C.q]],P.b.x+8,P.b.y+P.b.h-8);
+  const a0=ang(0),idv=p.I*Math.cos(a0),iqv=p.I*Math.sin(a0);
+  let diag=['正常：dq 为直流',C.ok]; if(st.tog.wrong)diag=['写反：dq 以 2 倍电频率振荡',C.bad]; else if(Math.abs(p.dw)>0.001)diag=['速度失配：dq 缓慢旋转摆动',C.bad]; else if(p.err!==0)diag=['角度偏差：dq 常值偏移（零位错误）',C.warn];
+  info(ctx,C,['iα = '+ia.toFixed(1)+'  iβ = '+ib.toFixed(1),'id = '+idv.toFixed(2)+'  iq = '+iqv.toFixed(2),'真实 id = '+(p.I*Math.cos(p.gam*D2R)).toFixed(2)+'  真实 iq = '+(p.I*Math.sin(p.gam*D2R)).toFixed(2),diag],P.b.x+8,P.b.y+16);}});
+
+/* ---------- A05 ---------- */
+SPECS.push({host:'anim-A05',title:'后向差分求导：采样周期、噪声放大与一阶低通',h:HH,
+ params:[{k:'Ts',label:'采样周期 Ts',min:0.05,max:2,step:0.05,v:0.5,unit:'ms',dp:2},{k:'noise',label:'采样噪声幅度',min:0,max:0.2,step:0.005,v:0.02,dp:3},{k:'alpha',label:'低通系数 α',min:0.02,max:1,step:0.01,v:0.3,dp:2}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),Ts=p.Ts/1000,om=TAU*50,t0=st.t*0.02,W=0.04;
+  const k0=Math.floor(t0/Ts)-400,k1=Math.ceil((t0+W)/Ts);let xp=null,y=0,e1=0,e2=0,n=0;const sx=[],sv=[],dv=[],yv=[];
+  for(let k=k0;k<=k1;k++){const tk=k*Ts,x=Math.sin(om*tk)+p.noise*hr(k);if(xp!==null){const d=(x-xp)/Ts/om;y+=p.alpha*(d-y);if(tk>=t0){sx.push((tk-t0)*1000);sv.push(x);dv.push(d);yv.push(y);const tr=Math.cos(om*tk);e1+=(d-tr)*(d-tr);e2+=(y-tr)*(y-tr);n++;}}xp=x;}
+  const P1=plotBox(ctx,C,inset(S.L,40,22,10,30),[0,40],[-1.5,1.5],{nx:4,ny:4,title:'信号 x = sin(ωt) + 噪声（50 Hz），采样点',xl:'时间 ms'});
+  pfn(ctx,P1,x=>Math.sin(om*(t0+x/1000)),0,40,300,C.muted,1.4);
+  const zx=[],zy=[];for(let i=0;i<sx.length;i++){zx.push(sx[i],sx[i]+p.Ts);zy.push(sv[i],sv[i]);}pline(ctx,P1,zx,zy,C.acc,1.4);
+  if(sx.length<=120){ctx.fillStyle=C.acc;sx.forEach((x,i)=>{ctx.beginPath();ctx.arc(P1.X(x),P1.Y(sv[i]),2.4,0,TAU);ctx.fill();});}
+  const P2=plotBox(ctx,C,inset(S.R,40,22,10,30),[0,40],[-2.5,2.5],{nx:4,ny:5,title:'导数 /ω：真实（灰）差分（红）低通后（蓝）',xl:'时间 ms'});
+  pfn(ctx,P2,x=>Math.cos(om*(t0+x/1000)),0,40,300,C.muted,2);pline(ctx,P2,sx,dv,C.bad,1.1);pline(ctx,P2,sx,yv,C.acc,2);
+  const lagDeg=360*50*Ts/2;
+  info(ctx,C,['RMS 误差（差分）= '+Math.sqrt(e1/Math.max(1,n)).toFixed(3),'RMS 误差（低通）= '+Math.sqrt(e2/Math.max(1,n)).toFixed(3),'差分固有延迟 Ts/2 → 50 Hz 滞后 '+lagDeg.toFixed(2)+'°','噪声放大 ≈ √2·σ/(Ts·ω) = '+(1.414*p.noise/(Ts*om)).toFixed(3)],P2.b.x+8,P2.b.y+16);}});
+
+/* ---------- A06 ---------- */
+SPECS.push({host:'anim-A06',title:'数字积分器：偏置漂移、积分限幅与泄漏积分',h:HH,
+ params:[{k:'bias',label:'输入直流偏置 b',min:0,max:0.2,step:0.005,v:0.05,dp:3},{k:'lam',label:'泄漏系数 λ',min:0,max:0.05,step:0.001,v:0,dp:3},{k:'lim',label:'积分器限幅',min:0.5,max:5,step:0.1,v:2,dp:1}],
+ toggles:[{k:'clamp',label:'启用积分器限幅',v:false}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),Ts=0.01;if(st.t>120)st.t=0;
+  const N=Math.floor(st.t/Ts),start=Math.max(0,N-1000);let y=0;const hx=[],hy=[],hi=[],hu=[];let ymax=1;
+  for(let k=0;k<=N;k++){const u=Math.sin(TAU*k*Ts)+p.bias;y=(1-p.lam)*y+u*Ts;if(st.tog.clamp)y=clamp(y,-p.lim,p.lim);if(k>=start){const tt=k*Ts-st.t;hx.push(tt);hy.push(y);hi.push((1-Math.cos(TAU*k*Ts))/TAU);hu.push(u*0.3);ymax=Math.max(ymax,Math.abs(y));}}
+  const yr=Math.ceil(ymax*1.2*2)/2;
+  const P1=plotBox(ctx,C,inset(S.L,40,22,10,30),[-10,0],[-1.5,1.5],{nx:5,ny:4,title:'输入 u = sin(2πt) + b',xl:'时间 s'});
+  pfn(ctx,P1,x=>{const tt=st.t+x;return tt<0?0:Math.sin(TAU*tt)+p.bias;},-10,0,400,C.acc2,1.8);hl(ctx,P1,[-10,0],p.bias,C.bad);
+  const P2=plotBox(ctx,C,inset(S.R,40,22,10,30),[-10,0],[-yr,yr],{nx:5,ny:4,title:'积分输出（蓝）vs 无偏置理想积分（灰虚线）',xl:'时间 s（右端 = 当前）'});
+  pline(ctx,P2,hx,hi,C.muted,1.6,[5,4]);pline(ctx,P2,hx,hy,C.acc,2.2);
+  if(st.tog.clamp){hl(ctx,P2,[-10,0],p.lim,C.bad);hl(ctx,P2,[-10,0],-p.lim,C.bad);}
+  if(N===0){info(ctx,C,['点击「▶ 启动」开始累加（Ts = 10 ms 演示）'],P2.b.x+8,P2.b.y+16);return;}
+  const sat=st.tog.clamp&&Math.abs(y)>=p.lim-1e-9;
+  info(ctx,C,['t = '+st.t.toFixed(1)+' s','积分值 y = '+y.toFixed(3),'理想值 = '+((1-Math.cos(TAU*st.t))/TAU).toFixed(3),[p.lam>0?'泄漏积分：偏置误差有界 ≈ b·Ts/λ = '+(p.bias*Ts/p.lam).toFixed(3):'纯积分：偏置漂移 ≈ b·t = '+(p.bias*st.t).toFixed(2),p.lam>0?C.ok:(p.bias>0?C.bad:C.ok)],[sat?'⚠ 积分器贴限幅（饱和）':'',C.bad]].filter(s=>(Array.isArray(s)?s[0]:s)!==''),P2.b.x+8,P2.b.y+16);}});
+
+/* ---------- A07 ---------- */
+SPECS.push({host:'anim-A07',title:'RL 对象 1/(Ls+R)：阶跃响应与伯德图',h:HH,
+ params:[{k:'R',label:'电阻 R',min:5,max:50,step:0.5,v:12,unit:'mΩ',dp:1},{k:'L',label:'电感 L',min:10,max:200,step:1,v:45,unit:'µH',dp:0},{k:'V',label:'阶跃电压',min:0.05,max:1,step:0.01,v:0.24,unit:'V',dp:2}],
+ toggles:[{k:'dly',label:'相位叠加 1.5Ts = 75 µs 延迟',v:false}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),R=p.R*1e-3,L=p.L*1e-6,tau=L/R,iss=p.V/R,fc=R/(TAU*L);
+  const P1=plotBox(ctx,C,inset(S.L,44,22,10,30),[0,25],[0,Math.max(1,iss*1.15)],{nx:5,ny:4,title:'阶跃响应 i(t) = V/R·(1 − e^(−t/τ))',xl:'时间 ms'});
+  pfn(ctx,P1,x=>iss*(1-Math.exp(-x/1000/tau)),0,25,300,C.acc,2.2);
+  hl(ctx,P1,[0,25],0.632*iss,C.warn);if(tau*1000<25)vl(ctx,P1,[0,iss*1.15],tau*1000,C.warn);
+  const tc=((st.t%3)/3)*25,ic=iss*(1-Math.exp(-tc/1000/tau));ctx.fillStyle=C.bad;ctx.beginPath();ctx.arc(P1.X(tc),P1.Y(ic),4.5,0,TAU);ctx.fill();
+  info(ctx,C,['τ = L/R = '+(tau*1000).toFixed(2)+' ms','i∞ = V/R = '+iss.toFixed(1)+' A','63.2% = '+(0.632*iss).toFixed(1)+' A（黄虚线）','fc = R/(2πL) = '+fc.toFixed(1)+' Hz'],P1.b.x+P1.b.w*0.38,P1.b.y+P1.b.h*0.62);
+  const R2=S.R, hh=(R2.h-30)/2;
+  const fx=lg=>Math.pow(10,lg),mag=lg=>-20*Math.log10(Math.hypot(R,TAU*fx(lg)*L)),pha=lg=>-Math.atan(TAU*fx(lg)*L/R)/D2R-(st.tog.dly?360*fx(lg)*75e-6:0);
+  const m0=mag(0),m1=mag(4),myr=[Math.floor((m1-5)/10)*10,Math.ceil((m0+5)/10)*10];
+  const xf=v=>['1','10','100','1k','10k'][Math.round(v)]||'';
+  const B1=plotBox(ctx,C,{x:R2.x+44,y:R2.y+22,w:R2.w-54,h:hh-26},[0,4],myr,{nx:4,ny:3,title:'幅频 |G(jω)| (dB, A/V)',xf});
+  pfn(ctx,B1,mag,0,4,200,C.acc,2);vl(ctx,B1,myr,Math.log10(fc),C.warn);
+  const pr=st.tog.dly?[-360,0]:[-90,0];
+  const B2=plotBox(ctx,C,{x:R2.x+44,y:R2.y+22+hh,w:R2.w-54,h:hh-26},[0,4],pr,{nx:4,ny:4,title:'相频 ∠G (°)'+(st.tog.dly?' 含延迟':''),xf,xl:'频率 Hz'});
+  pfn(ctx,B2,pha,0,4,300,C.d,2);vl(ctx,B2,pr,Math.log10(fc),C.warn);
+  info(ctx,C,['1 kHz：|G| = '+mag(3).toFixed(1)+' dB，∠G = '+pha(3).toFixed(1)+'°'],B2.b.x+6,B2.b.y+B2.b.h-8);}});
+
+/* ---------- A08 ---------- */
+SPECS.push({host:'anim-A08',title:'离散 PI 电流环：零极点对消、积分饱和与延迟振荡（d 轴 RL 对象）',h:w=>w>=620?400:520,
+ params:[{k:'kp',label:'Kp',min:0.02,max:1.5,step:0.001,v:0.283,unit:'V/A',dp:3},{k:'ki',label:'Ki',min:0,max:600,step:1,v:75,unit:'V/(A·s)',dp:0},{k:'vmax',label:'电压限幅 Vmax',min:0.5,max:6.93,step:0.01,v:6.93,unit:'V',dp:2}],
+ toggles:[{k:'aw',label:'启用条件积分抗饱和',v:true},{k:'dly',label:'1 拍计算延迟（真实 MCU）',v:true}],
+ buttons:[{label:'按 1 kHz 带宽零极点对消',fn:a=>{a.setP('kp',0.283);a.setP('ki',75);a.setP('vmax',6.93);}},
+  {label:'演示积分饱和（Vmax=1 V，关抗饱和）',fn:a=>{a.setP('kp',0.283);a.setP('ki',300);a.setP('vmax',1.0);a.setT('aw',false);}},
+  {label:'演示延迟导致振荡（Kp=1.2）',fn:a=>{a.setP('kp',1.2);a.setP('ki',75);a.setP('vmax',6.93);a.setT('dly',true);a.setT('aw',true);}}],
+ draw(ctx,w,h,st,C){const p=st.p,R=0.012,L=45e-6,Ts=50e-6,N=400,a=Math.exp(-R*Ts/L),b=(1-a)/R;
+  let i=0,I=0,uPrev=0;const tx=[],ix=[],ux=[],rx=[];let sat=0;
+  for(let k=0;k<N;k++){const tt=k*Ts,ref=tt<1e-3?0:(tt<10e-3?20:5),e=ref-i,P=p.kp*e;let Inew=I+p.ki*Ts*e;
+    if(st.tog.aw){Inew=clamp(Inew,-p.vmax,p.vmax);const un=P+Inew;if(un>p.vmax){if(e<0)I=Inew;}else if(un<-p.vmax){if(e>0)I=Inew;}else I=Inew;}else I=Inew;
+    const u=clamp(P+I,-p.vmax,p.vmax);if(Math.abs(u)>=p.vmax-1e-9)sat++;
+    tx.push(tt*1000);ix.push(i);ux.push(u);rx.push(ref);
+    const ap=st.tog.dly?uPrev:u;i=a*i+b*ap;uPrev=u;}
+  const frac=st.t===0?1:clamp((st.t%4)/3,0,1),n=Math.max(2,Math.floor(N*frac));
+  const top={x:46,y:22,w:w-58,h:Math.round(h*0.56)-40},bot={x:46,y:Math.round(h*0.56)+16,w:w-58,h:h-Math.round(h*0.56)-46};
+  const P1=plotBox(ctx,C,top,[0,20],[-5,45],{nx:10,ny:5,title:'电流：给定（灰虚线）与实际 id（蓝）'});
+  pline(ctx,P1,tx,rx,C.muted,1.4,[5,4]);pline(ctx,P1,tx.slice(0,n),ix.slice(0,n),C.acc,2.2);
+  const P2=plotBox(ctx,C,bot,[0,20],[-7.5,7.5],{nx:10,ny:4,title:'PI 输出电压 vd 与限幅（红虚线）',xl:'时间 ms'});
+  hl(ctx,P2,[0,20],p.vmax,C.bad);hl(ctx,P2,[0,20],-p.vmax,C.bad);pline(ctx,P2,tx.slice(0,n),ux.slice(0,n),C.d,1.8);
+  let mx=0,t10=null,t90=null;for(let k=20;k<200;k++){mx=Math.max(mx,ix[k]);if(t10===null&&ix[k]>=2)t10=tx[k];if(t90===null&&ix[k]>=18)t90=tx[k];}
+  const os=Math.max(0,(mx-20)/20*100),bw=p.kp/L/TAU;
+  info(ctx,C,['ωc = Kp/L → 带宽 ≈ '+bw.toFixed(0)+' Hz','推荐 Ki = ωc·R = '+(p.kp/L*R).toFixed(1),[ '超调 = '+os.toFixed(1)+' %',os>10?C.bad:C.ok],'上升时间 10→90% = '+(t10!==null&&t90!==null?(t90-t10).toFixed(2)+' ms':'未到达'),[ '电压饱和占比 = '+(sat/N*100).toFixed(1)+' %',sat>20?C.warn:C.fg],[ (st.tog.dly&&p.kp*b>=1)?'⚠ Kp·Ts/L ≥ 1：带延迟环路失稳':'',C.bad]].filter(s=>(Array.isArray(s)?s[0]:s)!==''),P1.b.x+P1.b.w*0.52,P1.b.y+16);}});
+})();
+</script>
+<script>document.readyState==="loading"?document.addEventListener("DOMContentLoaded",FOC_INIT):FOC_INIT();</script>
+</body>
+</html>
+<!-- NEXT_SEGMENT: B01 B02 B03 -->
