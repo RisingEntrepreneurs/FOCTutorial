@@ -1,0 +1,258 @@
+
+<!-- ================= F01 ================= -->
+<section class="chap" id="F01" data-title="F01 FOC vs DTC">
+<h2 class="chap-h">F01 FOC vs DTC：控制结构、开关频率与工程取舍</h2>
+<p class="chap-sub">模块 F · 拓展对比 · 第 1 节（选型概述见 B01）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>控制方案层面的对比</td></tr>
+<tr><th>输入 / 输出</th><td>输入：应用需求；输出：方案选择依据</td></tr>
+<tr><th>工程价值</th><td>理解 DTC 的优点（结构简单、动态快、参数依赖少）与代价（脉动、开关频率不定、采样要求高），面试与方案评审常见</td></tr>
+<tr><th>上下游依赖</th><td>B01、C04、C05</td></tr>
+<tr><th>适用角色</th><td>算法、系统</td></tr>
+<tr><th>前置数学依赖</th><td>A04 磁链矢量、A06 积分</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>DTC 是工业界（尤其大功率变频器）的重要流派；知道它与 FOC 的差别，才能理解为何车载 EPS / 电驱主流选择 FOC。</div>
+<div><b>② 量产怎么做</b>车载低压 EPS 与主驱普遍采用 FOC + SVPWM；DTC 及其改进形式（如 DTC-SVM，以固定开关频率输出）多见于工业驱动 <span class="tg tg-check">【待核对：具体应用分布以行业资料为准】</span>。</div>
+<div><b>③ 如何证明</b>同电机同工况对比：力矩脉动、电流 THD、噪声频谱、动态响应时间、低速性能。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>理解定子磁链 ψs = ∫(v − Rs·i)dt（A06）和电磁转矩 Te = 1.5·p·(ψα·iβ − ψβ·iα)。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>经典 DTC（来源：Takahashi / Depenbrock 提出的直接转矩控制经典结构）：
+   估计 ψs（电压模型积分）与 Te → 与给定比较 → 磁链滞环（2 级）、转矩滞环（3 级）
+   根据磁链所在扇区 + 两个滞环输出查开关表，直接选择一个电压矢量（V0~V7）
+   特点：无电流环、无坐标旋转、无 PWM 调制器；采样频率需很高（数十 kHz），开关频率随工况变化
+FOC：电流环 + SVPWM，固定开关频率，转矩通过 iq 间接控制
+DTC-SVM：用预测 / PI 计算所需电压矢量，经 SVM 输出，恢复固定开关频率</div>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>维度</th><th>FOC</th><th>经典 DTC</th></tr>
+<tr><td>控制量</td><td>id、iq（经电流环）</td><td>|ψs|、Te（滞环）</td></tr>
+<tr><td>坐标旋转</td><td>需要 Park，依赖准确角度</td><td>不需要转子角度（定子磁链扇区即可）</td></tr>
+<tr><td>开关频率</td><td>固定</td><td>变化，频谱分散</td></tr>
+<tr><td>转矩脉动</td><td>小</td><td>较大，取决于滞环宽度与采样频率</td></tr>
+<tr><td>动态响应</td><td>受电流环带宽限制</td><td>很快（直接选矢量）</td></tr>
+<tr><td>参数依赖</td><td>L、ψf（解耦、MTPA、弱磁）</td><td>主要 Rs（磁链积分），低速敏感</td></tr>
+<tr><td>低速 / 零速</td><td>有传感器时满力矩</td><td>磁链估计困难</td></tr>
+<tr><td>EMC / 噪声</td><td>频谱集中，可设计</td><td>宽频，难预测</td></tr>
+</table></div>
+<div id="anim-F01"></div>
+<div class="anim-note"><b>动画在演示什么：</b>同一转矩阶跃下，FOC（电流环 + 固定频率 PWM，用平均模型表示）与经典 DTC（转矩滞环 + 离散采样）的转矩波形对比。<br>
+<b>拖动滑块：</b>DTC 滞环宽度越小、采样频率越高，脉动越小，但开关次数增加；FOC 电流环带宽决定响应速度。<br>
+<b>观察：</b>DTC 上升更快但稳态脉动大；FOC 稳态平滑。（教学简化模型，仅示意趋势）</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（DTC 结构示意）</h3>
+<ol><li>高频采样（如 40~80 kHz）电流与 Vdc。</li><li>电压模型磁链积分（需漂移抑制，A06）。</li><li>转矩估计与滞环比较。</li><li>扇区判断 + 开关表 → 直接写入开关状态。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>DTC 相电流纹波大且不规则；FOC 相电流纹波规则（PWM 频率）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 【伪代码】经典 DTC 开关表核心（教学对照，不用于本 EPS 项目）*/
+static const uint8_t c_DtcTable[2][3][6] = { /* [磁链增减][转矩增/保持/减][扇区] → 电压矢量编号 */
+    { {2,3,4,5,6,1}, {7,0,7,0,7,0}, {6,1,2,3,4,5} },   /* 磁链增 */
+    { {3,4,5,6,1,2}, {0,7,0,7,0,7}, {5,6,1,2,3,4} }    /* 磁链减 */
+};
+void Dtc_Step(float psiErr, float teErr, uint8_t sector)
+{
+    uint8_t f = (psiErr &gt; 0.0f) ? 0u : 1u;                               /* 2 级磁链滞环（省略滞环宽度）*/
+    uint8_t t = (teErr &gt; TE_BAND) ? 0u : ((teErr &lt; -TE_BAND) ? 2u : 1u);  /* 3 级转矩滞环 */
+    Inv_ApplyVector(c_DtcTable[f][t][sector]);
+}</code></pre>
+<p class="note">开关表编号约定在不同文献中不同，此处仅示意结构 <span class="tg tg-check">【待核对：以所引用文献的扇区与矢量编号为准】</span>。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5>对比误区：用 DTC 仿真动态「证明」优于 FOC</h5><dl>
+<dt>现象</dt><dd>仿真中 DTC 转矩上升明显更快。</dd>
+<dt>可能根因</dt><dd>仿真采样频率远高于实际可实现值；未计 EMC 与噪声。</dd>
+<dt>排查</dt><dd>按实际 MCU 采样率重新仿真。</dd>
+<dt>修复</dt><dd>在同等硬件条件下对比。</dd>
+<dt>验证</dt><dd>台架数据。</dd></dl></div>
+<div class="issue"><h5>易错点：认为 DTC 完全不依赖参数</h5><dl>
+<dt>现象</dt><dd>低速磁链估计漂移、转矩失控。</dd>
+<dt>根因</dt><dd>电压模型依赖 Rs，低速时 Rs·i 占比大。</dd>
+<dt>排查</dt><dd>改变 Rs ±20% 仿真。</dd>
+<dt>修复</dt><dd>Rs 在线修正 / 混合磁链模型。</dd>
+<dt>验证</dt><dd>低速转矩误差。</dd></dl></div>
+<div class="issue"><h5>易错点：把 DTC-SVM 当作经典 DTC</h5><dl>
+<dt>现象</dt><dd>讨论中混淆开关频率特性。</dd>
+<dt>根因</dt><dd>DTC-SVM 已用 SVM 输出，开关频率固定。</dd>
+<dt>排查</dt><dd>明确具体结构。</dd>
+<dt>修复</dt><dd>按结构分别比较。</dd>
+<dt>验证</dt><dd>—</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>车载 EMC 认证对开关频率分布敏感，经典 DTC 的宽频谱需要额外滤波设计。</li>
+<li>FOC 的角度依赖是其主要风险点，需要角度诊断（C09、C12）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="F01" id="quiz-F01"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：DTC 结构（磁链 / 转矩滞环 + 开关表）、与 FOC 的八维对比、DTC-SVM。</li></ul></div>
+</section>
+
+<!-- ================= F02 ================= -->
+<section class="chap" id="F02" data-title="F02 有感 vs 无感">
+<h2 class="chap-h">F02 有传感 FOC vs 无感 FOC</h2>
+<p class="chap-sub">模块 F · 拓展对比 · 第 2 节（原理见 C09、C10）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>角度来源选择</td></tr>
+<tr><th>输入 / 输出</th><td>输入：成本、性能、安全需求；输出：传感器方案与降级策略</td></tr>
+<tr><th>工程价值</th><td>EPS：有感为主、无感为辅（降级 / 交叉校验）；风机水泵：无感为主</td></tr>
+<tr><th>上下游依赖</th><td>C09、C10、C12</td></tr>
+<tr><th>适用角色</th><td>系统、算法</td></tr>
+<tr><th>前置数学依赖</th><td>—</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>传感器影响成本、可靠性与性能；无感在零低速存在原理性限制。</div>
+<div><b>② 量产怎么做</b>按应用的零速力矩需求决定：需要零速满力矩（EPS、伺服）→ 有感；只需中高速（风机、泵、压缩机）→ 无感 + 开环启动。</div>
+<div><b>③ 如何证明</b>全转速范围的角度误差、启动成功率、负载突变鲁棒性、故障降级试验。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3><ul><li>C09、C10 内容。</li></ul></div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>维度</th><th>有感（旋变 / 编码器）</th><th>无感（反电动势类）</th><th>无感（高频注入）</th></tr>
+<tr><td>零速力矩</td><td>满力矩</td><td>不可用（需开环启动）</td><td>可用（需凸极）</td></tr>
+<tr><td>低速精度</td><td>高</td><td>差</td><td>中，有注入噪声</td></tr>
+<tr><td>高速精度</td><td>高（需延迟补偿）</td><td>较好（需相位补偿）</td><td>一般切换到反电动势法</td></tr>
+<tr><td>参数依赖</td><td>低</td><td>高（Rs、L）</td><td>中（凸极比）</td></tr>
+<tr><td>成本 / 可靠性</td><td>传感器 + 线束 + 解码</td><td>无额外硬件</td><td>无额外硬件，算力要求高</td></tr>
+<tr><td>噪声</td><td>—</td><td>—</td><td>注入引起可闻噪声</td></tr>
+<tr><td>功能安全</td><td>需传感器诊断</td><td>可作为交叉校验 / 降级</td><td>同左</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>观测器动态见 C10 动画。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（EPS 混合方案）</h3>
+<ol><li>旋变为主角度源；无感观测器后台持续运行。</li><li>运行中比较两者角度差（C12 失步 / 角度诊断）。</li><li>旋变故障：转速高于阈值 → 切换无感并限制助力；低于阈值 → 按安全设计进入降级 / 安全状态。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3><ul><li>两角度源差值在正常工况下保持在小范围内；故障注入（断开旋变信号）时检测并切换。</li></ul></div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 角度源交叉校验与选择（1 ms）*/
+static DIAG_DEB_tst s_angMismatch = { 0u, 10u, 0u, 0u };   /* 10 ms 去抖，锁存（C12）*/
+void Angle_Arbitrate_1ms(void)
+{
+    int16_t diff = (int16_t)(uint16_t)(gFoc.thetaEObs - gFoc.thetaEFromRes);
+    uint8_t obsOk = (labs(gFoc.spdRpmFilt) &gt; Cal_ObsMinRpm);
+    uint8_t mismatch = obsOk &amp;&amp; ((diff &gt; 5461) || (diff &lt; -5461));          /* ±30° */
+    Diag_Deb(&amp;s_angMismatch, mismatch);
+    if (Res_HwFault() || s_angMismatch.active) {
+        if (obsOk) { Angle_SelectSource(ANG_SRC_OBS); Derate_SetTorqueLimit(Cal_SensorlessTqLim); }
+        else       { FOC_EmergencyOff(DIAG_ANGLE_LOST); }
+    }
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>交叉校验误报</h5><dl>
+<dt>现象</dt><dd>正常行驶偶发角度不一致故障。</dd>
+<dt>可能根因</dt><dd>观测器在低速 / 动态时误差大，阈值过严或未按转速放宽。</dd>
+<dt>排查</dt><dd>记录误报时转速与加速度。</dd>
+<dt>修复</dt><dd>阈值随转速调度；低于可用转速不判。</dd>
+<dt>验证</dt><dd>耐久零误报，故障注入可检出。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>切换到无感瞬间冲击</h5><dl>
+<dt>现象</dt><dd>旋变故障切换时力矩跳变。</dd>
+<dt>可能根因</dt><dd>两角度源存在差值，切换时阶跃。</dd>
+<dt>排查</dt><dd>记录切换前差值。</dd>
+<dt>修复</dt><dd>角度平滑过渡、积分器预置。</dd>
+<dt>验证</dt><dd>切换平滑。</dd></dl></div>
+<div class="issue"><h5>易错点：无感作为备份但从未在量产中验证</h5><dl>
+<dt>现象</dt><dd>真实故障发生时降级失败。</dd>
+<dt>根因</dt><dd>后台观测器参数未随标定更新。</dd>
+<dt>排查</dt><dd>定期在台架做故障注入。</dd>
+<dt>修复</dt><dd>回归测试包含降级场景。</dd>
+<dt>验证</dt><dd>注入试验通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3><ul><li>无感低速限制必须在系统层明确，不能由底层「尽力而为」。</li><li>高频注入的可闻噪声在 EPS 中可能不可接受。</li></ul></div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="F02" id="quiz-F02"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3><ul><li>核心考点：零速能力、参数依赖、混合方案、交叉校验与降级。</li></ul></div>
+</section>
+
+<!-- ================= F03 ================= -->
+<section class="chap" id="F03" data-title="F03 SPMSM vs IPMSM">
+<h2 class="chap-h">F03 SPMSM 和 IPMSM 在算法上的差异</h2>
+<p class="chap-sub">模块 F · 拓展对比 · 第 3 节（本教程案例为 IPMSM；切换为 SPMSM 的改动点在此汇总）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>电机类型对算法各模块的影响</td></tr>
+<tr><th>输入 / 输出</th><td>输入：Ld、Lq 关系；输出：各模块改动清单</td></tr>
+<tr><th>工程价值</th><td>同一软件平台适配两类电机时，明确哪些模块要改</td></tr>
+<tr><th>上下游依赖</th><td>B02、C05、C06、C07、C10、C11</td></tr>
+<tr><th>适用角色</th><td>算法</td></tr>
+<tr><th>前置数学依赖</th><td>B02 转矩公式</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>凸极性（Ld ≠ Lq）决定是否有磁阻转矩、能否高频注入、弱磁能力与观测器模型。</div>
+<div><b>② 量产怎么做</b>平台软件以 IPMSM 通用形式实现，SPMSM 时令 Ld = Lq 自动退化；MTPA 表变为 id = 0。</div>
+<div><b>③ 如何证明</b>按改动清单逐项验证。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3><ul><li>实测 Ld、Lq（C11）。</li></ul></div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>模块</th><th>SPMSM（Ld ≈ Lq）</th><th>IPMSM（Ld &lt; Lq）</th></tr>
+<tr><td>转矩</td><td>Te = 1.5·p·ψf·iq</td><td>Te = 1.5·p·[ψf·iq + (Ld − Lq)·id·iq]</td></tr>
+<tr><td>MTPA</td><td>id = 0</td><td>id &lt; 0，查表 / 公式（C06）</td></tr>
+<tr><td>电流环</td><td>d、q 参数相同</td><td>d、q 参数不同（Kp 按各自电感）</td></tr>
+<tr><td>弱磁</td><td>能力取决于 ψf/Ls 与 Imax；通常弱磁能力较弱</td><td>磁阻转矩帮助弱磁区出力，弱磁能力通常更强</td></tr>
+<tr><td>无感（反电动势类）</td><td>标准反电动势模型</td><td>需扩展反电动势（EEMF）模型</td></tr>
+<tr><td>无感（高频注入）</td><td>无凸极，难以使用</td><td>可用</td></tr>
+<tr><td>参数辨识</td><td>只需 Ls</td><td>需 Ld、Lq 及饱和曲线</td></tr>
+<tr><td>电感饱和</td><td>较弱</td><td>Lq 饱和明显</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>凸极比对转矩 / MTPA 的影响可直接在 B02 与 C06 动画中把 Lq 拖到等于 Ld 观察。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（切换为 SPMSM 的改动清单）</h3>
+<ol><li>参数：Cal_Ld = Cal_Lq = Ls；前馈系数 kLd = kLq。</li><li>MTPA 表全部置 0。</li><li>电流环 d、q 参数相同。</li><li>观测器使用标准模型（EEMF 自动退化）。</li><li>重新评估弱磁深度与最高转速。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3><ul><li>SPMSM：电流角扫描时最大转矩在 β = 90°。</li></ul></div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 通用实现，SPMSM 时自动退化 */
+float FOC_TorqueEst_Generic(float id_A, float iq_A)
+{
+    float psi = Cal_PsiF_mWb * 1e-3f;
+    float dL  = (Cal_Ld_uH - Cal_Lq_uH) * 1e-6f;   /* SPMSM: dL = 0 → 磁阻项消失 */
+    return 1.5f * FOC_POLE_PAIRS * (psi * iq_A + dL * id_A * iq_A);
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>同一软件换 SPMSM 后效率反而下降</h5><dl>
+<dt>现象</dt><dd>MTPA 仍给负 id。</dd><dt>可能根因</dt><dd>MTPA 表未置零。</dd><dt>排查</dt><dd>查 idRef。</dd><dt>修复</dt><dd>表置零。</dd><dt>验证</dt><dd>同力矩电流下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>IPMSM 用标准反电动势观测器误差大</h5><dl>
+<dt>现象</dt><dd>大电流时角度误差增大。</dd><dt>可能根因</dt><dd>未用 EEMF，凸极项被当作扰动。</dd><dt>排查</dt><dd>误差与电流相关性。</dd><dt>修复</dt><dd>EEMF 模型。</dd><dt>验证</dt><dd>误差与电流无关。</dd></dl></div>
+<div class="issue"><h5>易错点：IPMSM 电流环 d/q 用同一 Kp</h5><dl>
+<dt>现象</dt><dd>d 轴超调或 q 轴偏慢。</dd><dt>根因</dt><dd>Ld ≠ Lq。</dd><dt>排查</dt><dd>两轴分别阶跃。</dd><dt>修复</dt><dd>分开设计。</dd><dt>验证</dt><dd>两轴响应一致。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3><ul><li>表贴电机也存在轻微凸极（饱和凸极），高频注入可能「勉强可用」但不可靠。</li></ul></div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="F03" id="quiz-F03"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3><ul><li>核心考点：八项差异、切换改动清单、EEMF、凸极与高频注入。</li></ul></div>
+</section>

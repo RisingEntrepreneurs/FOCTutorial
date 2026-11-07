@@ -132,7 +132,11 @@ function buildQ(q,num,mode){
   box.append(head, el('div','q-stem',q.q));
   const st={sel:null,graded:false,right:false}; box._st=st;
   if(isObj(q)){
-    const opts=q.type==='tf'?['正确','错误']:q.opts, ans=q.type==='tf'?(q.ans?0:1):q.ans;
+    /* 单选题选项按题目 id 确定性打乱（同一题每次顺序一致），避免正确答案集中在某一选项 */
+    let opts=q.type==='tf'?['正确','错误']:q.opts, ans=q.type==='tf'?(q.ans?0:1):q.ans;
+    if(q.type==='single'){let hsh=0;for(const ch of q.id)hsh=(hsh*31+ch.charCodeAt(0))>>>0;const idx=opts.map((_,i)=>i);
+      for(let i=idx.length-1;i>0;i--){hsh=(hsh*1103515245+12345)>>>0;const j=(hsh>>>16)%(i+1);[idx[i],idx[j]]=[idx[j],idx[i]];}
+      opts=idx.map(i=>q.opts[i]);ans=idx.indexOf(q.ans);}
     const list=el('div','q-opts'); const exp=el('div','q-exp'); exp.hidden=true;
     opts.forEach((o,i)=>{const b=el('button','q-opt',(q.type==='single'?String.fromCharCode(65+i)+'. ':'')+o);
       b.onclick=()=>{if(st.graded)return; if(mode==='exam'){st.sel=i;$$('.q-opt',list).forEach((x,j)=>x.classList.toggle('sel',j===i));return;} grade(i);};
@@ -252,6 +256,7 @@ function makeAnim(spec){
   if(spec.buttons&&spec.buttons.length){const bb=el('div','ctl-btns');spec.buttons.forEach(b=>{const x=el('button','btn btn-sm',b.label);x.onclick=()=>{b.fn(api);render();};bb.append(x);});ctl.append(bb);}
   bp.onclick=()=>api.setRun(!st.running);
   br.onclick=()=>{st.t=0;(spec.params||[]).forEach(q=>api.setP(q.k,q.v));(spec.toggles||[]).forEach(q=>api.setT(q.k,!!q.v));render();};
+  st.req=()=>{if(!st._rq){st._rq=1;requestAnimationFrame(()=>{st._rq=0;render();});}};   /* 动画可自行请求重绘（X1 传导高亮）*/
   ANIMS.push(api); resize(); return api;
 }
 function refreshRbAnims(){const box=$('#rbAnims');if(!box)return;box.innerHTML='';ANIMS.forEach(a=>{const b=el('button','btn btn-sm','<span>'+a.host.replace('anim-','')+' '+a.title.slice(0,12)+'…</span><span>'+(a.st.running?'⏸':'▶')+'</span>');b.onclick=()=>a.setRun(!a.st.running);box.append(b);});

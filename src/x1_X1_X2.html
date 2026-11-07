@@ -1,0 +1,222 @@
+
+<!-- ================= X1 ================= -->
+<section class="chap" id="X1" data-title="X1 端到端数据流追踪">
+<h2 class="chap-h">X1 端到端数据流追踪：ADC 原始码 → … → PWM 比较寄存器</h2>
+<p class="chap-sub">重点强化 · 1</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>完整 FOC 主链路（导读第五节静态图的交互版）</td></tr>
+<tr><th>输入 / 输出</th><td>输入：ADC 码值、旋变角度、力矩需求、Vdc；输出：三相 PWM 比较值</td></tr>
+<tr><th>工程价值</th><td>把每一节学到的局部知识串成一条可追踪的数值链；任何一个参数变化都能看到它如何一路传导到 PWM 与实际力矩</td></tr>
+<tr><th>上下游依赖</th><td>汇总 A01~C13</td></tr>
+<tr><th>适用角色</th><td>全部</td></tr>
+<tr><th>前置数学依赖</th><td>模块 A 全部</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>调试时看到的是「末端现象」（力矩、噪声），根因可能在链路最前端；能沿数值链逐级追踪，才能做到 E04 的系统定位。</div>
+<div><b>② 量产怎么做</b>每一级输出都是 gFoc 中可测量的变量（D08），XCP 可同时记录整条链。</div>
+<div><b>③ 如何证明</b>同一时刻各级数值相互一致（可手算复核），例如 iα = ia、|i_dq| = |i_αβ|、duty 与 vα、vβ 对应。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3><ul><li>理解各章约定（导读第三节）。本动画全部采用 EPS 案例参数与全书统一约定。</li></ul></div>
+
+<div class="part"><h3>第三部分：核心原理与公式（数据流总表）</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>#</th><th>环节</th><th>输入 → 输出</th><th>核心公式 / 操作</th><th>章节</th></tr>
+<tr><td>1</td><td>ADC</td><td>相电流 → adcIa, adcIb</td><td>N = N0 + I/K，K = 0.024414 A/码</td><td>A01 C01</td></tr>
+<tr><td>2</td><td>偏移 / 增益</td><td>码值 → ia, ib（Q15）</td><td>(N − Cal_Off)·16·GainCorr</td><td>A01 C01</td></tr>
+<tr><td>3</td><td>Clarke</td><td>ia, ib → iα, iβ</td><td>iα = ia，iβ = (ia + 2ib)/√3</td><td>C02</td></tr>
+<tr><td>4</td><td>角度</td><td>θm → θe, sin, cos</td><td>θe = 4θm − Cal_ThetaOffset</td><td>A03 C09</td></tr>
+<tr><td>5</td><td>Park</td><td>iα, iβ, θ → id, iq</td><td>i_dq = i_αβ·e^(−jθ)</td><td>A04 C03</td></tr>
+<tr><td>6</td><td>给定（MTPA / 弱磁）</td><td>Te 需求 → idRef, iqRef</td><td>MTPA 表 + 电压闭环弱磁 + 电流圆限幅</td><td>C06 C07</td></tr>
+<tr><td>7</td><td>电流环 + 前馈</td><td>误差 → vd, vq</td><td>PI + (−ωLq·iq, ω(Ld·id + ψf))</td><td>A08 C05</td></tr>
+<tr><td>8</td><td>电压限幅</td><td>vd, vq → 限幅后</td><td>|v| ≤ 0.95·Vdc/√3，d 轴优先</td><td>A02 C05</td></tr>
+<tr><td>9</td><td>反 Park</td><td>vd, vq, θc → vα, vβ</td><td>θc = θ + 1.5·Δθ</td><td>C03</td></tr>
+<tr><td>10</td><td>SVPWM → 寄存器</td><td>vα, vβ, Vdc → dutyA/B/C → CMP</td><td>min-max 零序注入，CMP = duty × 周期计数</td><td>C04 B06</td></tr>
+</table></div>
+<div id="anim-X1"></div>
+<div class="anim-note"><b>动画在演示什么：</b>EPS 电机在给定转速、力矩下稳态运行，10 个方框显示链路上每一级在<b>当前同一时刻</b>的数值（随电角度旋转而变化）。底部曲线为一个电周期内控制器测得的 id、iq 与电机实际力矩。<br>
+<b>拖动任一滑块：</b>受影响的方框会从源头开始依次高亮（黄色），演示参数如何一路传导。例如：「A 相偏移误差」从第 1 框开始传导：电流环会努力把「测得的」电流调到给定，所以低速时测得的 iq 几乎是平的，但<b>实际</b>电流与力矩出现 1×fe 脉动（转速越高、越接近电流环带宽，纹波越多地显现在测得的 dq 中）——这也是为什么偏移问题要看实际力矩 / 相电流；「零位误差」从第 4 框开始，测得的 iq 正常但实际力矩下降；「转速」升高到弱磁区时，第 6 框 idRef 自动变负、第 8 框电压利用率逼近 100%；「Vdc」降低使第 8、10 框变化。<br>
+<b>说明：</b>为突出传导关系，动画假设电流环在控制器坐标中精确跟踪给定（L0 证据，见 X3）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>中断内按 1→10 顺序执行（B03 中 FOC_FastLoop_Isr）。</li><li>每一级结果写入 gFoc，XCP 以主中断事件同时采集整条链。</li><li>手算复核：任选一个时刻，用记录的 ia、ib、θ 手算 id、iq 与 duty，与记录值比对（PIL / 台架一致性检查）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3><ul><li>正常：iq 测量为直线，实际力矩恒定；duty 为马鞍波。</li><li>每种扰动在链路上的「首次出现位置」就是 E04 定位流程的依据。</li></ul></div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 主链路（整合各章函数），数字为上表步骤号 */
+void FOC_FastLoop_Isr(void)
+{
+    Adc_ReadPhaseCurrents(&amp;gFoc.adcIa, &amp;gFoc.adcIb);   /* 1  B06 硬件触发后读取 */
+    FOC_CurrentConvert_Isr();                          /* 2  A01 */
+    FOC_Clarke_Isr();                                  /* 3  C02 */
+    FOC_AngleUpdate_Isr();                             /* 4  A03 / C09 */
+    FOC_Park_Isr();                                    /* 5  A04 */
+    Ref_Fetch_Isr();                                   /* 6  D03：1 ms 任务生成的 MTPA / 弱磁给定 */
+    FOC_CurrentLoop_Isr();                             /* 7、8  C05（含前馈与 d 轴优先限幅）*/
+    FOC_InvPark_Isr();                                 /* 9  C03 */
+    FOC_Svpwm_Isr();                                   /* 10 C04 → Pwm_WriteDuty 写影子寄存器 */
+    FOC_FastDiag_Isr();                                /*    C12 */
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5>追踪示例：力矩脉动</h5><dl><dt>现象</dt><dd>实际力矩 1×fe 脉动。</dd><dt>可能根因</dt><dd>链路第 1~2 级偏移。</dd><dt>排查</dt><dd>静止看第 2 级输出是否为 0。</dd><dt>修复</dt><dd>C01。</dd><dt>验证</dt><dd>第 5 级 iq 纹波消失。</dd></dl></div>
+<div class="issue"><h5>追踪示例：测得 iq 正常但力矩低</h5><dl><dt>现象</dt><dd>控制器内部一切「正常」。</dd><dt>可能根因</dt><dd>第 4 级角度（零位），控制器坐标与真实坐标不一致。</dd><dt>排查</dt><dd>正反转对比、反电动势对比。</dd><dt>修复</dt><dd>C09。</dd><dt>验证</dt><dd>实际力矩恢复。</dd></dl></div>
+<div class="issue"><h5>追踪示例：高速电流畸变</h5><dl><dt>现象</dt><dd>第 8 级电压利用率 100%。</dd><dt>可能根因</dt><dd>第 6 级弱磁不足或 Vdc 跌落。</dd><dt>排查</dt><dd>看 idRef 与 Vdc。</dd><dt>修复</dt><dd>C07。</dd><dt>验证</dt><dd>电压利用率回到目标。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3><ul><li>只看末端（力矩、噪声）不看链路中间量。</li><li>不同级变量用不同 DAQ 事件采集，时间不对齐，导致错误结论。</li></ul></div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="X1" id="quiz-X1"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3><ul><li>核心考点：10 级顺序、每级公式、扰动的首次出现位置、同一时刻手算复核。</li></ul></div>
+</section>
+
+<!-- ================= X2 ================= -->
+<section class="chap" id="X2" data-title="X2 浮点 vs 定点">
+<h2 class="chap-h">X2 浮点 vs 定点：Q 格式选择、误差来源、溢出风险与可复制定点工具宏</h2>
+<p class="chap-sub">重点强化 · 2（基础见 A01、D02）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>全部中断算法的数值实现选择</td></tr>
+<tr><th>输入 / 输出</th><td>输入：MCU 能力、精度、确定性、标定需求；输出：浮点 / 定点 / 混合方案与工具宏</td></tr>
+<tr><th>工程价值</th><td>S32K146 有单精度 FPU：浮点在中断中可用，但 float 精度陷阱（A06）、基值与溢出（定点）各有风险</td></tr>
+<tr><th>上下游依赖</th><td>D02、D08</td></tr>
+<tr><th>适用角色</th><td>MCU 底层、算法</td></tr>
+<tr><th>前置数学依赖</th><td>A01、D02</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>「有 FPU 就用浮点」与「定点更专业」都是片面结论；需按每个模块的数值特征选择。</div>
+<div><b>② 量产怎么做</b>常见混合方案：快环定点或单精度浮点（统一一种），角度用 uint16 / uint32，累加器用宽整数，慢任务用浮点，标定量按 A2L 需要选择格式。</div>
+<div><b>③ 如何证明</b>SIL 对比 double 参考：最大误差、均方误差、长时间运行漂移、边界溢出测试。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3><ul><li>MCU FPU 能力（S32K146：Cortex-M4F 单精度 FPU，以 NXP 数据手册为准）。</li><li>中断上下文 FPU 寄存器保存开销（D03）。</li></ul></div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>维度</th><th>单精度浮点 float32</th><th>定点 Q15 / Q31</th></tr>
+<tr><td>动态范围</td><td>极大，基本无需担心溢出</td><td>受基值限制，需逐点分析</td></tr>
+<tr><td>精度</td><td>相对精度 ~6×10⁻⁸（24 位尾数），绝对精度随数值增大变差</td><td>绝对精度恒定（Q15：3×10⁻⁵ pu）</td></tr>
+<tr><td>典型陷阱</td><td>大数加小数丢失（角度累加、积分器）；与 0 比较；NaN 传播</td><td>回绕溢出、截断累积、格式混用、abs(−32768)</td></tr>
+<tr><td>执行时间</td><td>有 FPU 时乘加快；除法、sqrt、三角函数较慢；中断压栈开销</td><td>整数乘加快；三角函数查表</td></tr>
+<tr><td>可移植性</td><td>依赖 FPU</td><td>任意 MCU</td></tr>
+<tr><td>标定 A2L</td><td>FLOAT32_IEEE，物理值直观</td><td>整数 + 换算公式</td></tr>
+<tr><td>适合</td><td>观测器、慢任务、参数计算、需要大动态范围的中间量</td><td>采样换算、PWM 计算、角度（uint）、需要确定性与位精确比对的环节</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-fix">【定点实现】</span>本教程案例的基值修正（C07 / C12 中暴露的问题）
+原设计：I_BASE = 50 A，采样量程 ±50 A → 无法表示 60 A 电流极限，软件过流阈值无裕量
+推荐修正 <span class="tg tg-case">【案例假设】</span>：采样量程 ±80 A（硬件改增益），I_BASE = 80 A
+   每码 = 160 A/4096 = 0.039 A；Q15 每码 = 0.039 × 32768/80 = 16 LSB（同样可用移位！）
+   电流极限 60 A → 24576；软件过流 70 A → 28672，硬件过流 75 A
+   代价：电流分辨率从 0.024 A 变为 0.039 A；所有标幺参数重算（Kp_pu = Kp·I_BASE/V_BASE）
+float 角度累加精度：θ 不取模时 ULP(θ) = 2^(⌊log₂θ⌋ − 23)，当 ULP 接近每步增量 Δθ 时角度严重量化</div>
+<div id="anim-X2"></div>
+<div class="anim-note"><b>动画在演示什么：</b>用 float32 累加电角度 θ += ωe·Ts 且<b>不取模</b>时，θ 越来越大，float 的最小间隔 ULP 随之增大，每步增量被量化。曲线为每步增量的相对误差随运行时间的变化；对比 uint32 相位累加器（A06）误差恒为极小常数。<br>
+<b>拖动滑块：</b>电频率越低（Δθ 越小），误差越早变严重——低速开环拖动最先出问题。<br>
+<b>正常：</b>uint32 / 取模 float。<b>异常：</b>不取模 float 运行数分钟后误差达到百分之几十。</div>
+<h4 class="sub">可直接复制的定点工具头文件（foc_fix.h）</h4>
+<pre><code>/* =====================================================================
+ * foc_fix.h  —— FOC 定点工具（本教程统一版本）
+ * 约定：q15_t = Q15 [-1, 1)；q12_t = Q12 [-8, 8)；q30 状态用 int32
+ *       负数右移按算术右移（Arm GCC / IAR / GHS 均如此，需在编码规范中声明）
+ * ===================================================================== */
+#ifndef FOC_FIX_H
+#define FOC_FIX_H
+#include &lt;stdint.h&gt;
+
+typedef int16_t q15_t;
+typedef int16_t q12_t;
+typedef int32_t q30_t;
+
+#define Q15_ONE        ((int32_t)32767)
+#define Q15_MIN_       ((int32_t)-32768)
+#define Q15_INV_SQRT3  ((q15_t)18919)     /* 1/√3   */
+#define Q15_SQRT3_2    ((q15_t)28378)     /* √3/2   */
+#define Q15_2PI_INV    ((q15_t)5215)      /* 1/(2π) */
+
+/* 编译期常量转换（仅用于初始化，勿在中断中对变量使用）*/
+#define Q15_C(x)  ((q15_t)(((x) &gt;= 0.99997f) ? 32767 : (((x) &lt;= -1.0f) ? -32768 : \
+                   (int32_t)((x) * 32768.0f + (((x) &gt;= 0.0f) ? 0.5f : -0.5f)))))
+#define Q12_C(x)  ((q12_t)((int32_t)((x) * 4096.0f + (((x) &gt;= 0.0f) ? 0.5f : -0.5f))))
+
+static inline q15_t Q15_Sat(int32_t x)
+{ return (q15_t)((x &gt; Q15_ONE) ? Q15_ONE : ((x &lt; Q15_MIN_) ? Q15_MIN_ : x)); }
+
+static inline int32_t Q31_Sat64(int64_t x)
+{ return (int32_t)((x &gt; INT32_MAX) ? INT32_MAX : ((x &lt; INT32_MIN) ? INT32_MIN : x)); }
+
+static inline q15_t Q15_Add(q15_t a, q15_t b)   { return Q15_Sat((int32_t)a + b); }
+static inline q15_t Q15_Sub(q15_t a, q15_t b)   { return Q15_Sat((int32_t)a - b); }
+static inline q15_t Q15_Neg(q15_t a)            { return Q15_Sat(-(int32_t)a); }       /* -(-32768) 饱和 */
+static inline q15_t Q15_Abs(q15_t a)            { return (a &lt; 0) ? Q15_Neg(a) : a; }  /* abs(-32768) = 32767 */
+static inline q15_t Q15_Mul(q15_t a, q15_t b)   { return Q15_Sat(((int32_t)a * b) &gt;&gt; 15); }
+static inline q15_t Q15_MulR(q15_t a, q15_t b)  { return Q15_Sat(((int32_t)a * b + (1 &lt;&lt; 14)) &gt;&gt; 15); }
+static inline q15_t Q15_MulQ12(q15_t x, q12_t k){ return Q15_Sat(((int32_t)x * k) &gt;&gt; 12); }
+static inline q15_t Q15_MAC2(q15_t a, q15_t b, q15_t c, q15_t d)
+{ return Q15_Sat(((int32_t)a * b + (int32_t)c * d) &gt;&gt; 15); }               /* a·b + c·d */
+static inline q15_t Q15_MSC2(q15_t a, q15_t b, q15_t c, q15_t d)
+{ return Q15_Sat(((int32_t)a * b - (int32_t)c * d) &gt;&gt; 15); }               /* a·b − c·d */
+
+/* 一阶低通：y += k·(x − y)，状态 Q30 防截断死区 */
+static inline q15_t Q15_Lpf(q30_t *y, q15_t x, q15_t k)
+{
+    int64_t e = ((int64_t)x &lt;&lt; 15) - *y;
+    *y = Q31_Sat64((int64_t)*y + ((e * k) &gt;&gt; 15));
+    return (q15_t)(*y &gt;&gt; 15);
+}
+
+/* 角度：uint16 0..65535 ↔ 0..2π；差值自动处理过零 */
+static inline int16_t Ang_Diff(uint16_t a, uint16_t b) { return (int16_t)(uint16_t)(a - b); }
+
+/* 整数开方：输入 Q30 非负 → 输出 Q15 */
+static inline q15_t Q15_SqrtQ30(int32_t xQ30)
+{
+    uint32_t x = (xQ30 &gt; 0) ? (uint32_t)xQ30 : 0u, r = 0u, b = 1uL &lt;&lt; 30;
+    while (b &gt; x) { b &gt;&gt;= 2; }
+    while (b != 0u) { if (x &gt;= r + b) { x -= r + b; r = (r &gt;&gt; 1) + b; } else { r &gt;&gt;= 1; } b &gt;&gt;= 2; }
+    return (q15_t)((r &gt; 32767u) ? 32767u : r);
+}
+#endif /* FOC_FIX_H */</code></pre>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>为每个模块填写「数值方案表」：格式、基值、范围、最坏中间量、是否饱和。</li><li>选择统一的快环方案（全定点或全 float），避免同一链路频繁转换。</li><li>浮点角度 / 积分必须取模或用整数累加器。</li><li>SIL：与 double 参考比较，统计误差；边界单元测试。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3><ul><li>定点电流环与 double 参考的差异在若干 LSB 内；长时间运行无漂移。</li></ul></div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* float 版 PI（慢任务 / 观测器适用），含抗饱和；与定点版 PI_Run（A08）行为一致 */
+typedef struct { float kp, kiTs, integ, outMax, outMin; } PIF_tst;
+static inline float PIF_Run(PIF_tst *pi, float e)
+{
+    float iNew = pi-&gt;integ + pi-&gt;kiTs * e;
+    if (iNew &gt; pi-&gt;outMax) { iNew = pi-&gt;outMax; }
+    if (iNew &lt; pi-&gt;outMin) { iNew = pi-&gt;outMin; }
+    float u = pi-&gt;kp * e + iNew;
+    if (u &gt; pi-&gt;outMax)      { u = pi-&gt;outMax; if (e &lt; 0.0f) { pi-&gt;integ = iNew; } }
+    else if (u &lt; pi-&gt;outMin) { u = pi-&gt;outMin; if (e &gt; 0.0f) { pi-&gt;integ = iNew; } }
+    else                     { pi-&gt;integ = iNew; }
+    return u;
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>float 积分器小误差不收敛</h5><dl><dt>现象</dt><dd>积分状态很大时，小误差增量被吞掉。</dd><dt>可能根因</dt><dd>大数加小数（相对精度 6e-8）。</dd><dt>排查</dt><dd>比较增量与积分值的 ULP。</dd><dt>修复</dt><dd>限幅积分器、标幺化、或 double / 整数累加。</dd><dt>验证</dt><dd>稳态误差消失。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>NaN 导致 PWM 输出异常</h5><dl><dt>现象</dt><dd>偶发 duty 异常，随后持续。</dd><dt>可能根因</dt><dd>sqrt 负数、除零产生 NaN 并在积分器中传播。</dd><dt>排查</dt><dd>isnan 检测。</dd><dt>修复</dt><dd>输入保护，积分器 NaN 时复位并报故障。</dd><dt>验证</dt><dd>边界测试。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>改基值后部分模块行为异常</h5><dl><dt>现象</dt><dd>I_BASE 从 50 改到 80 A 后电流环变慢。</dd><dt>可能根因</dt><dd>Kp 标幺值未按新基值重算。</dd><dt>排查</dt><dd>列出所有依赖 I_BASE 的常量。</dd><dt>修复</dt><dd>参数从物理值自动生成标幺值。</dd><dt>验证</dt><dd>回归测试。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3><ul><li>中断中混用 double：Cortex-M4F 只有单精度 FPU，double 走软件库，非常慢。</li><li>float 字面量未加 f 后缀（1.5 而非 1.5f）导致隐式 double 运算。</li></ul></div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="X2" id="quiz-X2"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3><ul><li>核心考点：两者优缺点、float 大数吞小数、基值修正方法、double 陷阱、工具宏使用。</li></ul></div>
+</section>

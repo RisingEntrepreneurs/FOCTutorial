@@ -11,7 +11,7 @@
 <!-- ================= 结业综合大试卷 ================= -->
 <section class="chap" id="final" data-title="结业综合大试卷">
 <h2 class="chap-h">结业综合大试卷</h2>
-<p class="chap-sub">覆盖全部已交付模块的题库（随分段交付自动扩充）：随机 30 道客观题 + 4 道工程分析 / 简答题。建议在全部模块完成后作为完整自测。</p>
+<p class="chap-sub">覆盖模块 A~F 与重点强化 X 全部题库：每次随机抽取 30 道客观题 + 4 道工程分析 / 简答题，可反复「重新组卷」。建议学完全部模块后作为完整自测。</p>
 <div class="exam" data-scope="ALL" data-nobj="30" data-nsub="4" data-key="examFinal"></div>
 </section>
 
@@ -28,6 +28,13 @@
   <div class="fcard"><b>RL 对象</b><br>G = 1/(Ls+R)，τ = L/R</div>
   <div class="fcard"><b>PI 对消</b><br>Kp = ωc·L，Ki = ωc·R</div>
   <div class="fcard"><b>延迟相位</b><br>φ = 360°·f·Td（Td≈1.5Ts）</div>
+  <div class="fcard"><b>SVPWM</b><br>线性区 |v| ≤ Vdc/√3<br>v0 = −(max+min)/2</div>
+  <div class="fcard"><b>dq 电压</b><br>vd = R·id + Ld·did/dt − ω·Lq·iq<br>vq = R·iq + Lq·diq/dt + ω(Ld·id + ψf)</div>
+  <div class="fcard"><b>转矩</b><br>Te = 1.5p[ψf·iq + (Ld−Lq)id·iq]</div>
+  <div class="fcard"><b>MTPA</b><br>id = ψf/2ΔL − √(ψf²/4ΔL² + iq²)</div>
+  <div class="fcard"><b>电压椭圆</b><br>(Ld·id+ψf)² + (Lq·iq)² ≤ (Vmax/ω)²</div>
+  <div class="fcard"><b>死区误差</b><br>ΔV ≈ Td/Ts·Vdc（12 V,1 µs: 0.24 V）</div>
+  <div class="fcard"><b>阶次</b><br>k_e = f/fe，k_m = k_e·p</div>
   <h4>调试提示</h4>
   <div class="fcard" style="font-family:inherit">dq 纹波 1×fe → 电流偏移<br>2×fe → 两相增益差 / Park 写反<br>6×fe → 死区 / 反电动势谐波<br>正反转不对称 → 零位偏差</div>
   <h4>动画快捷启停</h4>

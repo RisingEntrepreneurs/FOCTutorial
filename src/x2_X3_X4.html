@@ -1,0 +1,199 @@
+
+<!-- ================= X3 ================= -->
+<section class="chap" id="X3" data-title="X3 仿真证据 vs 台架证据">
+<h2 class="chap-h">X3 纸面仿真证据 vs 台架实质证据：仿真 / 动画跑通 ≠ 台架可以稳定运行</h2>
+<p class="chap-sub">重点强化 · 3（证据等级定义见导读第四节）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>验证与评审：什么证据能支撑什么结论</td></tr>
+<tr><th>输入 / 输出</th><td>输入：动画、仿真、SIL/PIL、台架、整车数据；输出：结论及其证据等级</td></tr>
+<tr><th>工程价值</th><td>避免把「仿真看起来不错」当作「可以量产」，也避免对台架数据过度外推</td></tr>
+<tr><th>上下游依赖</th><td>D05、D07、E03</td></tr>
+<tr><th>适用角色</th><td>全部，评审人</td></tr>
+<tr><th>前置数学依赖</th><td>—</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>本页所有动画都是 L0 证据：它们证明方向、符号、趋势，但不证明任何实际性能。</div>
+<div><b>② 量产怎么做</b>每个验收结论标注证据等级与工况覆盖；关键性能只接受 L3 及以上。</div>
+<div><b>③ 如何证明</b>证据清单：数据文件、工况、软件 / 标定版本、仪器、可复现步骤。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3><ul><li>导读第四节证据等级 L0~L4。</li></ul></div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>结论</th><th>L0 动画 / L1 仿真能说明</th><th>必须 L3 台架才能说明</th><th>关键台架证据</th></tr>
+<tr><td>电流环性能</td><td>结构正确、参数量级</td><td>实际带宽、超调、相位裕度</td><td>阶跃 + 扫频，多电流 / 电压 / 温度</td></tr>
+<tr><td>力矩精度</td><td>公式与方向</td><td>力矩常数、正反对称</td><td>扭矩传感器扫速、扫电流</td></tr>
+<tr><td>力矩脉动 / 手感</td><td>阶次机理</td><td>实际脉动幅值</td><td>力矩 / iq 频谱阶次分析</td></tr>
+<tr><td>弱磁 / 外特性</td><td>电压椭圆趋势</td><td>最高转速、各速力矩</td><td>外特性曲线 9~16 V</td></tr>
+<tr><td>无感观测</td><td>收敛机理</td><td>各转速角度误差、最低可用转速</td><td>与旋变对比</td></tr>
+<tr><td>保护诊断</td><td>逻辑正确</td><td>检出时间、误报率</td><td>故障注入、耐久</td></tr>
+<tr><td>定点实现</td><td>（SIL L2）数值一致性</td><td>—</td><td>PIL 执行时间、边界测试</td></tr>
+<tr><td>量产可用</td><td>—</td><td>需 L4 整车 / 环境 / EMC</td><td>整车试验报告</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>本节讨论证据本身。</p>
+<div class="formula">判断一条曲线能证明什么的五个问题：
+   ① 来源：动画 / 仿真 / 台架 / 整车？      ② 模型或被测对象包含了哪些非理想因素（E03）？
+   ③ 工况覆盖：电压、温度、转速、电流、批次？④ 版本：软件、标定、硬件、电机批次？
+   ⑤ 可复现：数据文件与步骤是否完整？</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（证据管理）</h3>
+<ol><li>每个测试记录：ID、日期、版本（软件 / 标定 / 硬件 / 电机）、工况、仪器、数据文件、结论、证据等级。</li><li>评审报告中每条结论注明等级；低于要求的结论标「待验证」。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3><ul><li>同一指标在 L1、L3 下的数值差异应被记录并解释（E03）。</li></ul></div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>测试记录模板（可复制）
+-------------------------------------------------------------
+测试 ID      : TB-CL-0012
+日期 / 人员  : 2026-xx-xx / xxx
+证据等级     : L3（台架）
+软件 / 标定  : SW 1.4.2 / CAL 1.4.2-b03     硬件: B 样件 #07   电机: 批次 2 #15
+工况         : Vdc 9 / 12 / 16 V；绕组温度 25 °C；转速 1000 rpm；iq 阶跃 5→25 A
+仪器         : CANape 主中断事件 DAQ（分频 1）、扭矩传感器 xx、电流探头 xx
+数据文件     : TB-CL-0012_*.mf4
+结果         : 超调 4.1 / 3.2 / 3.0 %；上升时间 0.31 / 0.30 / 0.30 ms；相位裕度 61°（扫频）
+结论         : 电流环在 25 °C、9~16 V 满足要求；低温 / 高温未覆盖 → 待 TB-CL-0013
+-------------------------------------------------------------</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5>评审问题：只有仿真截图</h5><dl><dt>现象</dt><dd>设计评审中性能结论仅有 Simulink 曲线。</dd><dt>可能根因</dt><dd>台架资源未到位或进度压力。</dd><dt>排查</dt><dd>检查证据等级。</dd><dt>修复</dt><dd>结论标「L1，待 L3 验证」并列入计划。</dd><dt>验证</dt><dd>台架数据补齐。</dd></dl></div>
+<div class="issue"><h5>评审问题：单一工况外推</h5><dl><dt>现象</dt><dd>12 V、25 °C 数据被用于证明全工况。</dd><dt>可能根因</dt><dd>工况矩阵缺失。</dd><dt>排查</dt><dd>列工况覆盖表。</dd><dt>修复</dt><dd>补测边界工况。</dd><dt>验证</dt><dd>矩阵覆盖。</dd></dl></div>
+<div class="issue"><h5>评审问题：版本不可追溯</h5><dl><dt>现象</dt><dd>数据无法对应软件 / 标定版本。</dd><dt>可能根因</dt><dd>记录不全。</dd><dt>排查</dt><dd>按模板检查。</dd><dt>修复</dt><dd>记录模板强制字段。</dd><dt>验证</dt><dd>抽查通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3><ul><li>把本页动画截图放进技术报告作为性能证据。</li><li>台架数据挑「最好的一次」而非统计结果。</li></ul></div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="X3" id="quiz-X3"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3><ul><li>核心考点：L0~L4 含义、各结论所需最低证据、五个判断问题、测试记录要素。</li></ul></div>
+</section>
+
+<!-- ================= X4 ================= -->
+<section class="chap" id="X4" data-title="X4 参数表模板">
+<h2 class="chap-h">X4 参数表模板：电阻、电感、磁链、PID、滤波、观测器、MTPA 表、弱磁表</h2>
+<p class="chap-sub">重点强化 · 4（每张表均可「复制表格」粘贴到 Excel；数值为 EPS 案例假设值 <span class="tg tg-case">【案例假设】</span>）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>标定数据管理</td></tr>
+<tr><th>输入 / 输出</th><td>输入：辨识与标定结果；输出：结构化参数表（物理值 + 定点值 + 来源 + 版本）</td></tr>
+<tr><th>工程价值</th><td>参数表是算法、标定、测试三方的共同语言；记录来源可避免「这个值是谁改的、为什么」</td></tr>
+<tr><th>上下游依赖</th><td>C11、D07、D08</td></tr>
+<tr><th>适用角色</th><td>标定、算法</td></tr>
+<tr><th>前置数学依赖</th><td>A01 标幺换算</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>同一参数在代码（Q 格式）、A2L（物理值）、报告（单位）中三种形态，需要一张表对照。</div>
+<div><b>② 量产怎么做</b>参数表 → 脚本生成 C 初始化文件与 A2L / 标定文件，单一数据源。</div>
+<div><b>③ 如何证明</b>表中每项有「来源 / 验证」列，对应测试记录 ID（X3）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3><ul><li>基值：I_BASE 50 A、V_BASE 16 V、ω_BASE 3351 rad/s、Ts 50 µs（若按 X2 修正基值，需重算定点列）。</li></ul></div>
+
+<div class="part"><h3>第三部分：核心原理与公式（模板）</h3>
+<h4 class="sub">表 1 电机参数</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>参数</th><th>标定量</th><th>物理值</th><th>单位</th><th>测量条件</th><th>方法</th><th>来源 / 测试 ID</th></tr>
+<tr><td>极对数</td><td>FOC_POLE_PAIRS</td><td>4</td><td>—</td><td>—</td><td>设计值</td><td>图纸</td></tr>
+<tr><td>相电阻</td><td>Cal_Rs25_mOhm</td><td>12.0</td><td>mΩ</td><td>25 °C</td><td>两点法 / 微欧计</td><td>TB-ID-0001</td></tr>
+<tr><td>d 轴电感</td><td>Cal_Ld_uH</td><td>45</td><td>µH</td><td>id 0~−50 A</td><td>阶跃 / 方波注入</td><td>TB-ID-0002</td></tr>
+<tr><td>q 轴电感（小电流）</td><td>Cal_Lq_uH</td><td>75</td><td>µH</td><td>iq ≤ 10 A</td><td>锁止 / 高频注入</td><td>TB-ID-0003</td></tr>
+<tr><td>永磁磁链</td><td>Cal_PsiF_mWb</td><td>3.5</td><td>mWb</td><td>25 °C</td><td>对拖反电动势</td><td>TB-ID-0004</td></tr>
+<tr><td>磁链温度系数</td><td>Cal_PsiTc_pct</td><td>待测</td><td>%/°C</td><td>−40~125 °C</td><td>温箱对拖</td><td>【待核对】</td></tr>
+<tr><td>转动惯量（电机侧折算）</td><td>Cal_J</td><td>2.0e−5</td><td>kg·m²</td><td>—</td><td>加速试验</td><td>TB-ID-0005</td></tr>
+</table></div>
+<h4 class="sub">表 2 Lq 饱和表（用于 Kp 调度与 MTPA）</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>|iq| (A)</th><th>0</th><th>10</th><th>20</th><th>30</th><th>40</th><th>50</th></tr>
+<tr><td>Lq (µH)</td><td>75</td><td>75</td><td>待测</td><td>待测</td><td>待测</td><td>待测</td></tr>
+<tr><td>Cal_IqKp_q12</td><td>6032</td><td>6032</td><td>按 ωc·Lq 计算</td><td>…</td><td>…</td><td>…</td></tr>
+</table></div>
+<h4 class="sub">表 3 电流环 / 速度环 / 弱磁环 PI</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>环</th><th>标定量</th><th>物理值</th><th>定点值</th><th>格式</th><th>设计依据</th><th>验收</th></tr>
+<tr><td>d 轴电流</td><td>Cal_IdKp_q12 / Cal_IdKiTs_q15</td><td>0.283 V/A / 75.4 V/(A·s)</td><td>3619 / 386</td><td>Q12 / Q15</td><td>ωc = 2π·1 kHz，对消</td><td>超调 &lt; 10%，PM ≥ 45°</td></tr>
+<tr><td>q 轴电流</td><td>Cal_IqKp_q12 / Cal_IqKiTs_q15</td><td>0.471 V/A / 75.4 V/(A·s)</td><td>6032 / 386</td><td>Q12 / Q15</td><td>同上</td><td>同上</td></tr>
+<tr><td>速度</td><td>Cal_SpdKp_q12 / Cal_SpdKiTs_q15</td><td>按 B05</td><td>2048 / 33</td><td>Q12 / Q15</td><td>带宽 40 Hz</td><td>超调 &lt; 10%</td></tr>
+<tr><td>弱磁</td><td>Cal_FwKp_q12 / Cal_FwKiTs_q15</td><td>待标定</td><td>—</td><td>Q12 / Q15</td><td>带宽 ≤ 电流环 1/10</td><td>扫速无振荡</td></tr>
+</table></div>
+<h4 class="sub">表 4 滤波器与补偿</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>名称</th><th>标定量</th><th>物理值</th><th>定点值</th><th>执行周期</th><th>备注</th></tr>
+<tr><td>速度低通</td><td>Cal_SpdLpfK_q15</td><td>fc = 50 Hz</td><td>7838</td><td>1 ms</td><td>α = Ts/(τ+Ts)</td></tr>
+<tr><td>延迟补偿</td><td>Cal_AngCompK_q8</td><td>1.5 Ts</td><td>384</td><td>50 µs</td><td>台架扫速标定</td></tr>
+<tr><td>死区补偿</td><td>Cal_DtCompV_q15</td><td>0.24 V @12 V</td><td>492</td><td>50 µs</td><td>随 Vdc 缩放</td></tr>
+<tr><td>死区线性区</td><td>Cal_DtI0_q15</td><td>1 A</td><td>655</td><td>50 µs</td><td>—</td></tr>
+<tr><td>电压裕量</td><td>Cal_VmaxK_q15</td><td>0.95</td><td>31130</td><td>50 µs</td><td>—</td></tr>
+</table></div>
+<h4 class="sub">表 5 观测器参数</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>标定量</th><th>物理值</th><th>含义</th><th>调整方向</th></tr>
+<tr><td>Cal_SmoK</td><td>8.0 V</td><td>滑模增益（&gt; 最大反电动势估计误差）</td><td>过小不收敛，过大抖振</td></tr>
+<tr><td>Cal_SmoBnd</td><td>2.0 A</td><td>边界层宽度</td><td>大则平滑但滞后</td></tr>
+<tr><td>Cal_PllKp / Cal_PllKi</td><td>400 / 40000</td><td>PLL（ωn ≈ 200 rad/s，ζ = 1）</td><td>带宽高收敛快噪声大</td></tr>
+<tr><td>Cal_ObsMinRpm</td><td>待标定</td><td>观测可用最低转速</td><td>由台架角度误差确定</td></tr>
+</table></div>
+<h4 class="sub">表 6 MTPA 表（索引 |iq|，常数电感初值，需台架覆盖）</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>|iq| (A)</th><th>0</th><th>5</th><th>10</th><th>15</th><th>20</th><th>25</th><th>30</th><th>35</th><th>40</th><th>45</th><th>50</th><th>55</th><th>60</th></tr>
+<tr><td>idRef (A)</td><td>0</td><td>−0.21</td><td>−0.85</td><td>−1.90</td><td>−3.33</td><td>−5.13</td><td>−7.26</td><td>−9.69</td><td>−12.40</td><td>−15.34</td><td>−18.50</td><td>−21.84</td><td>−25.35</td></tr>
+<tr><td>Q15</td><td>0</td><td>−140</td><td>−558</td><td>−1244</td><td>−2185</td><td>−3363</td><td>−4759</td><td>−6353</td><td>−8124</td><td>−10053</td><td>−12122</td><td>−14313</td><td>−16613</td></tr>
+</table></div>
+<h4 class="sub">表 7 弱磁前馈表（idFW 下限参考，索引转速 × Vdc，空载估算，需台架标定）</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>转速 \ Vdc</th><th>9 V</th><th>12 V</th><th>16 V</th></tr>
+<tr><td>3000 rpm</td><td>待标定</td><td>0</td><td>0</td></tr>
+<tr><td>4000 rpm</td><td>待标定</td><td>待标定</td><td>0</td></tr>
+<tr><td>6000 rpm</td><td>待标定</td><td>待标定</td><td>待标定</td></tr>
+<tr><td>8000 rpm</td><td>待标定</td><td>待标定</td><td>待标定</td></tr>
+</table></div>
+<p class="note">空载理论参考：要使 |v| ≤ Vmax，需 ψf + Ld·id ≤ Vmax/ωe → id ≤ (Vmax/ωe − ψf)/Ld。例如 12 V、8000 rpm：Vmax/ωe = 1.96 mWb → id ≤ −34 A（空载，未计 Rs 与 iq）。带载时还需考虑 Lq·iq 项（C07）。</p>
+<h4 class="sub">表 8 保护阈值</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>保护</th><th>阈值</th><th>时间 / 去抖</th><th>响应</th><th>通路</th></tr>
+<tr><td>硬件过流</td><td>60 A</td><td>&lt; 2 µs</td><td>关管锁存</td><td>比较器</td></tr>
+<tr><td>软件过流</td><td>48 A（码值比较）</td><td>3 周期</td><td>关管</td><td>中断</td></tr>
+<tr><td>过压</td><td>18 V</td><td>1 ms</td><td>关管 / 限回馈</td><td>中断</td></tr>
+<tr><td>欠压</td><td>9 V 降额 / 7 V 停机</td><td>10 ms</td><td>降额</td><td>1 ms</td></tr>
+<tr><td>过温</td><td>按降额曲线 / 150 °C 停机</td><td>—</td><td>线性降额</td><td>100 ms</td></tr>
+<tr><td>角度不一致</td><td>±30° 电角度</td><td>10 ms</td><td>降级 / 关管</td><td>1 ms</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>本节为模板。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3><ol><li>维护 CSV / Excel 参数表（单一数据源）。</li><li>脚本生成 cal_init.c 与 A2L 片段（D08）。</li><li>定点列由物理值与基值自动计算，禁止手填。</li></ol></div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3><ul><li>D05 模型从同一参数表加载，保证模型与代码一致。</li></ul></div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code># 【伪代码 / Python】参数表 → C 初始化代码（定点列自动计算）
+import csv
+BASE = {'I': 50.0, 'V': 16.0, 'Ts': 50e-6}
+def kp_q12(kp):   return round(kp * BASE['I'] / BASE['V'] * 4096)
+def kits_q15(ki): return round(ki * BASE['Ts'] * BASE['I'] / BASE['V'] * 32768)
+
+with open('params.csv', encoding='utf-8') as f, open('cal_init.c', 'w') as out:
+    for row in csv.DictReader(f):                    # 列：name, phys, kind
+        v = float(row['phys'])
+        q = kp_q12(v) if row['kind'] == 'kp' else kits_q15(v) if row['kind'] == 'ki' else v
+        out.write(f"CALIB volatile int16_t {row['name']} = {q};   /* phys = {v} */\n")</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5>参数表问题：物理值与定点值不一致</h5><dl><dt>现象</dt><dd>表中 Kp = 0.47 V/A，代码 Q12 = 3619。</dd><dt>可能根因</dt><dd>手填定点值、d/q 混淆。</dd><dt>排查</dt><dd>脚本复算。</dd><dt>修复</dt><dd>自动生成。</dd><dt>验证</dt><dd>一致性检查。</dd></dl></div>
+<div class="issue"><h5>参数表问题：来源缺失</h5><dl><dt>现象</dt><dd>不知道某参数何时、为何修改。</dd><dt>可能根因</dt><dd>无来源列。</dd><dt>排查</dt><dd>—</dd><dt>修复</dt><dd>强制填写测试 ID。</dd><dt>验证</dt><dd>抽查。</dd></dl></div>
+<div class="issue"><h5>参数表问题：基值改变后未更新</h5><dl><dt>现象</dt><dd>改 I_BASE 后部分参数仍为旧定点值。</dd><dt>可能根因</dt><dd>手动维护。</dd><dt>排查</dt><dd>脚本全量重算对比。</dd><dt>修复</dt><dd>基值作为脚本输入。</dd><dt>验证</dt><dd>回归测试。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3><ul><li>参数表与代码、A2L、仿真模型四处各自维护。</li><li>「待测」项被默认值代替后忘记补测。</li></ul></div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="X4" id="quiz-X4"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3><ul><li>核心考点：参数表结构（物理值 / 定点值 / 条件 / 方法 / 来源）、单一数据源、自动换算。</li></ul></div>
+</section>

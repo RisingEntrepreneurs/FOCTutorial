@@ -1,0 +1,149 @@
+
+<!-- ================= F04 ================= -->
+<section class="chap" id="F04" data-title="F04 主驱 vs EPS 辅驱">
+<h2 class="chap-h">F04 主驱高压电驱与辅驱低压 EPS 的差异</h2>
+<p class="chap-sub">模块 F · 拓展对比 · 第 4 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>应用层面：同一套 FOC 理论在不同电压 / 功率等级下的工程差异</td></tr>
+<tr><th>输入 / 输出</th><td>输入：母线电压、功率、转速、功能安全目标；输出：算法与硬件侧重点</td></tr>
+<tr><th>工程价值</th><td>从 EPS 转到主驱（或反之）的工程师需要知道哪些经验可直接迁移，哪些需要重新评估</td></tr>
+<tr><th>上下游依赖</th><td>全书</td></tr>
+<tr><th>适用角色</th><td>全部</td></tr>
+<tr><th>前置数学依赖</th><td>—</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>12 V EPS 的主要矛盾是「电压低、电流大、手感要求高」；高压主驱的主要矛盾是「功率大、转速高、开关损耗与安全」。</div>
+<div><b>② 量产怎么做</b>算法框架相同（FOC + MTPA + 弱磁），参数与侧重点不同；主驱更关注效率 Map、过调制、主动短路、绝缘与高压安全。</div>
+<div><b>③ 如何证明</b>各自的验收体系不同：EPS 侧重力矩品质与主观评价；主驱侧重效率、外特性、热与安全。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3><ul><li>全书概念。</li></ul></div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>维度</th><th>EPS 辅驱（本案例）</th><th>主驱高压电驱（一般特征）<span class="tg tg-check">【待核对：以具体项目为准】</span></th></tr>
+<tr><td>母线电压</td><td>12 V（9~16 V 波动）</td><td>数百 V（如 400 V / 800 V 平台）</td></tr>
+<tr><td>功率器件</td><td>低压 MOSFET</td><td>IGBT / SiC MOSFET</td></tr>
+<tr><td>开关频率</td><td>常见 16~20 kHz 以上（避开可闻）</td><td>常见 8~20 kHz（损耗与噪声权衡），SiC 可更高</td></tr>
+<tr><td>主要电压问题</td><td>可用电压低、电源波动大（冷启动跌落），低速时死区 / 压降误差与所需电压同量级</td><td>过调制利用率、dv/dt、高压绝缘</td></tr>
+<tr><td>主要控制目标</td><td>力矩精度、低脉动、手感、低速平顺</td><td>效率、全速域外特性、高速稳定性</td></tr>
+<tr><td>弱磁 / 过调制</td><td>需要弱磁，过调制谨慎使用</td><td>深度弱磁 + 过调制 / 六步运行常见</td></tr>
+<tr><td>位置传感</td><td>旋变 / 磁编，无感作降级</td><td>旋变为主</td></tr>
+<tr><td>故障响应</td><td>关管 / 安全状态（低压回馈风险较小但需评估）</td><td>主动短路（ASC）/ 关管策略按转速选择，防止高压回馈</td></tr>
+<tr><td>功能安全</td><td>转向相关，安全目标严格</td><td>非预期扭矩等，安全目标严格</td></tr>
+<tr><td>热管理</td><td>堵转 / 原地转向热模型</td><td>水冷、结温估计、降额 Map</td></tr>
+<tr><td>标定重点</td><td>脉动、手感、低压表现</td><td>效率 Map、MTPA / 弱磁表（二维：转矩 × 转速 × 电压）</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>本节为工程对比。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（迁移时的检查清单）</h3>
+<ol><li>基值与 Q 格式重新规划（电压、电流范围相差数十倍）。</li><li>死区补偿量按 ΔV ≈ Td/Ts·Vdc 重新计算并标定（器件开关延迟特性也不同）。</li><li>MTPA / 弱磁表从一维变为多维（电压、转速）。</li><li>故障响应策略（ASC / 关管）与过压保护重新设计。</li><li>采样方案（主驱常用相电流传感器而非分流电阻）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3><ul><li>同一控制结构在两种平台下的关键区别在电压利用率、死区占比与故障响应。</li></ul></div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 平台参数化：同一代码通过配置头文件适配不同平台（示意）*/
+#if   defined(PLATFORM_EPS_12V)
+  #define FOC_I_BASE   (50.0f)
+  #define FOC_V_BASE   (16.0f)
+  #define FOC_PWM_HZ   (20000u)
+  #define FOC_FAULT_RESPONSE  FAULT_RESP_PWM_OFF
+#elif defined(PLATFORM_TRACTION_HV)              /* 【案例假设】仅示意 */
+  #define FOC_I_BASE   (800.0f)
+  #define FOC_V_BASE   (500.0f)
+  #define FOC_PWM_HZ   (10000u)
+  #define FOC_FAULT_RESPONSE  FAULT_RESP_ASC_OR_OFF_BY_SPEED
+#endif</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5>迁移误区：直接沿用 EPS 的死区补偿量</h5><dl><dt>现象</dt><dd>高压平台低速脉动异常。</dd><dt>可能根因</dt><dd>补偿量按 12 V 标定。</dd><dt>排查</dt><dd>按 ΔV = Td/Ts·Vdc 重算。</dd><dt>修复</dt><dd>重新标定。</dd><dt>验证</dt><dd>6 阶分量。</dd></dl></div>
+<div class="issue"><h5>迁移误区：故障一律关管</h5><dl><dt>现象</dt><dd>高压高速故障关管后母线过压。</dd><dt>可能根因</dt><dd>反电动势整流回馈。</dd><dt>排查</dt><dd>按转速评估反电动势与母线电压。</dd><dt>修复</dt><dd>ASC / 关管按转速选择。</dd><dt>验证</dt><dd>故障注入试验。</dd></dl></div>
+<div class="issue"><h5>迁移误区：沿用一维 MTPA 表</h5><dl><dt>现象</dt><dd>主驱高速效率差。</dd><dt>可能根因</dt><dd>未考虑电压与转速维度。</dd><dt>排查</dt><dd>效率 Map 测试。</dd><dt>修复</dt><dd>多维表 + 电压闭环。</dd><dt>验证</dt><dd>效率 Map 达标。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3><ul><li>高压平台的测量与调试必须遵守高压安全规程（培训、隔离、放电）。<span class="tg tg-red">【风险红线】</span></li></ul></div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="F04" id="quiz-F04"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3><ul><li>核心考点：电压 / 器件 / 开关频率差异、控制目标差异、故障响应（ASC）、迁移检查清单。</li></ul></div>
+</section>
+
+<!-- ================= F05 ================= -->
+<section class="chap" id="F05" data-title="F05 厂商方案特点">
+<h2 class="chap-h">F05 主流厂商方案特点（ST / TI / NXP / Infineon）</h2>
+<p class="chap-sub">模块 F · 拓展对比 · 第 5 节 <span class="tg tg-vendor">【厂商参考】</span>均为厂商参考实现，不是唯一标准</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>开发起点：参考设计、库与工具</td></tr>
+<tr><th>输入 / 输出</th><td>输入：芯片平台；输出：可复用的软件组件、工具与需要自研的部分</td></tr>
+<tr><th>工程价值</th><td>合理使用厂商库可缩短开发周期；但必须理解其约定与限制，并按项目功能安全要求评估</td></tr>
+<tr><th>上下游依赖</th><td>全书</td></tr>
+<tr><th>适用角色</th><td>全部</td></tr>
+<tr><th>前置数学依赖</th><td>—</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>拷贝厂商例程是常见做法，也是坐标约定冲突、Q 格式不一致的常见来源（B03）。</div>
+<div><b>② 量产怎么做</b>评估库的许可证、功能安全认证状态、可维护性；关键算法理解后再用；统一到项目约定。</div>
+<div><b>③ 如何证明</b>库组件单元测试、与项目约定一致性测试。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3><ul><li>以下内容为概括性描述，具体功能、版本、许可证与认证状态请以各厂商官方文档为准 <span class="tg tg-check">【待核对】</span>。</li></ul></div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>厂商</th><th>典型生态（概括）</th><th>特点</th><th>使用注意</th></tr>
+<tr><td>ST</td><td>STM32 系列 + Motor Control SDK、Motor Control Workbench 图形化配置</td><td>上手快、配置工具完善；提供有感 / 无感（状态观测器 + PLL 等）组件</td><td>生成代码结构与项目架构融合；坐标与 Q 格式约定核对</td></tr>
+<tr><td>TI</td><td>C2000 实时 MCU + MotorControl SDK；InstaSPIN-FOC（FAST 观测器）</td><td>实时控制外设强；FAST 为 TI 私有观测器 <span class="tg tg-check">【厂商私有方案】</span></td><td>私有算法以库形式提供，内部不可见；可移植性受限</td></tr>
+<tr><td>NXP</td><td>S32K / MPC57xx 等；RTCESL（实时控制嵌入式软件库，含数学、滤波、电机控制模块）、MCAT 调试工具、AMMCLib（汽车数学与电机控制库）</td><td>面向汽车级；部分库提供功能安全相关文档 <span class="tg tg-check">【待核对】</span></td><td>函数命名与 Q 格式（frac16 等）约定需与项目统一</td></tr>
+<tr><td>Infineon</td><td>AURIX / XMC / PSoC 等；电机控制应用笔记与参考软件（如 MOTIX 系列集成方案）</td><td>汽车级 MCU 与栅极驱动、集成电机控制芯片生态</td><td>以具体芯片的应用笔记为准</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>本节为生态概览。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（引入厂商库的流程）</h3>
+<ol><li>确认许可证与量产使用条款。</li><li>确认是否满足项目功能安全要求（认证 / 安全手册 / 需自行验证）。</li><li>对库函数做约定一致性测试（Clarke 系数、Park 方向、Q 格式、角度格式）。</li><li>封装适配层：项目代码只调用适配层，便于替换。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3><ul><li>库函数与项目参考实现在相同输入下输出一致（单元测试）。</li></ul></div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 适配层示例：把厂商库 Park 封装为项目约定（库函数名为占位符）*/
+void Foc_Park_Adapter(const CPLX_tst *ab, q15_t s, q15_t c, CPLX_tst *dq)
+{
+#if USE_VENDOR_LIB
+    VENDOR_ParkFrac16(ab-&gt;re, ab-&gt;im, s, c, &amp;dq-&gt;re, &amp;dq-&gt;im);   /* 【伪代码】占位名 */
+    /* 若厂商约定 q 轴方向相反，在此统一 */
+    #if VENDOR_Q_SIGN_INVERTED
+    dq-&gt;im = Q15_Sat(-(int32_t)dq-&gt;im);
+    #endif
+#else
+    *dq = Cplx_RotNeg(*ab, s, c);                                    /* A04 项目实现 */
+#endif
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5>常见问题：混用两家例程导致方向冲突</h5><dl><dt>现象</dt><dd>dq 2 倍频振荡。</dd><dt>可能根因</dt><dd>约定不同（B03）。</dd><dt>排查</dt><dd>单元测试。</dd><dt>修复</dt><dd>适配层统一。</dd><dt>验证</dt><dd>dq 直流。</dd></dl></div>
+<div class="issue"><h5>常见问题：私有观测器无法定位问题</h5><dl><dt>现象</dt><dd>某工况观测失效但无法看内部状态。</dd><dt>可能根因</dt><dd>库黑盒。</dd><dt>排查</dt><dd>与旋变对比、改变参数观察。</dd><dt>修复</dt><dd>联系厂商支持或替换为可见算法。</dd><dt>验证</dt><dd>—</dd></dl></div>
+<div class="issue"><h5>常见问题：库版本升级行为变化</h5><dl><dt>现象</dt><dd>升级 SDK 后性能变化。</dd><dt>可能根因</dt><dd>默认参数 / 实现变化。</dd><dt>排查</dt><dd>版本差异与回归测试。</dd><dt>修复</dt><dd>锁定版本，升级走评估流程。</dd><dt>验证</dt><dd>回归通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3><ul><li>演示板例程不等于量产代码：缺少诊断、异常处理与安全机制。</li></ul></div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="F05" id="quiz-F05"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3><ul><li>核心考点：厂商参考 ≠ 标准、私有算法标注、约定一致性测试、适配层。</li></ul></div>
+</section>
+
+<!-- ================= 模块 F 综合自测 ================= -->
+<section class="chap" id="F-test" data-title="模块 F 章节综合自测卷">
+<h2 class="chap-h">模块 F 章节综合自测卷</h2>
+<p class="chap-sub">从 F01~F05 题库随机抽取 12 道客观题 + 2 道主观题，交卷统一判分。</p>
+<div class="exam" data-scope="F" data-nobj="12" data-nsub="2" data-key="examF"></div>
+</section>
