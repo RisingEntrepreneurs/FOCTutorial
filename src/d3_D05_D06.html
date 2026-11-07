@@ -1,0 +1,242 @@
+
+<!-- ================= D05 ================= -->
+<section class="chap" id="D05" data-title="D05 Simulink 仿真">
+<h2 class="chap-h">D05 仿真：Simulink 模型搭建，从开环到闭环</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 5 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>开发流程：算法设计 → MIL → SIL → PIL → 台架</td></tr>
+<tr><th>输入 / 输出</th><td>输入：电机参数、控制算法；输出：仿真波形、参数初值、测试用例</td></tr>
+<tr><th>工程价值</th><td>上台架前发现方向、符号、单位、稳定性问题；为标定提供初值与对照基准</td></tr>
+<tr><th>上下游依赖</th><td>上游 B02、C 全部；下游 D06、E03</td></tr>
+<tr><th>适用角色</th><td>算法、模型开发</td></tr>
+<tr><th>前置数学依赖</th><td>A07、D01</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>台架试错代价高（损坏硬件、占用资源）；仿真可以安全地尝试极端工况和故障。</div>
+<div><b>② 量产怎么做</b>分层模型：对象（电机 dq 模型 + 逆变器平均模型 + 机械）与控制器（离散、带延迟、可选定点）；按步骤从开环到闭环逐级验证；控制器子系统可代码生成或与手写代码 SIL 比对。</div>
+<div><b>③ 如何证明</b>仿真只证明到 L1/L2（导读证据等级）；必须与台架同工况曲线对比，记录差异来源（E03）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>电机参数（含不确定范围）、逆变器参数（死区、压降）、采样与延迟时序。</li>
+<li>MATLAB/Simulink 及相应工具箱（是否使用 Motor Control Blockset 等以项目授权为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>不满足：连续域理想模型 → 仿真结果过于乐观（E03）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>对象模型（dq，B02 / C05）：
+   Ld·did/dt = vd − Rs·id + ωe·Lq·iq
+   Lq·diq/dt = vq − Rs·iq − ωe·(Ld·id + ψf)
+   J·dωm/dt = Te − TL − B·ωm，θe = ∫p·ωm dt
+逆变器平均模型：v_actual = v_ref·(Vdc/Vdc_meas) − ΔV_deadtime·sign(i)（C13）
+控制器：Ts = 50 µs 离散子系统，输入经 ZOH 采样，输出经 1 拍延迟（单采样单更新）+ ZOH（PWM 平均）
+求解器：对象用变步长或小定步长（如 1 µs），控制器 50 µs 触发</div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>模型搭建是工具操作流程；本页各章动画均为「简化 L0 模型」，D05 关注如何搭建更接近台架的 L1/L2 模型。</p>
+<h4 class="sub">从开环到闭环的六步</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>步骤</th><th>模型内容</th><th>验证目标</th><th>典型发现的问题</th></tr>
+<tr><td>1</td><td>电机 dq 模型 + 给定电压开环（vd, vq 常数）</td><td>稳态电流符合 dq 方程；反电动势 ∝ 转速</td><td>参数单位、ψf 定义</td></tr>
+<tr><td>2</td><td>加 abc / αβ 变换 + SVPWM 平均 + 开环 V/f 或 I/F</td><td>电机按设定方向旋转，三相电流正弦</td><td>相序、Park 符号、方向约定</td></tr>
+<tr><td>3</td><td>电流环闭环（理想角度）</td><td>阶跃响应符合 1 kHz 设计</td><td>PI 参数、单位</td></tr>
+<tr><td>4</td><td>加入延迟、离散、量化、死区</td><td>相位裕度、6 阶纹波</td><td>带宽过高、延迟补偿</td></tr>
+<tr><td>5</td><td>加速度环 / MTPA / 弱磁</td><td>全速域外特性</td><td>弱磁振荡、iq 限幅</td></tr>
+<tr><td>6</td><td>加观测器 / 角度误差模型 / 故障注入</td><td>切换、诊断</td><td>切换冲击、阈值</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（模型到代码）</h3>
+<ol><li>控制器模型使用与代码相同的数据结构命名（gFoc 字段、Cal_ 参数），便于对照。</li>
+<li>定点模型（若代码生成）：Fixed-Point Designer 设定 Q 格式；手写代码则用 MEX / S-Function 嵌入 C 代码做 SIL。</li>
+<li>PIL：在 S32K146 上运行控制器，模型提供对象，测量执行时间与数值一致性。</li>
+<li>测试用例沉淀：阶跃、扫速、电压跌落、参数偏差 ±30%，作为回归测试集。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>步骤 2：iα–iβ 逆时针圆（正转）；dq 直流。</li>
+<li>步骤 4：加入延迟后，原来在理想模型中稳定的高带宽参数可能振荡——这正是需要的「提前暴露」。</li>
+<li>与台架对比时，叠加同工况实测曲线，差异按 E03 分类。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>% 【伪代码 / MATLAB 脚本】EPS 电机参数初始化（模型工作区）【案例假设】
+P.p    = 4;        P.Rs = 12e-3;    P.Ld = 45e-6;   P.Lq = 75e-6;
+P.psiF = 3.5e-3;   P.J  = 2e-5;     P.B  = 1e-5;
+P.Vdc  = 12;       P.Ts = 50e-6;    P.Td = 1e-6;    % 死区
+P.Ibase = 50;      P.Vbase = 16;
+% 电流环参数（A08 零极点对消，1 kHz）
+wc = 2*pi*1000;
+C.KpD = wc*P.Ld;   C.KpQ = wc*P.Lq;   C.Ki = wc*P.Rs;
+% 标幺 / 定点（与 C 代码一致）
+C.KpD_q12  = round(C.KpD*P.Ibase/P.Vbase*4096);     % 3619
+C.KpQ_q12  = round(C.KpQ*P.Ibase/P.Vbase*4096);     % 6032
+C.KiTs_q15 = round(C.Ki*P.Ts*P.Ibase/P.Vbase*32768);% 386
+% 参数鲁棒性扫描
+for k = [0.7 1.0 1.3]
+    P.Lq_true = k*P.Lq;   % 对象使用偏差参数，控制器仍用标称值
+    % sim('eps_foc_model'); 记录超调与带宽
+end</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>仿真完美，台架振荡</h5><dl>
+<dt>现象</dt><dd>仿真电流环阶跃无超调，台架严重振荡。</dd>
+<dt>可能根因</dt><dd>模型无延迟 / 连续控制器；参数理想；无采样噪声。</dd>
+<dt>排查</dt><dd>按步骤 4 补齐延迟与离散。</dd>
+<dt>修复</dt><dd>模型补齐后重新设计参数。</dd>
+<dt>验证</dt><dd>模型与台架阶跃超调一致（差异 &lt; 几个百分点）。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>仿真中电机反转</h5><dl>
+<dt>现象</dt><dd>给正 iq，仿真电机反转。</dd>
+<dt>可能根因</dt><dd>模型中 Park 与控制器约定不一致、θe 积分方向、相序。</dd>
+<dt>排查</dt><dd>步骤 2 开环检查方向。</dd>
+<dt>修复</dt><dd>统一约定（导读第三节）。</dd>
+<dt>验证</dt><dd>正 iq 正转。</dd></dl></div>
+<div class="issue"><h5>易错点：仿真步长过大</h5><dl>
+<dt>现象</dt><dd>电流纹波、死区效应在仿真中看不到。</dd>
+<dt>根因</dt><dd>对象步长 ≥ PWM 周期，平均模型不含开关细节。</dd>
+<dt>排查</dt><dd>明确模型目标（平均 or 开关）。</dd>
+<dt>修复</dt><dd>需要研究纹波 / 死区时用开关模型 + 小步长。</dd>
+<dt>验证</dt><dd>与示波器纹波对比。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>模型与代码两套参数文件各自维护，逐渐不一致：从同一数据源生成。</li>
+<li>只仿真名义参数：必须做参数偏差与电压范围扫描。</li>
+<li>把仿真曲线放进评审报告作为「验证通过」的证据：仿真最多是 L1/L2（X3）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D05" id="quiz-D05"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：六步搭建法、延迟与离散建模、MIL/SIL/PIL 区别、参数扫描、仿真证据边界。</li></ul></div>
+</section>
+
+<!-- ================= D06 ================= -->
+<section class="chap" id="D06" data-title="D06 台架上电流程">
+<h2 class="chap-h">D06 台架上电流程：电机对齐、零位标定、开环拖动、切入闭环、无感切入</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 6 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>从「代码编译通过」到「电机闭环运行」的台架步骤</td></tr>
+<tr><th>输入 / 输出</th><td>输入：新硬件、新软件；输出：经逐项验证的闭环系统与基础标定（偏移、零位、方向）</td></tr>
+<tr><th>工程价值</th><td>按顺序逐项验证可以把问题限定在最小范围；跳步骤是炸管和浪费时间的主要原因</td></tr>
+<tr><th>上下游依赖</th><td>依赖 C01~C10；下游 D07</td></tr>
+<tr><th>适用角色</th><td>全部台架人员</td></tr>
+<tr><th>前置数学依赖</th><td>A06 相位累加器、B04 换向思想</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>闭环系统中任何一个环节（采样、方向、角度、PWM）出错都会表现为「抖动 / 过流」，无法区分；必须先开环逐项验证。</div>
+<div><b>② 量产怎么做</b>固定 Checklist：限流电源 → 静态检查 → PWM 空载 → 偏移 → 开环 → 零位 → 电流闭环 → 外环 / 无感；每步有通过判据和记录。</div>
+<div><b>③ 如何证明</b>每一步的通过判据（波形、数值）记录在台架日志中。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li><span class="tg tg-red">【风险红线】</span>首次上电使用可限流的直流电源（如限流 5~10 A）而非电池；硬件过流保护已验证；急停可用。</li>
+<li>示波器（电流探头 ×2、差分电压探头）、CANape + XCP 连接、对拖台架（可选）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>步骤</th><th>操作</th><th>通过判据</th><th>失败常见原因</th></tr>
+<tr><td>0 静态</td><td>不接电机，上电</td><td>电源电流正常；Vdc 采样正确；无故障码</td><td>采样分压、ADC 配置</td></tr>
+<tr><td>1 PWM 空载</td><td>不接电机，输出固定 duty</td><td>三相波形、死区、中心对齐、互补正确</td><td>极性、死区配置</td></tr>
+<tr><td>2 偏移</td><td>接电机，PWM 关</td><td>偏移在范围内，静止电流 &lt; 0.1 A</td><td>C01</td></tr>
+<tr><td>3 对齐</td><td>开环角度 0、id = 小电流（电流闭环 + 固定角度）</td><td>转子转到固定位置并保持，电流稳定</td><td>电流符号、增益</td></tr>
+<tr><td>4 I/F 开环拖动</td><td>固定 id/|i| 电流闭环、开环角度按频率斜坡</td><td>平稳旋转，方向正确，iα–iβ 逆时针</td><td>相序、Park 方向</td></tr>
+<tr><td>5 角度对比</td><td>I/F 运行时比较旋变 θe 与开环 θ</td><td>两者斜率一致、方向一致（差值近似常数）</td><td>极对数、方向、解码配置</td></tr>
+<tr><td>6 零位</td><td>d 轴对齐法或反电动势法</td><td>重复性 &lt; 0.5°</td><td>C09</td></tr>
+<tr><td>7 电流闭环</td><td>旋变角度、小 iq（2~5 A）</td><td>正 iq 正转，正反对称</td><td>零位、方向</td></tr>
+<tr><td>8 电流环验收</td><td>阶跃、扫频</td><td>A08/C05 指标</td><td>参数</td></tr>
+<tr><td>9 外环 / 弱磁 / 无感</td><td>逐项开启</td><td>各章判据</td><td>C07/C08/C10</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>I/F 开环（电流闭环 + 开环角度）的稳定机理：
+   设电流矢量与转子 d 轴夹角为 γ（负载角），电磁转矩 Te = Kt·|i|·sin γ
+   对齐后起动 γ ≈ 0；开环角度前进 → γ 增大 → 转矩增大，自动平衡负载与加速转矩
+   γ &lt; 90° 时具有自恢复能力；γ &gt; 90° 后转矩随 γ 增大反而下降 → 失步
+   最大可带负载 TL,max = Kt·|i|；加速时还需克服 J·dω/dt 与摩擦
+   转子在平衡点附近为弱阻尼振荡（固有频率 ≈ √(p·Kt·|i|/J)），加速度过大会激发振荡越过 90°</div>
+<div id="anim-D06"></div>
+<div class="anim-note"><b>动画在演示什么：</b>I/F 启动：对齐后开环角度按加速度斜坡增加，转子在电磁转矩作用下跟随，负载角 γ 为电流矢量与转子 d 轴的夹角。上图转速（给定 / 实际），下图 γ。<br>
+<b>拖动滑块：</b>减小电流幅值或增大负载 / 加速度，γ 增大；超过 90° 后转子失步，实际转速崩溃——这就是 I/F 启动失败的物理过程。<br>
+<b>正常：</b>γ 稳定在 90° 以下（叠加衰减振荡）。<b>异常：</b>γ 越过 90° 后持续增大、转速下跌。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>软件提供「台架模式」：开环角度源、固定电流给定、各步独立使能（XCP 标定量控制）。</li>
+<li>I/F：先在开环角度 0 对齐，随后电流闭环（PI 正常工作）+ 角度由相位累加器给出（A06），电流保持在开环 d 轴方向，频率按斜坡升高；电流幅值足以带动负载（如 20 A）。也有实现把电流放在开环 q 轴，此时转子会先超前 90° 再建立平衡，起动冲击更大。</li>
+<li>切入闭环（I/F → 旋变或观测器）：角度差 |θsrc − θIF| 小于阈值并稳定 → 预置电流环积分器 → 切换角度源 → 电流给定从「全部在开环 q 轴」逐渐过渡到「由力矩需求决定」。</li>
+<li>每步通过后，在台架日志记录关键数值与截图。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>步骤 3：转子转到固定位置，可能有小幅振荡后稳定。</li>
+<li>步骤 4：相电流幅值恒定、频率按斜坡增加；示波器上三相正弦相差 120°。</li>
+<li>步骤 5：θ旋变 − θIF 为近似常数（负载角 + 零位偏差），不随时间漂移。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* I/F 开环拖动（台架模式），1 ms 更新频率斜坡，中断累加角度（A06）*/
+volatile float Cal_IfCurr_A    = 20.0f;   /* 【案例假设】*/
+volatile float Cal_IfAccel_Hz_s = 50.0f;  /* 电频率加速度 */
+volatile float Cal_IfFreqMax_Hz = 40.0f;  /* 600 rpm 机械 */
+static float s_ifFreq;
+
+void Bench_IfDrag_1ms(void)
+{
+    s_ifFreq += Cal_IfAccel_Hz_s * 1.0e-3f;
+    if (s_ifFreq &gt; Cal_IfFreqMax_Hz) { s_ifFreq = Cal_IfFreqMax_Hz; }
+    gBench.phInc = FOC_FreqToInc((uint32_t)(s_ifFreq * 1000.0f));          /* A06 */
+    FOC_SetIdqRef(AMP_TO_Q15(Cal_IfCurr_A), 0);   /* 电流放在开环 d 轴（与对齐一致），转子以负载角 γ 滞后跟随 */
+    gBench.angDiff = (int16_t)(uint16_t)(gFoc.thetaEFromRes - gFoc.thetaE); /* 步骤 5 对比 */
+}
+
+/* 切入旋变闭环：角度差稳定后切换 */
+void Bench_SwitchToResolver_1ms(void)
+{
+    static uint16_t s_ok;
+    s_ok = ((gBench.angDiff &gt; -1820) &amp;&amp; (gBench.angDiff &lt; 1820)) ? (uint16_t)(s_ok + 1u) : 0u;  /* ±10° */
+    if (s_ok &gt; 200u) {
+        FOC_CurrentLoop_Preset(gFoc.vd, gFoc.vq, 0, 0);  /* C05 */
+        Angle_SelectSource(ANG_SRC_RESOLVER);
+        gFoc.state = FOC_ST_RUN_TORQUE;
+    }
+}</code></pre>
+<p class="note">切换判据中的角度差包含「负载角 + 零位误差」；零位已标定时，空载 I/F 下角度差应接近当前负载角。切换后电流矢量从「开环 d 轴方向」逐渐转到「由力矩需求决定的 dq 给定」，id、iq 均需斜坡过渡。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>对齐时电机来回摆动不停</h5><dl>
+<dt>现象</dt><dd>步骤 3 转子持续振荡。</dd>
+<dt>可能根因</dt><dd>电流环参数过激；对齐电流过大且无阻尼（机械谐振）。</dd>
+<dt>排查</dt><dd>看 id 是否稳定；降低电流。</dd>
+<dt>修复</dt><dd>电流斜坡上升；降低 Kp。</dd>
+<dt>验证</dt><dd>对齐稳定。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>I/F 升速到某频率后失步</h5><dl>
+<dt>现象</dt><dd>拖动到一定转速后电机抖动、停转，电流仍在。</dd>
+<dt>可能根因</dt><dd>负载角超过 90°（电流不足 / 加速过快）；电压饱和（开环电压不够）。</dd>
+<dt>排查</dt><dd>记录 angDiff、vq 是否饱和。</dd>
+<dt>修复</dt><dd>增大电流 / 降低加速度；提前切入闭环。</dd>
+<dt>验证</dt><dd>多次 I/F 成功率 100%。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>步骤 5 角度差持续漂移</h5><dl>
+<dt>现象</dt><dd>θ旋变 − θIF 不是常数，以恒定斜率变化。</dd>
+<dt>可能根因</dt><dd>极对数配置错误（旋变电角度速度 ≠ 开环）、方向相反（斜率为 2 倍）。</dd>
+<dt>排查</dt><dd>计算漂移斜率与 I/F 频率比值。</dd>
+<dt>修复</dt><dd>修正极对数 / 方向。</dd>
+<dt>验证</dt><dd>角度差恒定。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li><span class="tg tg-red">【风险红线】</span>首次直接用电池上电闭环：方向错误时正反馈，电流瞬间上千安级（取决于回路阻抗），可能损坏 MOS。</li>
+<li>跳过步骤 5 直接闭环：极对数 / 方向错误被掩盖为「抖动」。</li>
+<li>对齐方向：从静止对齐时转子可能转向反方向的 d 轴（N/S 对称），不影响电角度零位，但影响机械位置相关的标定。</li>
+<li>台架结束未恢复保护标定量（C12 踩坑）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D06" id="quiz-D06"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：上电步骤顺序与判据、I/F 机理与负载角、角度对比判据、切入条件与积分器预置、限流电源红线。</li>
+<li>台架高频：「上电抖动无法闭环」的标准排查路径（见调试模拟场景 1）。</li></ul></div>
+</section>

@@ -1,0 +1,254 @@
+
+<!-- ================= D07 ================= -->
+<section class="chap" id="D07" data-title="D07 标定实战">
+<h2 class="chap-h">D07 标定实战：电流环带宽、滤波、MTPA 表、弱磁表、观测器参数</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 7 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>软件冻结后、量产前：参数从「初值」变为「验证值」</td></tr>
+<tr><th>输入 / 输出</th><td>输入：仿真初值、台架测量；输出：标定数据集（HEX / DCM / CDFX 等，以项目流程为准）</td></tr>
+<tr><th>工程价值</th><td>同一套软件适配不同电机批次、不同整车需求，标定质量直接决定性能一致性</td></tr>
+<tr><th>上下游依赖</th><td>依赖 C05~C13、D06；输出给 D08 数据管理</td></tr>
+<tr><th>适用角色</th><td>标定工程师、算法</td></tr>
+<tr><th>前置数学依赖</th><td>A07 伯德图、A08 PI</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>参数辨识有误差、电机有饱和与温度特性、整车对噪声与手感有主观要求——这些只能在台架和整车上收敛。</div>
+<div><b>② 量产怎么做</b>固定标定顺序（内环到外环）、每项有输入条件 / 方法 / 判据 / 记录；标定数据版本化管理。</div>
+<div><b>③ 如何证明</b>每个标定量对应的验收试验数据（阶跃、扫频、外特性、脉动频谱）；全温度 / 电压范围抽样复测。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>D06 全部步骤通过；扭矩传感器、温箱 / 冷却控制、可编程电源（电压扫描）。</li>
+<li>XCP 测量与标定连接稳定，DAQ 采样率满足（电流环相关信号建议按主中断事件采集）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>顺序</th><th>标定项</th><th>方法</th><th>判据</th></tr>
+<tr><td>1</td><td>偏移 / 增益 / 零位 / 延迟补偿 Kc</td><td>C01、C09、C03</td><td>静止电流、正反对称、力矩常数平直</td></tr>
+<tr><td>2</td><td>死区补偿</td><td>低速恒力矩，最小化 6 阶</td><td>6 阶分量下降、小电流无噪声</td></tr>
+<tr><td>3</td><td>电流环 Kp/Ki（分电流区间）</td><td>阶跃 + 扫频注入</td><td>开环穿越 ≈ 1 kHz、相位裕度 ≥ 45°、闭环谐振峰 &lt; 1 dB、超调 &lt; 10%</td></tr>
+<tr><td>4</td><td>解耦前馈系数</td><td>高速阶跃，最小化 id 扰动</td><td>id 扰动 &lt; 1~2 A</td></tr>
+<tr><td>5</td><td>MTPA 表</td><td>电流角扫描</td><td>同力矩电流最小</td></tr>
+<tr><td>6</td><td>弱磁 PI / Vtarget / 前馈表</td><td>扫速 + 急加速 + 电压跌落</td><td>无振荡、外特性达标</td></tr>
+<tr><td>7</td><td>速度 / 位置环、滤波</td><td>阶跃、负载扰动</td><td>超调、恢复时间</td></tr>
+<tr><td>8</td><td>观测器 / PLL</td><td>与旋变对比</td><td>各转速角度误差</td></tr>
+<tr><td>9</td><td>保护阈值、降额曲线</td><td>故障注入、温升试验</td><td>检出时间、零误报</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>扫频注入测闭环频响：
+   iqRef = iq0 + a·sin(2πft)，f 从 50 Hz 扫到 3 kHz；每个频点记录稳态 iq 的幅值比与相位
+   幅值比 |T(jω)| = A_out/A_in，−3 dB 频率即闭环带宽；由于延迟，闭环 −3 dB 点通常高于开环穿越频率 ωc，
+   零极点对消设计中的「带宽 1 kHz」严格说指 ωc；开环特性可由 L = T/(1 − T) 推得，或在误差处注入直接测开环
+注入幅值要小（如额定 5%）避免饱和；f 接近 PWM/10 以上时注意采样混叠与 DAQ 采样率</div>
+<div id="anim-D07"></div>
+<div class="anim-note"><b>动画在演示什么：</b>在 iq 给定上叠加小幅正弦，扫描频率，计算闭环幅频（点）并与设计（虚线）比较。被控对象为离散 RL + 1.5Ts 延迟，控制器 Kp 按「标定电感 L̂」设计。<br>
+<b>拖动滑块：</b>真实 Lq 与 L̂ 偏差（模拟饱和）：真实电感变小 → 实际带宽升高、谐振峰出现；Kp 缩放：观察带宽与峰值随 Kp 变化，观察开环穿越频率、相位裕度与谐振峰的变化，找出穿越 ≈ 1 kHz、相位裕度 ≥ 45°、峰值 &lt; 1 dB 的组合。<br>
+<b>正常：</b>测量点贴近设计曲线。<b>异常：</b>出现谐振峰（相位裕度不足）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>软件提供扫频注入功能（台架模式）：注入频率、幅值、轴选择均为标定量；记录用 DAQ 或片上相关运算（每频点计算 sin/cos 相关得到幅值与相位，减少数据量）。</li>
+<li>分电流区间的电流环参数：按 |iq| 查表 Kp（应对 Lq 饱和）。</li>
+<li>每次标定修改：记录版本号、修改人、原因、验证数据（标定数据库）。</li>
+<li>标定完成后执行「回归套件」：D05 测试用例在台架复测。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>扫频：低频幅值比 ≈ 0 dB，平坦区一直延续到 ωc 附近，−3 dB 点略高于 ωc（延迟所致），相位单调下降。</li>
+<li>若出现 &gt; 3 dB 的峰值 → 相位裕度不足，降 Kp 或减小延迟。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 扫频注入 + 片上单频点相关分析（台架模式）*/
+volatile float Cal_SweepFreq_Hz = 100.0f;
+volatile float Cal_SweepAmp_A   = 1.5f;
+static float s_ph, s_accIs, s_accIc, s_accRs, s_accRc; static uint32_t s_n;
+
+void Bench_Sweep_Isr(void)     /* 主中断中调用（float，S32K146 FPU）*/
+{
+    float s = sinf(s_ph), c = cosf(s_ph);
+    float ref = Cal_SweepAmp_A * s;
+    gBench.iqInj_A = ref;                                 /* 叠加到 iqRef */
+    float y = Q15_TO_AMP(gFoc.iq) - gBench.iq0_A;
+    s_accRs += ref * s;  s_accRc += ref * c;              /* 输入相关 */
+    s_accIs += y * s;    s_accIc += y * c;                /* 输出相关 */
+    s_n++;
+    s_ph += 6.2831853f * Cal_SweepFreq_Hz * 50e-6f;
+    if (s_ph &gt; 6.2831853f) { s_ph -= 6.2831853f; }
+}
+void Bench_SweepResult(float *magDb, float *phaseDeg)     /* 整数个周期后调用 */
+{
+    float gin = sqrtf(s_accRs * s_accRs + s_accRc * s_accRc);
+    float gout = sqrtf(s_accIs * s_accIs + s_accIc * s_accIc);
+    *magDb    = 20.0f * log10f(gout / gin);
+    *phaseDeg = (atan2f(s_accIc, s_accIs) - atan2f(s_accRc, s_accRs)) * 57.2958f;
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>同一套标定在另一批电机上啸叫</h5><dl>
+<dt>现象</dt><dd>新批次电机电流环振荡。</dd>
+<dt>可能根因</dt><dd>电感批次差异 / 磁钢差异；参数裕量不足。</dd>
+<dt>排查</dt><dd>对新批次做参数辨识与扫频。</dd>
+<dt>修复</dt><dd>标定时以最不利参数验证鲁棒性（相位裕度留足）。</dd>
+<dt>验证</dt><dd>多批次抽样扫频合格。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>扫频结果在高频段乱跳</h5><dl>
+<dt>现象</dt><dd>1.5 kHz 以上幅值 / 相位数据离散。</dd>
+<dt>可能根因</dt><dd>DAQ 采样率不足（混叠）；注入幅值太小信噪比低；积分周期非整数。</dd>
+<dt>排查</dt><dd>改用片上相关运算；整数周期积分。</dd>
+<dt>修复</dt><dd>如上。</dd>
+<dt>验证</dt><dd>重复测量一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>标定数据回退</h5><dl>
+<dt>现象</dt><dd>已解决的问题在新版本软件中重现。</dd>
+<dt>可能根因</dt><dd>软件升级时标定数据未迁移或被默认值覆盖。</dd>
+<dt>排查</dt><dd>对比 HEX / 标定文件差异。</dd>
+<dt>修复</dt><dd>标定数据版本管理与软件版本绑定；迁移脚本。</dd>
+<dt>验证</dt><dd>回归套件通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>只在常温、12 V 下标定：低温 / 9 V / 16 V 下表现可能完全不同。</li>
+<li>在整车主观评价阶段修改底层电流环参数：会改变所有上层标定的基础；底层参数应在台架阶段冻结。</li>
+<li>多人同时修改同一标定集无记录。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D07" id="quiz-D07"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：标定顺序、扫频注入原理与注意事项、分区间参数、鲁棒性验证、标定数据管理。</li></ul></div>
+</section>
+
+<!-- ================= D08 ================= -->
+<section class="chap" id="D08" data-title="D08 标定变量与 XCP">
+<h2 class="chap-h">D08 常用标定变量、观测信号与 XCP 信号列表</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 8 节（完整参数表模板见 X4）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>调试与标定接口：软件与 CANape 之间的「合同」</td></tr>
+<tr><th>输入 / 输出</th><td>输入：代码变量、Q 格式；输出：A2L 描述（MEASUREMENT / CHARACTERISTIC / COMPU_METHOD）</td></tr>
+<tr><th>工程价值</th><td>测量信号选得好，问题定位快一个数量级；A2L 错误会导致标定写错值</td></tr>
+<tr><th>上下游依赖</th><td>依赖全部模块；服务 D06、D07、E 模块</td></tr>
+<tr><th>适用角色</th><td>标定工程师、软件</td></tr>
+<tr><th>前置数学依赖</th><td>A01 换算、D02 Q 格式</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>XCP 是 FOC 调试的「示波器 + 万用表」：在不停机的情况下观察内部变量、在线修改参数。</div>
+<div><b>② 量产怎么做</b>A2L 由构建工具从 ELF 地址 + 变量描述自动生成；标定量放在独立内存段（支持页切换 / 参考页工作页）；DAQ 事件与任务周期对应。</div>
+<div><b>③ 如何证明</b>每个标定量写入后读回校验；物理值与仪表比对；A2L 与 ELF 版本一致性检查。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>XCP on CAN（或 CAN FD）协议栈、DAQ 事件通道配置；CANape 工程。</li>
+<li>内存段规划：标定 RAM / Flash 段（参考页 / 工作页机制以协议栈与 MCU 能力为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>不满足：手工维护 A2L 地址 → 每次编译地址变化即失效。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<h4 class="sub">推荐 DAQ 测量信号（按调试场景分组）</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>分组</th><th>信号</th><th>格式 → 物理</th><th>事件</th><th>用途</th></tr>
+<tr><td>采样</td><td>gFoc.adcIa / adcIb</td><td>uint16 码值</td><td>FOC 主中断（分频）</td><td>偏移、饱和</td></tr>
+<tr><td>电流</td><td>gFoc.ia / ib / iAlpha / iBeta</td><td>Q15 × 50 A</td><td>主中断</td><td>XY 图、增益</td></tr>
+<tr><td>dq</td><td>gFoc.id / iq / idRef / iqRef</td><td>Q15 × 50 A</td><td>主中断</td><td>阶跃、纹波频谱</td></tr>
+<tr><td>电压</td><td>gFoc.vd / vq / vSat / vdcPu</td><td>Q15 × 16 V</td><td>主中断</td><td>饱和、弱磁</td></tr>
+<tr><td>角度</td><td>gFoc.thetaE / thetaM / thetaEObs / thetaEIncPerTs</td><td>uint16 × 360/65536</td><td>主中断</td><td>零位、观测对比</td></tr>
+<tr><td>速度</td><td>gFoc.spdRpmFilt / wePu_q15</td><td>rpm / Q15</td><td>1 ms</td><td>速度环</td></tr>
+<tr><td>占空比</td><td>gFoc.dutyA/B/C</td><td>Q15 × 100%</td><td>主中断</td><td>SVPWM、采样窗口</td></tr>
+<tr><td>状态</td><td>gFoc.state / 故障码 / 冻结帧</td><td>枚举</td><td>10 ms</td><td>流程、诊断</td></tr>
+<tr><td>性能</td><td>gDiag.isrMaxTicks / CPU 负载</td><td>计数 → µs</td><td>100 ms</td><td>时序余量</td></tr>
+</table></div>
+<h4 class="sub">核心标定量（CHARACTERISTIC）</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>标定量</th><th>格式</th><th>物理换算</th><th>章节</th></tr>
+<tr><td>Cal_IaOffset_cnt / Cal_IbOffset_cnt</td><td>int16</td><td>码值</td><td>A01 C01</td></tr>
+<tr><td>Cal_IaGainCorr_q15 / Cal_IbGainCorr_q15</td><td>Q15</td><td>×1/32768</td><td>C01</td></tr>
+<tr><td>Cal_ThetaOffset</td><td>uint16</td><td>×360/65536 °</td><td>C09</td></tr>
+<tr><td>Cal_AngCompK_q8</td><td>Q8</td><td>×1/256（×Ts）</td><td>C03</td></tr>
+<tr><td>Cal_IdKp_q12 / Cal_IqKp_q12</td><td>Q12</td><td>×(16/50)/4096 V/A</td><td>A08 C05</td></tr>
+<tr><td>Cal_IdKiTs_q15 / Cal_IqKiTs_q15</td><td>Q15</td><td>×(16/50)/32768/Ts V/(A·s)</td><td>A08</td></tr>
+<tr><td>Cal_KLq_q15 / Cal_KLd_q15 / Cal_KPsi_q15</td><td>Q15</td><td>见 C05 基值</td><td>C05</td></tr>
+<tr><td>Cal_MtpaId_q15[13]</td><td>Q15 数组（CURVE）</td><td>×50/32768 A</td><td>C06</td></tr>
+<tr><td>Cal_FwVoltK_q15 / Cal_FwKp_q12 / Cal_FwKiTs_q15</td><td>Q15/Q12</td><td>—</td><td>C07</td></tr>
+<tr><td>Cal_SpdLpfK_q15 / Cal_SpdKp_q12 / Cal_SpdKiTs_q15</td><td>Q15/Q12</td><td>—</td><td>A05 C08</td></tr>
+<tr><td>Cal_DtCompV_q15 / Cal_DtI0_q15</td><td>Q15</td><td>×16/32768 V</td><td>C13</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>本节为接口清单。</p>
+<div class="formula"><span class="tg tg-fix">【定点实现】</span>A2L 线性换算 COMPU_METHOD（RAT_FUNC 或 LINEAR）：phys = a·raw + b
+   gFoc.iq：a = 50/32768 = 0.00152588，b = 0，单位 A
+   Cal_IqKp_q12：a = (16/50)/4096 = 7.8125e−5，单位 V/A
+   Cal_ThetaOffset：a = 360/65536 = 0.0054932，单位 °</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>变量声明：测量量 volatile、全局非 static（或用链接器保留）、避免被优化；标定量放 <code>.calib</code> 段。</li>
+<li>变量描述：在代码中以注释 / 宏标注格式与单位，由脚本提取生成 A2L（或使用工具链 A2L 生成器）。</li>
+<li>DAQ 事件：主中断事件（每 N 次一次）、1 ms、10 ms；主中断事件信号数量受执行时间限制（D03）。</li>
+<li>发布前检查：A2L 与 ELF 匹配（地址、EPK 版本标识）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>CANape 中电流物理值与功率分析仪一致；角度显示 0~360°。</li>
+<li>主中断事件 DAQ 打开后，主中断执行时间增加量在预算内。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 标定段与测量变量声明（GCC 风格，段名以链接脚本为准）*/
+#define CALIB  __attribute__((section(".calib")))
+
+CALIB volatile int16_t  Cal_IdKp_q12   = 3619;   /* @a2l phys=raw*7.8125e-5 unit=V/A min=0 max=4 */
+CALIB volatile int16_t  Cal_IqKp_q12   = 6032;   /* @a2l phys=raw*7.8125e-5 unit=V/A */
+CALIB volatile uint16_t Cal_ThetaOffset = 0u;    /* @a2l phys=raw*0.0054932 unit=deg */
+
+FOC_tst gFoc;                                    /* 测量：@a2l struct FOC_tst */
+
+/* 片段示意：A2L CHARACTERISTIC（由脚本生成）
+/begin CHARACTERISTIC Cal_IqKp_q12 "" VALUE 0x1FFF8010 RL_SWORD 0 CM_Kp_q12 0 4
+/end CHARACTERISTIC
+/begin COMPU_METHOD CM_Kp_q12 "" LINEAR "%8.5" "V/A" COEFFS_LINEAR 7.8125e-5 0
+/end COMPU_METHOD
+*/</code></pre>
+<p class="note">地址 0x1FFF8010 仅为示意，实际由链接结果决定；A2L 关键字细节以 ASAM MCD-2 MC 标准与所用工具为准 <span class="tg tg-check">【待核对】</span>。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>标定修改后不生效</h5><dl>
+<dt>现象</dt><dd>CANape 修改 Kp，行为不变。</dd>
+<dt>可能根因</dt><dd>代码在初始化时把 Cal_ 复制到局部变量后不再读取；编译器优化（非 volatile）；在参考页而非工作页修改。</dd>
+<dt>排查</dt><dd>查代码读取位置；读回地址内容。</dd>
+<dt>修复</dt><dd>在使用处读取标定量（或提供刷新机制）；volatile；页切换配置。</dd>
+<dt>验证</dt><dd>修改即生效。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>CANape 显示乱码 / 数值错误</h5><dl>
+<dt>现象</dt><dd>新编译版本后部分信号显示异常。</dd>
+<dt>可能根因</dt><dd>A2L 未随 ELF 更新，地址错位。</dd>
+<dt>排查</dt><dd>EPK 检查。</dd>
+<dt>修复</dt><dd>构建流程自动生成 A2L。</dd>
+<dt>验证</dt><dd>EPK 一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>DAQ 丢帧</h5><dl>
+<dt>现象</dt><dd>高速记录时数据有缺口。</dd>
+<dt>可能根因</dt><dd>CAN 带宽不足（信号太多 / 频率太高）。</dd>
+<dt>排查</dt><dd>计算带宽：信号字节 × 事件频率 vs 总线容量。</dd>
+<dt>修复</dt><dd>降频、减少信号、使用 CAN FD 或片上缓存后上传。</dd>
+<dt>验证</dt><dd>无丢帧。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>结构体成员对齐与 A2L 偏移不一致（编译器填充）。</li>
+<li>量产软件保留 XCP 标定写权限：需要安全访问控制。</li>
+<li>Q 格式变更（如 Kp 从 Q15 改 Q12）未同步 A2L（A08 高频故障）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D08" id="quiz-D08"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：DAQ 信号分组、标定量清单、COMPU_METHOD 换算、A2L 与 ELF 一致性、带宽计算。</li></ul></div>
+</section>
+
+<!-- ================= 模块 D 综合自测 ================= -->
+<section class="chap" id="D-test" data-title="模块 D 章节综合自测卷">
+<h2 class="chap-h">模块 D 章节综合自测卷</h2>
+<p class="chap-sub">从 D01~D08 题库随机抽取 16 道客观题 + 2 道主观题，交卷统一判分。</p>
+<div class="exam" data-scope="D" data-nobj="16" data-nsub="2" data-key="examD"></div>
+</section>

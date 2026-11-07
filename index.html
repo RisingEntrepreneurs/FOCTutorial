@@ -3689,6 +3689,1002 @@ void FOC_DeadTimeComp(int32_t *va, int32_t *vb, int32_t *vc,
 <p class="chap-sub">从 C01~C13 题库随机抽取 20 道客观题 + 3 道主观题，交卷统一判分。</p>
 <div class="exam" data-scope="C" data-nobj="20" data-nsub="3" data-key="examC"></div>
 </section>
+
+<!-- ================= D01 ================= -->
+<section class="chap" id="D01" data-title="D01 离散化">
+<h2 class="chap-h">D01 离散化：连续域公式转离散——前向欧拉、后向欧拉、双线性变换</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 1 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>所有连续域设计（PI、滤波器、观测器、电机模型）落到 MCU 的必经步骤</td></tr>
+<tr><th>输入 / 输出</th><td>输入：传递函数 G(s) / 微分方程、采样周期 Ts；输出：差分方程 y[k] = f(y[k−1], x[k], …)</td></tr>
+<tr><th>工程价值</th><td>离散化方法不同，同一组参数在高频处的增益与相位不同；Ts 与带宽之比越小差异越大</td></tr>
+<tr><th>上下游依赖</th><td>上游 A05~A08；下游 D02 定点、D05 仿真模型一致性</td></tr>
+<tr><th>适用角色</th><td>算法、模型开发</td></tr>
+<tr><th>前置数学依赖</th><td>A05 差分、A06 离散积分、A07 传递函数</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>MCU 只能每 Ts 计算一次；s 必须映射到 z。映射方法决定稳定性保持、频率畸变和代码形式。</div>
+<div><b>② 量产怎么做</b>积分器多用后向欧拉（PI 位置式）；滤波器、观测器在带宽接近采样频率时用双线性（Tustin）或精确零阶保持（ZOH）离散；模型与代码使用同一方法。</div>
+<div><b>③ 如何证明</b>离散模型与连续模型在目标带宽内的伯德图对比（幅值误差、相位误差）；SIL 中代码与模型逐点一致。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>已知 Ts（电流环 50 µs、速度环 1 ms）与被离散对象的带宽。</li>
+<li>经验：带宽 ≤ fs/20 时三种方法差异小；接近 fs/5 时差异显著。</li>
+<li>不满足：前向欧拉离散高带宽对象可能把稳定系统变成不稳定。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（z = e^(sTs) 的三种近似）
+前向欧拉：s ≈ (z − 1)/Ts           稳定域映射不保持：稳定连续极点可能映射到单位圆外
+后向欧拉：s ≈ (z − 1)/(z·Ts)       总是保持稳定（甚至把部分不稳定变为稳定），引入额外相位滞后
+双线性 Tustin：s ≈ (2/Ts)·(z − 1)/(z + 1)   稳定性保持；频率轴压缩（预畸变 ωa = (2/Ts)·tan(ωd·Ts/2) 可校正关键频点）
+零阶保持 ZOH 精确离散（对象建模用）：一阶 1/(τs+1) → y[k] = a·y[k−1] + (1 − a)·x[k−1]，a = e^(−Ts/τ)
+例：一阶低通 1/(τs + 1)
+   前向：y[k] = y[k−1] + (Ts/τ)·(x[k−1] − y[k−1])           Ts/τ &gt; 2 时发散
+   后向：y[k] = y[k−1] + Ts/(τ+Ts)·(x[k] − y[k−1])        A05 使用的形式
+   Tustin：y[k] = [(2τ − Ts)·y[k−1] + Ts·(x[k] + x[k−1])]/(2τ + Ts)
+PI：C(s) = Kp + Ki/s → 后向：u[k] = Kp·e[k] + I[k]，I[k] = I[k−1] + Ki·Ts·e[k]（A08）</div>
+<div id="anim-D01"></div>
+<div class="anim-note"><b>动画在演示什么：</b>一阶低通（截止频率 fc）在采样频率 fs 下用三种方法离散，左图为阶跃响应，右图为幅频误差（离散 − 连续，dB）。<br>
+<b>拖动滑块：</b>fc/fs 从 0.01 增加到 0.4：后向欧拉响应变慢、Tustin 在奈奎斯特附近幅值压到 0、前向欧拉在 fc/fs 较大时出现振荡甚至发散（Ts/τ &gt; 2 即 fc/fs &gt; 0.318）。<br>
+<b>正常：</b>fc/fs ≤ 0.05 三者几乎重合。<b>异常：</b>前向欧拉发散 / 振荡。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>确定每个模块的执行周期 Ts，并写入模块头文件（参数与 Ts 绑定，A05 踩坑）。</li>
+<li>选择离散方法：积分器后向；低通后向或 Tustin；对象模型（观测器中的电机模型）ZOH 或前向（需检查稳定性条件）。</li>
+<li>离线计算系数（MATLAB c2d 或手算），以标定量形式存储；若 Ts 可变（变周期任务），系数需在线计算。</li>
+<li>与 Simulink 模型的离散方法一致（D05），SIL 逐点比对。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>fc/fs 小：三种方法阶跃响应几乎相同。</li>
+<li>C10 SMO 电流模型用前向欧拉：Ts/Ls·Rs 很小，稳定；但高转速时反电动势变化快，需检查精度。</li>
+<li>速度环 1 ms、带宽 40 Hz：fc/fs = 0.04，方法差异可忽略；电流环 50 µs、带宽 1 kHz：fc/fs = 0.05，差异小但延迟（1.5Ts）不可忽略。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 通用一阶低通（Tustin），float 版本用于 1 ms 任务；系数离线计算 */
+typedef struct { float b0, b1, a1, x1, y1; } LPF1_tst;
+
+void Lpf1_InitTustin(LPF1_tst *f, float fc_Hz, float Ts)
+{
+    float tau = 1.0f / (6.2831853f * fc_Hz);
+    float den = 2.0f * tau + Ts;
+    f-&gt;b0 = Ts / den;  f-&gt;b1 = Ts / den;
+    f-&gt;a1 = (2.0f * tau - Ts) / den;
+    f-&gt;x1 = 0.0f;      f-&gt;y1 = 0.0f;
+}
+static inline float Lpf1_Run(LPF1_tst *f, float x)
+{
+    float y = f-&gt;b0 * x + f-&gt;b1 * f-&gt;x1 + f-&gt;a1 * f-&gt;y1;
+    f-&gt;x1 = x;  f-&gt;y1 = y;
+    return y;
+}
+
+/* 用法：速度信号 50 Hz 低通，Ts = 1 ms */
+static LPF1_tst s_spdLpf;
+void App_Init(void) { Lpf1_InitTustin(&amp;s_spdLpf, 50.0f, 1.0e-3f); }</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>观测器在高转速发散</h5><dl>
+<dt>现象</dt><dd>SMO / 龙伯格在额定转速以上估计值振荡发散。</dd>
+<dt>可能根因</dt><dd>前向欧拉离散的模型在高 ωe·Ts 时失稳（旋转项 jωe 离散化误差）。</dd>
+<dt>排查</dt><dd>离线计算离散系统特征值随 ωe 变化；降低 Ts 对比。</dd>
+<dt>修复</dt><dd>改用后向 / Tustin / 精确离散；或旋转项用 e^(jωeTs) 精确旋转。</dd>
+<dt>验证</dt><dd>全转速范围观测收敛。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>代码与仿真结果在阶跃处差一拍</h5><dl>
+<dt>现象</dt><dd>SIL 对比中代码输出总比模型晚一个采样。</dd>
+<dt>可能根因</dt><dd>模型用前向（使用 x[k−1]），代码用后向（x[k]），或反之。</dd>
+<dt>排查</dt><dd>对比单位阶跃第一个非零输出时刻。</dd>
+<dt>修复</dt><dd>统一离散方法。</dd>
+<dt>验证</dt><dd>SIL 逐点误差 &lt; 1 LSB。</dd></dl></div>
+<div class="issue"><h5>易错点：改了任务周期没改系数</h5><dl>
+<dt>现象</dt><dd>速度滤波从 1 ms 任务移到 2 ms 任务后响应变慢一倍。</dd>
+<dt>根因</dt><dd>系数含 Ts。</dd>
+<dt>排查</dt><dd>代码审查系数来源。</dd>
+<dt>修复</dt><dd>系数由 Ts 计算或按任务周期分别标定。</dd>
+<dt>验证</dt><dd>截止频率实测正确。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>Tustin 的频率压缩：设计 2 kHz 陷波器在 20 kHz 采样下会偏到更低频，需预畸变。</li>
+<li>离散化不能消除执行延迟：1.5Ts 延迟是额外的，与离散方法无关。</li>
+<li>Simulink「Discrete-Time Integrator」默认方法要与代码核对（A06 易错点）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D01" id="quiz-D01"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：三种映射公式与稳定性、一阶低通三种差分方程、fc/fs 经验、预畸变、模型与代码一致。</li>
+<li>面试高频：「前向欧拉为什么可能不稳定？」</li></ul></div>
+</section>
+
+<!-- ================= D02 ================= -->
+<section class="chap" id="D02" data-title="D02 定点实现">
+<h2 class="chap-h">D02 定点实现：Q 格式选择、溢出保护、缩放、三角函数查表</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 2 节（浮点 vs 定点对比见 X2）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>所有中断内算法的数值表示</td></tr>
+<tr><th>输入 / 输出</th><td>输入：物理量范围、精度要求；输出：Q 格式、基值、运算宏</td></tr>
+<tr><th>工程价值</th><td>溢出导致的符号翻转是最危险的定点错误之一（电压反向、电流失控）</td></tr>
+<tr><th>上下游依赖</th><td>上游 A01 标幺；下游全部中断代码、D08 A2L 换算</td></tr>
+<tr><th>适用角色</th><td>MCU 底层、算法</td></tr>
+<tr><th>前置数学依赖</th><td>A01 线性映射与 Q15</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>无 FPU 或对确定性执行时间有要求的平台依赖定点；即便有单精度 FPU（S32K146 为 Cortex-M4F），量产代码中定点仍常用于确定性、与历史代码 / 库兼容、以及 A2L 标定直观。</div>
+<div><b>② 量产怎么做</b>统一标幺基值 + Q15 为主、增益用 Q12、积分状态 Q30；所有乘法 int32 中间量 + 饱和；溢出风险点做静态分析与边界单元测试。</div>
+<div><b>③ 如何证明</b>SIL 定点 vs 浮点模型误差统计；边界值单元测试（−32768、32767、最大 / 最小组合）；MIL→SIL→PIL 一致。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>每个信号的物理范围（含故障工况）、所需分辨率。</li>
+<li>编码规范：整数提升、负数右移约定（A01 踩坑）、饱和库函数。</li>
+<li>不满足：基值过小 → 饱和失真 / 诊断失效（B07、C07、C12 的基值陷阱）；基值过大 → 分辨率不足。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-fix">【定点实现】</span>
+Qm.n（有符号 16 位，m + n = 15）：值 = int / 2ⁿ，范围 [−2^m, 2^m − 2⁻ⁿ]，分辨率 2⁻ⁿ
+   Q15：[−1, 1)，LSB 3.05e−5；Q12：[−8, 8)，LSB 2.44e−4
+乘法：Qa × Qb = Q(a+b)（32 位）→ 右移 (a + b − c) 得 Qc
+加法：同格式才能相加；结果可能溢出 → 用 int32 中间量再饱和
+除法：尽量避免；用预计算倒数（如 1/Vdc 每周期一次）
+舍入：右移为向负无穷截断，平均误差 −0.5 LSB；需要时 (x + (1 &lt;&lt; (s−1))) &gt;&gt; s 四舍五入
+溢出两种结果：回绕（wrap，int16 默认行为：32767 + 1 = −32768）vs 饱和（钳在边界）——控制量必须饱和
+基值选择准则：基值 ≥ 最大物理值 × 1.2（含故障 / 测试工况），并检查分辨率是否满足最小控制量
+   案例反思：I_BASE = 50 A 与 C07 的 60 A 电流极限、C12 的过流阈值冲突（X2 给出修正方案）</div>
+<div id="anim-D02"></div>
+<div class="anim-note"><b>动画在演示什么：</b>一个正弦电压给定 vq = A·sin(ωt) 用 Q 格式表示后再做 ×K 增益运算（模拟 PI 输出累加）。比较「回绕」与「饱和」两种溢出处理，以及小数位数对量化误差的影响。<br>
+<b>拖动滑块：</b>幅值 × 增益超过格式范围时，回绕版本出现正负跳变（真实电机中就是电压瞬间反向，可能过流）；饱和版本只是削顶。减少小数位 n，量化台阶变明显。<br>
+<b>正常：</b>不超范围、误差 ≤ 0.5 LSB。<b>异常：</b>回绕跳变（红色）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>建立 foc_fix.h</b>：类型（q15_t、q12_t）、饱和、乘法、乘加、四舍五入宏，全项目唯一来源（X2 给出完整可复制版本）。</li>
+<li><b>信号字典</b>：每个变量的格式、基值、范围写在注释和 A2L（B07 / D08）。</li>
+<li><b>溢出分析</b>：对每个加法 / 乘法写出最坏范围，标注是否需要饱和。</li>
+<li><b>查表</b>：sin 表 1025 点 Q15（A03），atan2 用八分区 + 小表或 CORDIC，sqrt 用整数开方（A02）。</li>
+<li><b>测试</b>：边界单元测试 + 随机输入与 double 参考比对（误差统计）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>定点与浮点电流环阶跃对比：差异在 LSB 量级，若出现系统性偏差 → 截断累积（积分器位宽不足，A06）。</li>
+<li>出现突然跳变 → 回绕溢出。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* foc_fix.h 核心片段（完整版见 X2）*/
+typedef int16_t q15_t;
+typedef int16_t q12_t;
+typedef int32_t q30_t;
+
+#define Q15(x)        ((q15_t)((x) &gt;= 0.999969f ? 32767 : ((x) &lt;= -1.0f ? -32768 : (int32_t)((x) * 32768.0f + ((x) &gt;= 0 ? 0.5f : -0.5f)))))
+#define Q12(x)        ((q12_t)((int32_t)((x) * 4096.0f + ((x) &gt;= 0 ? 0.5f : -0.5f))))
+
+static inline q15_t Q15_Add(q15_t a, q15_t b) { return Q15_Sat((int32_t)a + b); }
+static inline q15_t Q15_MulRnd(q15_t a, q15_t b) { return Q15_Sat(((int32_t)a * b + (1 &lt;&lt; 14)) &gt;&gt; 15); }
+static inline q15_t Q15_MulQ12(q15_t x, q12_t k) { return Q15_Sat(((int32_t)x * k) &gt;&gt; 12); }
+
+/* 乘加：y = a·b + c·d（Park 用），int32 中间量不溢出（|a·b + c·d| ≤ 2³¹ 当 |a|,|c| ≤ 32767）*/
+static inline q15_t Q15_MAC2(q15_t a, q15_t b, q15_t c, q15_t d)
+{
+    return Q15_Sat(((int32_t)a * b + (int32_t)c * d) &gt;&gt; 15);
+}</code></pre>
+<p class="note">Q15 宏中常量表达式仅在编译期（初始化标定量）使用；中断中不要出现浮点到定点的运行时转换（若使用 FPU 也要计入执行时间）。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>偶发电流尖峰、电压反向</h5><dl>
+<dt>现象</dt><dd>大电流 / 高速工况偶发 vq 符号翻转，电流冲击。</dd>
+<dt>可能根因</dt><dd>某处 int16 加法未饱和（如 PI 输出 + 前馈）回绕。</dd>
+<dt>排查</dt><dd>XCP 高速记录相关变量；代码审查所有 int16 加减；用 −32768/32767 构造单元测试。</dd>
+<dt>修复</dt><dd>int32 中间量 + 饱和。</dd>
+<dt>验证</dt><dd>边界测试通过，耐久无复现。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>小电流时控制「发涩」、有死区感</h5><dl>
+<dt>现象</dt><dd>iq 给定 &lt; 0.5 A 时实际电流不跟随。</dd>
+<dt>可能根因</dt><dd>积分器 Q15 截断（A06）；Ki·Ts 的 Q15 值太小，量化后为 0 或误差大。</dd>
+<dt>排查</dt><dd>计算最小误差下每步积分增量的 LSB 数。</dd>
+<dt>修复</dt><dd>积分状态 Q30；KiTs 用更高精度格式。</dd>
+<dt>验证</dt><dd>小信号阶跃无稳态误差。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>CANape 显示值与代码内部不一致</h5><dl>
+<dt>现象</dt><dd>标定量写入 0.5，代码行为像 0.25。</dd>
+<dt>可能根因</dt><dd>A2L 中 COMPU_METHOD 用 Q15，代码中按 Q14 使用。</dd>
+<dt>排查</dt><dd>读原始十六进制值核对。</dd>
+<dt>修复</dt><dd>A2L 由代码头文件自动生成或统一检查（D08）。</dd>
+<dt>验证</dt><dd>物理值一致。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>(−32768) × (−32768) &gt;&gt; 15 = 32768 超出 Q15：乘法后也必须饱和（A01）。</li>
+<li>abs(−32768) 在 int16 中仍为 −32768：取绝对值前先饱和到 −32767。</li>
+<li>编译器整数提升：int16 × int16 在 C 中先提升为 int（32 位），但赋值回 int16 会截断——必须显式处理。</li>
+<li>混合基值：两个不同基值的量直接相加，结果无物理意义。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D02" id="quiz-D02"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：Qm.n 范围与分辨率、乘法格式规则、饱和 vs 回绕、基值选择准则、积分位宽、abs(−32768)。</li>
+<li>面试高频：「定点乘法怎么做？怎么防溢出？」</li></ul></div>
+</section>
+
+<!-- ================= D03 ================= -->
+<section class="chap" id="D03" data-title="D03 中断架构">
+<h2 class="chap-h">D03 中断架构：主中断、慢速任务、标定任务、故障快速通路</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 3 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>软件运行时结构：决定每段代码在什么时刻、以什么优先级执行</td></tr>
+<tr><th>输入 / 输出</th><td>输入：功能列表与时间要求；输出：中断 / 任务划分、优先级、数据交换机制</td></tr>
+<tr><th>工程价值</th><td>FOC 主中断不能被阻塞、不能超时；慢任务与通信不能破坏中断数据一致性</td></tr>
+<tr><th>上下游依赖</th><td>上游 B05、B06；下游 D04、D08、C12</td></tr>
+<tr><th>适用角色</th><td>MCU 底层、软件架构</td></tr>
+<tr><th>前置数学依赖</th><td>无（时间预算计算）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>不同功能的时间尺度相差 4 个数量级（2 µs 硬件保护、50 µs 电流环、1 ms 速度环、100 ms 热模型），必须分层调度。</div>
+<div><b>② 量产怎么做</b>硬件故障 → PWM 硬件关断（无需 CPU）；ADC 完成中断（最高软件优先级）跑 FOC；1 ms / 10 ms 周期任务（RTOS 或定时器中断）；XCP / CAN 在低优先级处理。</div>
+<div><b>③ 如何证明</b>最坏执行时间（WCET）测量、CPU 负载统计、中断抖动测量、数据一致性代码审查与压力测试。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>MCU 中断优先级与嵌套配置（Cortex-M NVIC），是否使用 RTOS / AUTOSAR OS。</li>
+<li>各功能的周期与最坏执行时间估计。</li>
+<li>不满足：XCP 读写、Flash 操作、长时间关中断阻塞 FOC 主中断 → 电流环周期性失控。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>层级</th><th>触发</th><th>周期</th><th>内容</th><th>优先级</th></tr>
+<tr><td>硬件保护</td><td>比较器 / 驱动故障</td><td>—</td><td>PWM 故障输入直接关管</td><td>硬件（无需 CPU）</td></tr>
+<tr><td>故障中断</td><td>PWM 故障标志</td><td>事件</td><td>记录、状态机置 FAULT</td><td>最高</td></tr>
+<tr><td>FOC 主中断</td><td>ADC 转换完成</td><td>50 µs</td><td>采样换算、角度、Clarke/Park、电流环、SVPWM、快速诊断</td><td>高</td></tr>
+<tr><td>2 kHz 任务</td><td>主中断分频</td><td>500 µs</td><td>弱磁环、MTPA 查表（可放 1 ms）</td><td>主中断内分频或中优先级</td></tr>
+<tr><td>1 ms 任务</td><td>定时器 / OS</td><td>1 ms</td><td>速度 / 位置环、给定生成、测速、诊断去抖、状态机</td><td>中</td></tr>
+<tr><td>10 ms / 100 ms</td><td>OS</td><td>10~100 ms</td><td>温度、热模型、降额、NVM、通信信号</td><td>低</td></tr>
+<tr><td>后台</td><td>空闲</td><td>—</td><td>XCP 协议处理、自检</td><td>最低</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+CPU 负载 U = Σ (Ci / Ti)；主中断负载 = C_foc / 50 µs
+示例 <span class="tg tg-case">【案例假设】</span>：C_foc = 20 µs → 40%；1 ms 任务 150 µs → 15%；其余 10% → 总 65%，余量 35%
+单调速率调度可调度性（Liu &amp; Layland 上界，n 个任务）：U ≤ n·(2^(1/n) − 1)（充分条件，n = 3 时 0.78）
+跨层数据：单个对齐 32 位读写原子；多变量用双缓冲 / 序号校验 / 短时关中断</div>
+<div id="anim-D03"></div>
+<div class="anim-note"><b>动画在演示什么：</b>2 ms 时间轴上的执行情况：FOC 主中断（每 50 µs）、1 ms 任务（被主中断抢占后继续）、后台 XCP。若某段代码关中断，会推迟主中断。<br>
+<b>拖动滑块：</b>增大主中断执行时间或 1 ms 任务时间，CPU 负载上升；「关中断时长」超过主中断剩余余量时，主中断被推迟（红色）——这意味着采样到更新的延迟变化，电流环出现抖动。<br>
+<b>正常：</b>主中断准时、负载有余量。<b>异常：</b>红色推迟 / 超载。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>NVIC 优先级：PWM 故障 &gt; ADC（FOC）&gt; 定时器（1 ms）&gt; 通信。</li>
+<li>主中断只做确定性计算：禁止 Flash 写、禁止阻塞调用、禁止可变长度循环。</li>
+<li>跨任务数据：慢任务 → 中断（给定、标定量）用双缓冲 + 「发布」标志；中断 → 慢任务（测量值）用快照结构。</li>
+<li>关中断临界区 &lt; 数 µs，并计入主中断抖动预算。</li>
+<li>执行时间监控：每个任务入口出口时间戳，记录最大值并通过 XCP 读出（B06）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>示波器 GPIO：主中断方波稳定 20 kHz、宽度稳定；1 ms 任务方波被切成多段（抢占）属正常。</li>
+<li>主中断开始时刻抖动 &lt; 1 µs；若有偶发推迟 → 查关中断代码。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 慢任务 → 中断：双缓冲发布给定（避免中断读到半更新的 id/iq 对）*/
+typedef struct { q15_t idRef, iqRef; } REF_tst;
+static REF_tst s_refBuf[2];
+static volatile uint8_t s_refIdx = 0u;           /* 中断读取的缓冲区下标 */
+
+void Ref_Publish_1ms(q15_t idRef, q15_t iqRef)   /* 1 ms 任务调用 */
+{
+    uint8_t w = (uint8_t)(s_refIdx ^ 1u);         /* 写另一块 */
+    s_refBuf[w].idRef = idRef;
+    s_refBuf[w].iqRef = iqRef;
+    __DMB();                                      /* 保证写入顺序 */
+    s_refIdx = w;                                 /* 单字节写入原子：发布 */
+}
+
+void Ref_Fetch_Isr(void)                          /* FOC 主中断调用 */
+{
+    const REF_tst *r = &amp;s_refBuf[s_refIdx];
+    gFoc.idRef = r-&gt;idRef;
+    gFoc.iqRef = r-&gt;iqRef;
+}
+
+/* 主中断分频：2 kHz 弱磁 */
+void FOC_FastLoop_Isr(void)
+{
+    static uint8_t s_div = 0u;
+    /* ... 采样、变换、电流环、SVPWM（B03）... */
+    if (++s_div &gt;= 10u) { s_div = 0u; gFoc.idRef = FOC_FieldWeakenAdjust(gFoc.idRefMtpa); }
+}</code></pre>
+<p class="note">双缓冲在「慢任务写一次、中断读多次」时可靠；若慢任务写入周期短于中断读取周期（不会发生于本例），需要更复杂的三缓冲或序号机制。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>XCP 测量变量多时电流环抖动</h5><dl>
+<dt>现象</dt><dd>CANape 加入大量 DAQ 信号后电流出现周期性扰动。</dd>
+<dt>可能根因</dt><dd>XCP DAQ 采集在主中断中执行或长时间关中断拷贝。</dd>
+<dt>排查</dt><dd>测主中断执行时间随 DAQ 信号数量的变化。</dd>
+<dt>修复</dt><dd>DAQ 事件放到低优先级或限制主中断事件中的信号数量（D08）。</dd>
+<dt>验证</dt><dd>满配 DAQ 下主中断 WCET 仍有余量。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>偶发 iq 给定「跳一下」</h5><dl>
+<dt>现象</dt><dd>id/iq 给定偶发出现不成对的组合（id 新、iq 旧）。</dd>
+<dt>可能根因</dt><dd>慢任务直接写全局变量，中断在两次写之间读取。</dd>
+<dt>排查</dt><dd>代码审查跨上下文变量。</dd>
+<dt>修复</dt><dd>双缓冲发布。</dd>
+<dt>验证</dt><dd>压力测试无复现。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>NVM 写入时电机抖一下</h5><dl>
+<dt>现象</dt><dd>保存标定 / 故障记录时电流异常。</dd>
+<dt>可能根因</dt><dd>Flash 擦写期间从同一 Flash 块取指令 / 关中断，主中断被延迟。</dd>
+<dt>排查</dt><dd>GPIO 测主中断间隔。</dd>
+<dt>修复</dt><dd>使用独立 Data Flash / EEPROM 仿真区，关键中断代码放 RAM 执行，或只在停机时写。</dd>
+<dt>验证</dt><dd>写入期间主中断间隔不变。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>在主中断里调用 printf / 日志函数。</li>
+<li>浮点上下文保存：Cortex-M4F 中断使用 FPU 时的惰性压栈会增加中断延迟，需计入。</li>
+<li>主中断依赖 ADC 完成中断，而 ADC 被其他功能（温度采样）插入转换，导致中断时刻漂移。</li>
+<li><span class="tg tg-red">【风险红线】</span>看门狗只在后台喂：主中断死循环时后台仍在运行喂狗，看门狗失效。应由多层任务共同签到后喂狗。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D03" id="quiz-D03"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：分层与优先级、主中断禁止事项、跨上下文一致性、CPU 负载计算、看门狗签到。</li>
+<li>面试高频：「电机控制软件的中断怎么设计？」</li></ul></div>
+</section>
+
+<!-- ================= D04 ================= -->
+<section class="chap" id="D04" data-title="D04 代码架构">
+<h2 class="chap-h">D04 代码架构：FOC 结构体划分、环间数据流、状态机</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 4 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>软件静态结构：模块划分、数据结构、运行状态</td></tr>
+<tr><th>输入 / 输出</th><td>输入：功能需求、AUTOSAR / 非 AUTOSAR 平台；输出：模块接口、结构体、状态机</td></tr>
+<tr><th>工程价值</th><td>可测试、可标定、可复用；状态机决定上电、故障、模式切换的安全性</td></tr>
+<tr><th>上下游依赖</th><td>上游 D03；下游 D06、D07、D08</td></tr>
+<tr><th>适用角色</th><td>软件架构、全部开发者</td></tr>
+<tr><th>前置数学依赖</th><td>无</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>FOC 链路 10+ 个模块、100+ 个标定量，没有清晰结构就无法单元测试，也无法让标定工程师理解。</div>
+<div><b>② 量产怎么做</b>按「硬件抽象 / 算法 / 应用」分层；算法模块纯函数化（输入结构 → 输出结构）；单一全局运行数据结构 + 标定结构；明确状态机。</div>
+<div><b>③ 如何证明</b>模块单元测试覆盖率、状态机转移测试（含非法转移）、代码静态分析（MISRA）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>平台约束：是否 AUTOSAR（若是，电机控制常以复杂驱动 CDD 形式实现，与 RTE 接口交互 <span class="tg tg-check">【待核对：以项目架构为准】</span>）。</li>
+<li>编码规范：MISRA C、命名规则（本教程：g 前缀全局、Cal_ 标定、s_ 静态）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<h4 class="sub">分层与模块</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>层</th><th>模块</th><th>职责</th></tr>
+<tr><td>硬件抽象（HAL）</td><td>Pwm_*, Adc_*, Res_*（旋变）, Gpio_*</td><td>寄存器访问、触发配置，不含算法</td></tr>
+<tr><td>算法（FOC 核心）</td><td>Foc_Sense, Foc_Angle, Foc_Transform, Foc_CurCtrl, Foc_Svpwm, Foc_Obs</td><td>纯计算，输入输出结构体，可在 PC 上单元测试</td></tr>
+<tr><td>给定与外环</td><td>Foc_RefGen（MTPA / 弱磁 / 限幅）, Foc_SpdCtrl, Foc_PosCtrl</td><td>1 ms 级</td></tr>
+<tr><td>诊断与安全</td><td>Foc_Diag, Foc_Derate</td><td>故障检测、降额、冻结帧</td></tr>
+<tr><td>应用 / 状态</td><td>Foc_Sm（状态机）, Foc_Calib（标定流程）</td><td>模式、上电流程、XCP 接口</td></tr>
+</table></div>
+<h4 class="sub">状态机（EPS 电机控制层）</h4>
+<div class="tbl-wrap">
+<svg class="flow-svg" viewBox="0 0 980 200" role="img" aria-label="FOC 状态机">
+<g><rect class="bx" x="10" y="20" width="110" height="40" rx="6"/><text x="65" y="44" text-anchor="middle">INIT 上电</text></g>
+<path class="ln" d="M120,40 L150,40"/>
+<g><rect class="bx" x="151" y="20" width="120" height="40" rx="6"/><text x="211" y="38" text-anchor="middle">OFFSET_CAL</text><text class="sm" x="211" y="54" text-anchor="middle">偏移校准 PWM 关</text></g>
+<path class="ln" d="M271,40 L301,40"/>
+<g><rect class="bx" x="302" y="20" width="100" height="40" rx="6"/><text x="352" y="38" text-anchor="middle">READY</text><text class="sm" x="352" y="54" text-anchor="middle">PWM 关，待命</text></g>
+<path class="ln" d="M402,40 L432,40"/>
+<g><rect class="bx math" x="433" y="20" width="120" height="40" rx="6"/><text x="493" y="38" text-anchor="middle">RUN_TORQUE</text><text class="sm" x="493" y="54" text-anchor="middle">主模式（有感）</text></g>
+<path class="ln" d="M553,40 L583,40"/>
+<g><rect class="bx" x="584" y="20" width="130" height="40" rx="6"/><text x="649" y="38" text-anchor="middle">RUN_SENSORLESS</text><text class="sm" x="649" y="54" text-anchor="middle">旋变故障降级</text></g>
+<g><rect class="bx" x="302" y="120" width="120" height="40" rx="6"/><text x="362" y="138" text-anchor="middle">CALIB</text><text class="sm" x="362" y="154" text-anchor="middle">零位/辨识/扫频</text></g>
+<g><rect class="bx" x="584" y="120" width="130" height="40" rx="6"/><text x="649" y="138" text-anchor="middle">FAULT</text><text class="sm" x="649" y="154" text-anchor="middle">关管+锁存+冻结帧</text></g>
+<path class="ln" d="M352,60 L360,118"/><path class="ln" d="M380,118 L372,60"/>
+<path class="ln" d="M493,60 L600,118"/><path class="ln" d="M649,60 L649,118"/><path class="ln" d="M584,150 L424,150"/>
+<text class="sm" x="430" y="172">故障清除且 PWM 关</text>
+<text class="sm" x="520" y="96">任意运行态检测到故障</text>
+</svg></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>状态机用静态图 + 转移表更清晰。</p>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>转移</th><th>条件</th><th>动作</th></tr>
+<tr><td>INIT → OFFSET_CAL</td><td>供电稳定、驱动就绪、转速 ≈ 0</td><td>PWM 关，开始累加</td></tr>
+<tr><td>OFFSET_CAL → READY</td><td>校准完成且范围合法</td><td>写偏移；失败 → FAULT</td></tr>
+<tr><td>READY → RUN_TORQUE</td><td>上层使能 + 无故障 + 角度有效</td><td>PI 清零 / 预置、前馈按当前转速初始化、PWM 使能</td></tr>
+<tr><td>RUN_TORQUE → RUN_SENSORLESS</td><td>角度故障且转速高于无感可用阈值</td><td>角度源切换、限制力矩</td></tr>
+<tr><td>任意 → FAULT</td><td>故障置位</td><td>先关管，再清积分、记录</td></tr>
+<tr><td>FAULT → READY</td><td>可恢复故障清除 + 上层复位请求</td><td>重新自检</td></tr>
+<tr><td>READY ⇄ CALIB</td><td>标定模式请求（XCP，仅开发 / 产线权限）</td><td>运行标定流程</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>定义 FOC_tst（运行数据，导读中给出并逐章扩充）、FOC_CAL_tst（标定量，可放在独立内存段便于 XCP 页切换）。</li>
+<li>算法函数签名统一：<code>void Foc_X_Run(const IN_tst*, OUT_tst*, STATE_tst*)</code>，便于 PC 单元测试。</li>
+<li>状态机在 1 ms 任务中运行；主中断只读取状态决定执行哪些模块。</li>
+<li>每个转移写测试用例，包括非法请求（如 FAULT 中请求 RUN）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>上电时序：INIT → OFFSET_CAL（约 0.1 s）→ READY，记录状态变量与 PWM 使能信号。</li>
+<li>故障注入：任意运行态 → FAULT 时 PWM 立即关闭，状态与故障码正确。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>typedef enum { FOC_ST_INIT, FOC_ST_OFFSET_CAL, FOC_ST_READY, FOC_ST_RUN_TORQUE,
+               FOC_ST_RUN_SENSORLESS, FOC_ST_CALIB, FOC_ST_FAULT } FOC_State_ten;
+
+void Foc_Sm_1ms(void)
+{
+    switch (gFoc.state) {
+    case FOC_ST_INIT:
+        if (Pwr_IsStable() &amp;&amp; (labs(gFoc.spdRpmFilt) &lt; 30)) { Pwm_DisableAll(); gFoc.state = FOC_ST_OFFSET_CAL; }
+        break;
+    case FOC_ST_OFFSET_CAL:
+        if (gFoc.offsetDone) { gFoc.state = Diag_AnyFault() ? FOC_ST_FAULT : FOC_ST_READY; }
+        break;
+    case FOC_ST_READY:
+        if (gApp.enableReq &amp;&amp; !Diag_AnyFault() &amp;&amp; Angle_IsValid()) {
+            FOC_PiResetAll();
+            FOC_CurrentLoop_PresetFromSpeed(gFoc.wePu_q15);   /* 旋转中使能：预置反电动势前馈 */
+            Pwm_EnableAll();
+            gFoc.state = FOC_ST_RUN_TORQUE;
+        } else if (gApp.calibReq) { gFoc.state = FOC_ST_CALIB; }
+        break;
+    case FOC_ST_RUN_TORQUE:
+        if (!gApp.enableReq) { Pwm_DisableAll(); gFoc.state = FOC_ST_READY; }
+        else if (!Angle_IsValid() &amp;&amp; Obs_IsUsable()) { Angle_SelectSource(ANG_SRC_OBS); gFoc.state = FOC_ST_RUN_SENSORLESS; }
+        break;
+    case FOC_ST_FAULT:
+        if (Diag_Recoverable() &amp;&amp; gApp.resetReq) { gFoc.state = FOC_ST_READY; }
+        break;
+    default: break;
+    }
+    if (Diag_AnyFault() &amp;&amp; (gFoc.state != FOC_ST_FAULT)) { FOC_EmergencyOff(Diag_FirstCode()); }  /* C12 */
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电机转动中使能，瞬间大电流</h5><dl>
+<dt>现象</dt><dd>车辆行驶中 EPS 复位后重新使能，冲击明显。</dd>
+<dt>可能根因</dt><dd>使能时 PI 输出为 0，但反电动势存在，相当于给电机加了一个「反电压」。</dd>
+<dt>排查</dt><dd>记录使能瞬间转速、vq、iq。</dd>
+<dt>修复</dt><dd>按当前转速预置 vq = ωe·ψf（飞车启动）。</dd>
+<dt>验证</dt><dd>不同转速下使能电流平滑。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>FAULT 后自动恢复反复触发</h5><dl>
+<dt>现象</dt><dd>间歇性故障导致电机频繁启停。</dd>
+<dt>可能根因</dt><dd>恢复条件过松，无次数限制。</dd>
+<dt>排查</dt><dd>故障记录中的恢复次数。</dd>
+<dt>修复</dt><dd>恢复次数上限、严重故障锁存到下次上电。</dd>
+<dt>验证</dt><dd>间歇故障注入表现符合设计。</dd></dl></div>
+<div class="issue"><h5>易错点：算法模块直接访问寄存器</h5><dl>
+<dt>现象</dt><dd>算法无法在 PC 上测试，换 MCU 要改算法。</dd>
+<dt>根因</dt><dd>分层被破坏。</dd>
+<dt>排查</dt><dd>代码依赖分析。</dd>
+<dt>修复</dt><dd>HAL 接口隔离。</dd>
+<dt>验证</dt><dd>算法模块 PC 单元测试通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>状态判断分散在多个模块：难以分析所有转移；状态机集中在一个函数。</li>
+<li>标定模式在量产软件中可被意外触发：需要权限保护（Seed&amp;Key / 产线模式）。</li>
+<li>全局结构体被多个任务写：明确每个字段的唯一写者。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D04" id="quiz-D04"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：分层、纯函数算法、状态机转移条件与动作、飞车启动、故障锁存、唯一写者原则。</li></ul></div>
+</section>
+
+<!-- ================= D05 ================= -->
+<section class="chap" id="D05" data-title="D05 Simulink 仿真">
+<h2 class="chap-h">D05 仿真：Simulink 模型搭建，从开环到闭环</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 5 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>开发流程：算法设计 → MIL → SIL → PIL → 台架</td></tr>
+<tr><th>输入 / 输出</th><td>输入：电机参数、控制算法；输出：仿真波形、参数初值、测试用例</td></tr>
+<tr><th>工程价值</th><td>上台架前发现方向、符号、单位、稳定性问题；为标定提供初值与对照基准</td></tr>
+<tr><th>上下游依赖</th><td>上游 B02、C 全部；下游 D06、E03</td></tr>
+<tr><th>适用角色</th><td>算法、模型开发</td></tr>
+<tr><th>前置数学依赖</th><td>A07、D01</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>台架试错代价高（损坏硬件、占用资源）；仿真可以安全地尝试极端工况和故障。</div>
+<div><b>② 量产怎么做</b>分层模型：对象（电机 dq 模型 + 逆变器平均模型 + 机械）与控制器（离散、带延迟、可选定点）；按步骤从开环到闭环逐级验证；控制器子系统可代码生成或与手写代码 SIL 比对。</div>
+<div><b>③ 如何证明</b>仿真只证明到 L1/L2（导读证据等级）；必须与台架同工况曲线对比，记录差异来源（E03）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>电机参数（含不确定范围）、逆变器参数（死区、压降）、采样与延迟时序。</li>
+<li>MATLAB/Simulink 及相应工具箱（是否使用 Motor Control Blockset 等以项目授权为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>不满足：连续域理想模型 → 仿真结果过于乐观（E03）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>对象模型（dq，B02 / C05）：
+   Ld·did/dt = vd − Rs·id + ωe·Lq·iq
+   Lq·diq/dt = vq − Rs·iq − ωe·(Ld·id + ψf)
+   J·dωm/dt = Te − TL − B·ωm，θe = ∫p·ωm dt
+逆变器平均模型：v_actual = v_ref·(Vdc/Vdc_meas) − ΔV_deadtime·sign(i)（C13）
+控制器：Ts = 50 µs 离散子系统，输入经 ZOH 采样，输出经 1 拍延迟（单采样单更新）+ ZOH（PWM 平均）
+求解器：对象用变步长或小定步长（如 1 µs），控制器 50 µs 触发</div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>模型搭建是工具操作流程；本页各章动画均为「简化 L0 模型」，D05 关注如何搭建更接近台架的 L1/L2 模型。</p>
+<h4 class="sub">从开环到闭环的六步</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>步骤</th><th>模型内容</th><th>验证目标</th><th>典型发现的问题</th></tr>
+<tr><td>1</td><td>电机 dq 模型 + 给定电压开环（vd, vq 常数）</td><td>稳态电流符合 dq 方程；反电动势 ∝ 转速</td><td>参数单位、ψf 定义</td></tr>
+<tr><td>2</td><td>加 abc / αβ 变换 + SVPWM 平均 + 开环 V/f 或 I/F</td><td>电机按设定方向旋转，三相电流正弦</td><td>相序、Park 符号、方向约定</td></tr>
+<tr><td>3</td><td>电流环闭环（理想角度）</td><td>阶跃响应符合 1 kHz 设计</td><td>PI 参数、单位</td></tr>
+<tr><td>4</td><td>加入延迟、离散、量化、死区</td><td>相位裕度、6 阶纹波</td><td>带宽过高、延迟补偿</td></tr>
+<tr><td>5</td><td>加速度环 / MTPA / 弱磁</td><td>全速域外特性</td><td>弱磁振荡、iq 限幅</td></tr>
+<tr><td>6</td><td>加观测器 / 角度误差模型 / 故障注入</td><td>切换、诊断</td><td>切换冲击、阈值</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（模型到代码）</h3>
+<ol><li>控制器模型使用与代码相同的数据结构命名（gFoc 字段、Cal_ 参数），便于对照。</li>
+<li>定点模型（若代码生成）：Fixed-Point Designer 设定 Q 格式；手写代码则用 MEX / S-Function 嵌入 C 代码做 SIL。</li>
+<li>PIL：在 S32K146 上运行控制器，模型提供对象，测量执行时间与数值一致性。</li>
+<li>测试用例沉淀：阶跃、扫速、电压跌落、参数偏差 ±30%，作为回归测试集。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>步骤 2：iα–iβ 逆时针圆（正转）；dq 直流。</li>
+<li>步骤 4：加入延迟后，原来在理想模型中稳定的高带宽参数可能振荡——这正是需要的「提前暴露」。</li>
+<li>与台架对比时，叠加同工况实测曲线，差异按 E03 分类。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>% 【伪代码 / MATLAB 脚本】EPS 电机参数初始化（模型工作区）【案例假设】
+P.p    = 4;        P.Rs = 12e-3;    P.Ld = 45e-6;   P.Lq = 75e-6;
+P.psiF = 3.5e-3;   P.J  = 2e-5;     P.B  = 1e-5;
+P.Vdc  = 12;       P.Ts = 50e-6;    P.Td = 1e-6;    % 死区
+P.Ibase = 50;      P.Vbase = 16;
+% 电流环参数（A08 零极点对消，1 kHz）
+wc = 2*pi*1000;
+C.KpD = wc*P.Ld;   C.KpQ = wc*P.Lq;   C.Ki = wc*P.Rs;
+% 标幺 / 定点（与 C 代码一致）
+C.KpD_q12  = round(C.KpD*P.Ibase/P.Vbase*4096);     % 3619
+C.KpQ_q12  = round(C.KpQ*P.Ibase/P.Vbase*4096);     % 6032
+C.KiTs_q15 = round(C.Ki*P.Ts*P.Ibase/P.Vbase*32768);% 386
+% 参数鲁棒性扫描
+for k = [0.7 1.0 1.3]
+    P.Lq_true = k*P.Lq;   % 对象使用偏差参数，控制器仍用标称值
+    % sim('eps_foc_model'); 记录超调与带宽
+end</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>仿真完美，台架振荡</h5><dl>
+<dt>现象</dt><dd>仿真电流环阶跃无超调，台架严重振荡。</dd>
+<dt>可能根因</dt><dd>模型无延迟 / 连续控制器；参数理想；无采样噪声。</dd>
+<dt>排查</dt><dd>按步骤 4 补齐延迟与离散。</dd>
+<dt>修复</dt><dd>模型补齐后重新设计参数。</dd>
+<dt>验证</dt><dd>模型与台架阶跃超调一致（差异 &lt; 几个百分点）。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>仿真中电机反转</h5><dl>
+<dt>现象</dt><dd>给正 iq，仿真电机反转。</dd>
+<dt>可能根因</dt><dd>模型中 Park 与控制器约定不一致、θe 积分方向、相序。</dd>
+<dt>排查</dt><dd>步骤 2 开环检查方向。</dd>
+<dt>修复</dt><dd>统一约定（导读第三节）。</dd>
+<dt>验证</dt><dd>正 iq 正转。</dd></dl></div>
+<div class="issue"><h5>易错点：仿真步长过大</h5><dl>
+<dt>现象</dt><dd>电流纹波、死区效应在仿真中看不到。</dd>
+<dt>根因</dt><dd>对象步长 ≥ PWM 周期，平均模型不含开关细节。</dd>
+<dt>排查</dt><dd>明确模型目标（平均 or 开关）。</dd>
+<dt>修复</dt><dd>需要研究纹波 / 死区时用开关模型 + 小步长。</dd>
+<dt>验证</dt><dd>与示波器纹波对比。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>模型与代码两套参数文件各自维护，逐渐不一致：从同一数据源生成。</li>
+<li>只仿真名义参数：必须做参数偏差与电压范围扫描。</li>
+<li>把仿真曲线放进评审报告作为「验证通过」的证据：仿真最多是 L1/L2（X3）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D05" id="quiz-D05"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：六步搭建法、延迟与离散建模、MIL/SIL/PIL 区别、参数扫描、仿真证据边界。</li></ul></div>
+</section>
+
+<!-- ================= D06 ================= -->
+<section class="chap" id="D06" data-title="D06 台架上电流程">
+<h2 class="chap-h">D06 台架上电流程：电机对齐、零位标定、开环拖动、切入闭环、无感切入</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 6 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>从「代码编译通过」到「电机闭环运行」的台架步骤</td></tr>
+<tr><th>输入 / 输出</th><td>输入：新硬件、新软件；输出：经逐项验证的闭环系统与基础标定（偏移、零位、方向）</td></tr>
+<tr><th>工程价值</th><td>按顺序逐项验证可以把问题限定在最小范围；跳步骤是炸管和浪费时间的主要原因</td></tr>
+<tr><th>上下游依赖</th><td>依赖 C01~C10；下游 D07</td></tr>
+<tr><th>适用角色</th><td>全部台架人员</td></tr>
+<tr><th>前置数学依赖</th><td>A06 相位累加器、B04 换向思想</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>闭环系统中任何一个环节（采样、方向、角度、PWM）出错都会表现为「抖动 / 过流」，无法区分；必须先开环逐项验证。</div>
+<div><b>② 量产怎么做</b>固定 Checklist：限流电源 → 静态检查 → PWM 空载 → 偏移 → 开环 → 零位 → 电流闭环 → 外环 / 无感；每步有通过判据和记录。</div>
+<div><b>③ 如何证明</b>每一步的通过判据（波形、数值）记录在台架日志中。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li><span class="tg tg-red">【风险红线】</span>首次上电使用可限流的直流电源（如限流 5~10 A）而非电池；硬件过流保护已验证；急停可用。</li>
+<li>示波器（电流探头 ×2、差分电压探头）、CANape + XCP 连接、对拖台架（可选）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>步骤</th><th>操作</th><th>通过判据</th><th>失败常见原因</th></tr>
+<tr><td>0 静态</td><td>不接电机，上电</td><td>电源电流正常；Vdc 采样正确；无故障码</td><td>采样分压、ADC 配置</td></tr>
+<tr><td>1 PWM 空载</td><td>不接电机，输出固定 duty</td><td>三相波形、死区、中心对齐、互补正确</td><td>极性、死区配置</td></tr>
+<tr><td>2 偏移</td><td>接电机，PWM 关</td><td>偏移在范围内，静止电流 &lt; 0.1 A</td><td>C01</td></tr>
+<tr><td>3 对齐</td><td>开环角度 0、id = 小电流（电流闭环 + 固定角度）</td><td>转子转到固定位置并保持，电流稳定</td><td>电流符号、增益</td></tr>
+<tr><td>4 I/F 开环拖动</td><td>固定 id/|i| 电流闭环、开环角度按频率斜坡</td><td>平稳旋转，方向正确，iα–iβ 逆时针</td><td>相序、Park 方向</td></tr>
+<tr><td>5 角度对比</td><td>I/F 运行时比较旋变 θe 与开环 θ</td><td>两者斜率一致、方向一致（差值近似常数）</td><td>极对数、方向、解码配置</td></tr>
+<tr><td>6 零位</td><td>d 轴对齐法或反电动势法</td><td>重复性 &lt; 0.5°</td><td>C09</td></tr>
+<tr><td>7 电流闭环</td><td>旋变角度、小 iq（2~5 A）</td><td>正 iq 正转，正反对称</td><td>零位、方向</td></tr>
+<tr><td>8 电流环验收</td><td>阶跃、扫频</td><td>A08/C05 指标</td><td>参数</td></tr>
+<tr><td>9 外环 / 弱磁 / 无感</td><td>逐项开启</td><td>各章判据</td><td>C07/C08/C10</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>I/F 开环（电流闭环 + 开环角度）的稳定机理：
+   设电流矢量与转子 d 轴夹角为 γ（负载角），电磁转矩 Te = Kt·|i|·sin γ
+   对齐后起动 γ ≈ 0；开环角度前进 → γ 增大 → 转矩增大，自动平衡负载与加速转矩
+   γ &lt; 90° 时具有自恢复能力；γ &gt; 90° 后转矩随 γ 增大反而下降 → 失步
+   最大可带负载 TL,max = Kt·|i|；加速时还需克服 J·dω/dt 与摩擦
+   转子在平衡点附近为弱阻尼振荡（固有频率 ≈ √(p·Kt·|i|/J)），加速度过大会激发振荡越过 90°</div>
+<div id="anim-D06"></div>
+<div class="anim-note"><b>动画在演示什么：</b>I/F 启动：对齐后开环角度按加速度斜坡增加，转子在电磁转矩作用下跟随，负载角 γ 为电流矢量与转子 d 轴的夹角。上图转速（给定 / 实际），下图 γ。<br>
+<b>拖动滑块：</b>减小电流幅值或增大负载 / 加速度，γ 增大；超过 90° 后转子失步，实际转速崩溃——这就是 I/F 启动失败的物理过程。<br>
+<b>正常：</b>γ 稳定在 90° 以下（叠加衰减振荡）。<b>异常：</b>γ 越过 90° 后持续增大、转速下跌。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>软件提供「台架模式」：开环角度源、固定电流给定、各步独立使能（XCP 标定量控制）。</li>
+<li>I/F：先在开环角度 0 对齐，随后电流闭环（PI 正常工作）+ 角度由相位累加器给出（A06），电流保持在开环 d 轴方向，频率按斜坡升高；电流幅值足以带动负载（如 20 A）。也有实现把电流放在开环 q 轴，此时转子会先超前 90° 再建立平衡，起动冲击更大。</li>
+<li>切入闭环（I/F → 旋变或观测器）：角度差 |θsrc − θIF| 小于阈值并稳定 → 预置电流环积分器 → 切换角度源 → 电流给定从「全部在开环 q 轴」逐渐过渡到「由力矩需求决定」。</li>
+<li>每步通过后，在台架日志记录关键数值与截图。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>步骤 3：转子转到固定位置，可能有小幅振荡后稳定。</li>
+<li>步骤 4：相电流幅值恒定、频率按斜坡增加；示波器上三相正弦相差 120°。</li>
+<li>步骤 5：θ旋变 − θIF 为近似常数（负载角 + 零位偏差），不随时间漂移。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* I/F 开环拖动（台架模式），1 ms 更新频率斜坡，中断累加角度（A06）*/
+volatile float Cal_IfCurr_A    = 20.0f;   /* 【案例假设】*/
+volatile float Cal_IfAccel_Hz_s = 50.0f;  /* 电频率加速度 */
+volatile float Cal_IfFreqMax_Hz = 40.0f;  /* 600 rpm 机械 */
+static float s_ifFreq;
+
+void Bench_IfDrag_1ms(void)
+{
+    s_ifFreq += Cal_IfAccel_Hz_s * 1.0e-3f;
+    if (s_ifFreq &gt; Cal_IfFreqMax_Hz) { s_ifFreq = Cal_IfFreqMax_Hz; }
+    gBench.phInc = FOC_FreqToInc((uint32_t)(s_ifFreq * 1000.0f));          /* A06 */
+    FOC_SetIdqRef(AMP_TO_Q15(Cal_IfCurr_A), 0);   /* 电流放在开环 d 轴（与对齐一致），转子以负载角 γ 滞后跟随 */
+    gBench.angDiff = (int16_t)(uint16_t)(gFoc.thetaEFromRes - gFoc.thetaE); /* 步骤 5 对比 */
+}
+
+/* 切入旋变闭环：角度差稳定后切换 */
+void Bench_SwitchToResolver_1ms(void)
+{
+    static uint16_t s_ok;
+    s_ok = ((gBench.angDiff &gt; -1820) &amp;&amp; (gBench.angDiff &lt; 1820)) ? (uint16_t)(s_ok + 1u) : 0u;  /* ±10° */
+    if (s_ok &gt; 200u) {
+        FOC_CurrentLoop_Preset(gFoc.vd, gFoc.vq, 0, 0);  /* C05 */
+        Angle_SelectSource(ANG_SRC_RESOLVER);
+        gFoc.state = FOC_ST_RUN_TORQUE;
+    }
+}</code></pre>
+<p class="note">切换判据中的角度差包含「负载角 + 零位误差」；零位已标定时，空载 I/F 下角度差应接近当前负载角。切换后电流矢量从「开环 d 轴方向」逐渐转到「由力矩需求决定的 dq 给定」，id、iq 均需斜坡过渡。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>对齐时电机来回摆动不停</h5><dl>
+<dt>现象</dt><dd>步骤 3 转子持续振荡。</dd>
+<dt>可能根因</dt><dd>电流环参数过激；对齐电流过大且无阻尼（机械谐振）。</dd>
+<dt>排查</dt><dd>看 id 是否稳定；降低电流。</dd>
+<dt>修复</dt><dd>电流斜坡上升；降低 Kp。</dd>
+<dt>验证</dt><dd>对齐稳定。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>I/F 升速到某频率后失步</h5><dl>
+<dt>现象</dt><dd>拖动到一定转速后电机抖动、停转，电流仍在。</dd>
+<dt>可能根因</dt><dd>负载角超过 90°（电流不足 / 加速过快）；电压饱和（开环电压不够）。</dd>
+<dt>排查</dt><dd>记录 angDiff、vq 是否饱和。</dd>
+<dt>修复</dt><dd>增大电流 / 降低加速度；提前切入闭环。</dd>
+<dt>验证</dt><dd>多次 I/F 成功率 100%。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>步骤 5 角度差持续漂移</h5><dl>
+<dt>现象</dt><dd>θ旋变 − θIF 不是常数，以恒定斜率变化。</dd>
+<dt>可能根因</dt><dd>极对数配置错误（旋变电角度速度 ≠ 开环）、方向相反（斜率为 2 倍）。</dd>
+<dt>排查</dt><dd>计算漂移斜率与 I/F 频率比值。</dd>
+<dt>修复</dt><dd>修正极对数 / 方向。</dd>
+<dt>验证</dt><dd>角度差恒定。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li><span class="tg tg-red">【风险红线】</span>首次直接用电池上电闭环：方向错误时正反馈，电流瞬间上千安级（取决于回路阻抗），可能损坏 MOS。</li>
+<li>跳过步骤 5 直接闭环：极对数 / 方向错误被掩盖为「抖动」。</li>
+<li>对齐方向：从静止对齐时转子可能转向反方向的 d 轴（N/S 对称），不影响电角度零位，但影响机械位置相关的标定。</li>
+<li>台架结束未恢复保护标定量（C12 踩坑）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D06" id="quiz-D06"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：上电步骤顺序与判据、I/F 机理与负载角、角度对比判据、切入条件与积分器预置、限流电源红线。</li>
+<li>台架高频：「上电抖动无法闭环」的标准排查路径（见调试模拟场景 1）。</li></ul></div>
+</section>
+
+<!-- ================= D07 ================= -->
+<section class="chap" id="D07" data-title="D07 标定实战">
+<h2 class="chap-h">D07 标定实战：电流环带宽、滤波、MTPA 表、弱磁表、观测器参数</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 7 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>软件冻结后、量产前：参数从「初值」变为「验证值」</td></tr>
+<tr><th>输入 / 输出</th><td>输入：仿真初值、台架测量；输出：标定数据集（HEX / DCM / CDFX 等，以项目流程为准）</td></tr>
+<tr><th>工程价值</th><td>同一套软件适配不同电机批次、不同整车需求，标定质量直接决定性能一致性</td></tr>
+<tr><th>上下游依赖</th><td>依赖 C05~C13、D06；输出给 D08 数据管理</td></tr>
+<tr><th>适用角色</th><td>标定工程师、算法</td></tr>
+<tr><th>前置数学依赖</th><td>A07 伯德图、A08 PI</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>参数辨识有误差、电机有饱和与温度特性、整车对噪声与手感有主观要求——这些只能在台架和整车上收敛。</div>
+<div><b>② 量产怎么做</b>固定标定顺序（内环到外环）、每项有输入条件 / 方法 / 判据 / 记录；标定数据版本化管理。</div>
+<div><b>③ 如何证明</b>每个标定量对应的验收试验数据（阶跃、扫频、外特性、脉动频谱）；全温度 / 电压范围抽样复测。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>D06 全部步骤通过；扭矩传感器、温箱 / 冷却控制、可编程电源（电压扫描）。</li>
+<li>XCP 测量与标定连接稳定，DAQ 采样率满足（电流环相关信号建议按主中断事件采集）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>顺序</th><th>标定项</th><th>方法</th><th>判据</th></tr>
+<tr><td>1</td><td>偏移 / 增益 / 零位 / 延迟补偿 Kc</td><td>C01、C09、C03</td><td>静止电流、正反对称、力矩常数平直</td></tr>
+<tr><td>2</td><td>死区补偿</td><td>低速恒力矩，最小化 6 阶</td><td>6 阶分量下降、小电流无噪声</td></tr>
+<tr><td>3</td><td>电流环 Kp/Ki（分电流区间）</td><td>阶跃 + 扫频注入</td><td>开环穿越 ≈ 1 kHz、相位裕度 ≥ 45°、闭环谐振峰 &lt; 1 dB、超调 &lt; 10%</td></tr>
+<tr><td>4</td><td>解耦前馈系数</td><td>高速阶跃，最小化 id 扰动</td><td>id 扰动 &lt; 1~2 A</td></tr>
+<tr><td>5</td><td>MTPA 表</td><td>电流角扫描</td><td>同力矩电流最小</td></tr>
+<tr><td>6</td><td>弱磁 PI / Vtarget / 前馈表</td><td>扫速 + 急加速 + 电压跌落</td><td>无振荡、外特性达标</td></tr>
+<tr><td>7</td><td>速度 / 位置环、滤波</td><td>阶跃、负载扰动</td><td>超调、恢复时间</td></tr>
+<tr><td>8</td><td>观测器 / PLL</td><td>与旋变对比</td><td>各转速角度误差</td></tr>
+<tr><td>9</td><td>保护阈值、降额曲线</td><td>故障注入、温升试验</td><td>检出时间、零误报</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>扫频注入测闭环频响：
+   iqRef = iq0 + a·sin(2πft)，f 从 50 Hz 扫到 3 kHz；每个频点记录稳态 iq 的幅值比与相位
+   幅值比 |T(jω)| = A_out/A_in，−3 dB 频率即闭环带宽；由于延迟，闭环 −3 dB 点通常高于开环穿越频率 ωc，
+   零极点对消设计中的「带宽 1 kHz」严格说指 ωc；开环特性可由 L = T/(1 − T) 推得，或在误差处注入直接测开环
+注入幅值要小（如额定 5%）避免饱和；f 接近 PWM/10 以上时注意采样混叠与 DAQ 采样率</div>
+<div id="anim-D07"></div>
+<div class="anim-note"><b>动画在演示什么：</b>在 iq 给定上叠加小幅正弦，扫描频率，计算闭环幅频（点）并与设计（虚线）比较。被控对象为离散 RL + 1.5Ts 延迟，控制器 Kp 按「标定电感 L̂」设计。<br>
+<b>拖动滑块：</b>真实 Lq 与 L̂ 偏差（模拟饱和）：真实电感变小 → 实际带宽升高、谐振峰出现；Kp 缩放：观察带宽与峰值随 Kp 变化，观察开环穿越频率、相位裕度与谐振峰的变化，找出穿越 ≈ 1 kHz、相位裕度 ≥ 45°、峰值 &lt; 1 dB 的组合。<br>
+<b>正常：</b>测量点贴近设计曲线。<b>异常：</b>出现谐振峰（相位裕度不足）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>软件提供扫频注入功能（台架模式）：注入频率、幅值、轴选择均为标定量；记录用 DAQ 或片上相关运算（每频点计算 sin/cos 相关得到幅值与相位，减少数据量）。</li>
+<li>分电流区间的电流环参数：按 |iq| 查表 Kp（应对 Lq 饱和）。</li>
+<li>每次标定修改：记录版本号、修改人、原因、验证数据（标定数据库）。</li>
+<li>标定完成后执行「回归套件」：D05 测试用例在台架复测。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>扫频：低频幅值比 ≈ 0 dB，平坦区一直延续到 ωc 附近，−3 dB 点略高于 ωc（延迟所致），相位单调下降。</li>
+<li>若出现 &gt; 3 dB 的峰值 → 相位裕度不足，降 Kp 或减小延迟。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 扫频注入 + 片上单频点相关分析（台架模式）*/
+volatile float Cal_SweepFreq_Hz = 100.0f;
+volatile float Cal_SweepAmp_A   = 1.5f;
+static float s_ph, s_accIs, s_accIc, s_accRs, s_accRc; static uint32_t s_n;
+
+void Bench_Sweep_Isr(void)     /* 主中断中调用（float，S32K146 FPU）*/
+{
+    float s = sinf(s_ph), c = cosf(s_ph);
+    float ref = Cal_SweepAmp_A * s;
+    gBench.iqInj_A = ref;                                 /* 叠加到 iqRef */
+    float y = Q15_TO_AMP(gFoc.iq) - gBench.iq0_A;
+    s_accRs += ref * s;  s_accRc += ref * c;              /* 输入相关 */
+    s_accIs += y * s;    s_accIc += y * c;                /* 输出相关 */
+    s_n++;
+    s_ph += 6.2831853f * Cal_SweepFreq_Hz * 50e-6f;
+    if (s_ph &gt; 6.2831853f) { s_ph -= 6.2831853f; }
+}
+void Bench_SweepResult(float *magDb, float *phaseDeg)     /* 整数个周期后调用 */
+{
+    float gin = sqrtf(s_accRs * s_accRs + s_accRc * s_accRc);
+    float gout = sqrtf(s_accIs * s_accIs + s_accIc * s_accIc);
+    *magDb    = 20.0f * log10f(gout / gin);
+    *phaseDeg = (atan2f(s_accIc, s_accIs) - atan2f(s_accRc, s_accRs)) * 57.2958f;
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>同一套标定在另一批电机上啸叫</h5><dl>
+<dt>现象</dt><dd>新批次电机电流环振荡。</dd>
+<dt>可能根因</dt><dd>电感批次差异 / 磁钢差异；参数裕量不足。</dd>
+<dt>排查</dt><dd>对新批次做参数辨识与扫频。</dd>
+<dt>修复</dt><dd>标定时以最不利参数验证鲁棒性（相位裕度留足）。</dd>
+<dt>验证</dt><dd>多批次抽样扫频合格。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>扫频结果在高频段乱跳</h5><dl>
+<dt>现象</dt><dd>1.5 kHz 以上幅值 / 相位数据离散。</dd>
+<dt>可能根因</dt><dd>DAQ 采样率不足（混叠）；注入幅值太小信噪比低；积分周期非整数。</dd>
+<dt>排查</dt><dd>改用片上相关运算；整数周期积分。</dd>
+<dt>修复</dt><dd>如上。</dd>
+<dt>验证</dt><dd>重复测量一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>标定数据回退</h5><dl>
+<dt>现象</dt><dd>已解决的问题在新版本软件中重现。</dd>
+<dt>可能根因</dt><dd>软件升级时标定数据未迁移或被默认值覆盖。</dd>
+<dt>排查</dt><dd>对比 HEX / 标定文件差异。</dd>
+<dt>修复</dt><dd>标定数据版本管理与软件版本绑定；迁移脚本。</dd>
+<dt>验证</dt><dd>回归套件通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>只在常温、12 V 下标定：低温 / 9 V / 16 V 下表现可能完全不同。</li>
+<li>在整车主观评价阶段修改底层电流环参数：会改变所有上层标定的基础；底层参数应在台架阶段冻结。</li>
+<li>多人同时修改同一标定集无记录。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D07" id="quiz-D07"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：标定顺序、扫频注入原理与注意事项、分区间参数、鲁棒性验证、标定数据管理。</li></ul></div>
+</section>
+
+<!-- ================= D08 ================= -->
+<section class="chap" id="D08" data-title="D08 标定变量与 XCP">
+<h2 class="chap-h">D08 常用标定变量、观测信号与 XCP 信号列表</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 8 节（完整参数表模板见 X4）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>调试与标定接口：软件与 CANape 之间的「合同」</td></tr>
+<tr><th>输入 / 输出</th><td>输入：代码变量、Q 格式；输出：A2L 描述（MEASUREMENT / CHARACTERISTIC / COMPU_METHOD）</td></tr>
+<tr><th>工程价值</th><td>测量信号选得好，问题定位快一个数量级；A2L 错误会导致标定写错值</td></tr>
+<tr><th>上下游依赖</th><td>依赖全部模块；服务 D06、D07、E 模块</td></tr>
+<tr><th>适用角色</th><td>标定工程师、软件</td></tr>
+<tr><th>前置数学依赖</th><td>A01 换算、D02 Q 格式</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>XCP 是 FOC 调试的「示波器 + 万用表」：在不停机的情况下观察内部变量、在线修改参数。</div>
+<div><b>② 量产怎么做</b>A2L 由构建工具从 ELF 地址 + 变量描述自动生成；标定量放在独立内存段（支持页切换 / 参考页工作页）；DAQ 事件与任务周期对应。</div>
+<div><b>③ 如何证明</b>每个标定量写入后读回校验；物理值与仪表比对；A2L 与 ELF 版本一致性检查。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>XCP on CAN（或 CAN FD）协议栈、DAQ 事件通道配置；CANape 工程。</li>
+<li>内存段规划：标定 RAM / Flash 段（参考页 / 工作页机制以协议栈与 MCU 能力为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>不满足：手工维护 A2L 地址 → 每次编译地址变化即失效。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<h4 class="sub">推荐 DAQ 测量信号（按调试场景分组）</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>分组</th><th>信号</th><th>格式 → 物理</th><th>事件</th><th>用途</th></tr>
+<tr><td>采样</td><td>gFoc.adcIa / adcIb</td><td>uint16 码值</td><td>FOC 主中断（分频）</td><td>偏移、饱和</td></tr>
+<tr><td>电流</td><td>gFoc.ia / ib / iAlpha / iBeta</td><td>Q15 × 50 A</td><td>主中断</td><td>XY 图、增益</td></tr>
+<tr><td>dq</td><td>gFoc.id / iq / idRef / iqRef</td><td>Q15 × 50 A</td><td>主中断</td><td>阶跃、纹波频谱</td></tr>
+<tr><td>电压</td><td>gFoc.vd / vq / vSat / vdcPu</td><td>Q15 × 16 V</td><td>主中断</td><td>饱和、弱磁</td></tr>
+<tr><td>角度</td><td>gFoc.thetaE / thetaM / thetaEObs / thetaEIncPerTs</td><td>uint16 × 360/65536</td><td>主中断</td><td>零位、观测对比</td></tr>
+<tr><td>速度</td><td>gFoc.spdRpmFilt / wePu_q15</td><td>rpm / Q15</td><td>1 ms</td><td>速度环</td></tr>
+<tr><td>占空比</td><td>gFoc.dutyA/B/C</td><td>Q15 × 100%</td><td>主中断</td><td>SVPWM、采样窗口</td></tr>
+<tr><td>状态</td><td>gFoc.state / 故障码 / 冻结帧</td><td>枚举</td><td>10 ms</td><td>流程、诊断</td></tr>
+<tr><td>性能</td><td>gDiag.isrMaxTicks / CPU 负载</td><td>计数 → µs</td><td>100 ms</td><td>时序余量</td></tr>
+</table></div>
+<h4 class="sub">核心标定量（CHARACTERISTIC）</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>标定量</th><th>格式</th><th>物理换算</th><th>章节</th></tr>
+<tr><td>Cal_IaOffset_cnt / Cal_IbOffset_cnt</td><td>int16</td><td>码值</td><td>A01 C01</td></tr>
+<tr><td>Cal_IaGainCorr_q15 / Cal_IbGainCorr_q15</td><td>Q15</td><td>×1/32768</td><td>C01</td></tr>
+<tr><td>Cal_ThetaOffset</td><td>uint16</td><td>×360/65536 °</td><td>C09</td></tr>
+<tr><td>Cal_AngCompK_q8</td><td>Q8</td><td>×1/256（×Ts）</td><td>C03</td></tr>
+<tr><td>Cal_IdKp_q12 / Cal_IqKp_q12</td><td>Q12</td><td>×(16/50)/4096 V/A</td><td>A08 C05</td></tr>
+<tr><td>Cal_IdKiTs_q15 / Cal_IqKiTs_q15</td><td>Q15</td><td>×(16/50)/32768/Ts V/(A·s)</td><td>A08</td></tr>
+<tr><td>Cal_KLq_q15 / Cal_KLd_q15 / Cal_KPsi_q15</td><td>Q15</td><td>见 C05 基值</td><td>C05</td></tr>
+<tr><td>Cal_MtpaId_q15[13]</td><td>Q15 数组（CURVE）</td><td>×50/32768 A</td><td>C06</td></tr>
+<tr><td>Cal_FwVoltK_q15 / Cal_FwKp_q12 / Cal_FwKiTs_q15</td><td>Q15/Q12</td><td>—</td><td>C07</td></tr>
+<tr><td>Cal_SpdLpfK_q15 / Cal_SpdKp_q12 / Cal_SpdKiTs_q15</td><td>Q15/Q12</td><td>—</td><td>A05 C08</td></tr>
+<tr><td>Cal_DtCompV_q15 / Cal_DtI0_q15</td><td>Q15</td><td>×16/32768 V</td><td>C13</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>本节为接口清单。</p>
+<div class="formula"><span class="tg tg-fix">【定点实现】</span>A2L 线性换算 COMPU_METHOD（RAT_FUNC 或 LINEAR）：phys = a·raw + b
+   gFoc.iq：a = 50/32768 = 0.00152588，b = 0，单位 A
+   Cal_IqKp_q12：a = (16/50)/4096 = 7.8125e−5，单位 V/A
+   Cal_ThetaOffset：a = 360/65536 = 0.0054932，单位 °</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>变量声明：测量量 volatile、全局非 static（或用链接器保留）、避免被优化；标定量放 <code>.calib</code> 段。</li>
+<li>变量描述：在代码中以注释 / 宏标注格式与单位，由脚本提取生成 A2L（或使用工具链 A2L 生成器）。</li>
+<li>DAQ 事件：主中断事件（每 N 次一次）、1 ms、10 ms；主中断事件信号数量受执行时间限制（D03）。</li>
+<li>发布前检查：A2L 与 ELF 匹配（地址、EPK 版本标识）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>CANape 中电流物理值与功率分析仪一致；角度显示 0~360°。</li>
+<li>主中断事件 DAQ 打开后，主中断执行时间增加量在预算内。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 标定段与测量变量声明（GCC 风格，段名以链接脚本为准）*/
+#define CALIB  __attribute__((section(".calib")))
+
+CALIB volatile int16_t  Cal_IdKp_q12   = 3619;   /* @a2l phys=raw*7.8125e-5 unit=V/A min=0 max=4 */
+CALIB volatile int16_t  Cal_IqKp_q12   = 6032;   /* @a2l phys=raw*7.8125e-5 unit=V/A */
+CALIB volatile uint16_t Cal_ThetaOffset = 0u;    /* @a2l phys=raw*0.0054932 unit=deg */
+
+FOC_tst gFoc;                                    /* 测量：@a2l struct FOC_tst */
+
+/* 片段示意：A2L CHARACTERISTIC（由脚本生成）
+/begin CHARACTERISTIC Cal_IqKp_q12 "" VALUE 0x1FFF8010 RL_SWORD 0 CM_Kp_q12 0 4
+/end CHARACTERISTIC
+/begin COMPU_METHOD CM_Kp_q12 "" LINEAR "%8.5" "V/A" COEFFS_LINEAR 7.8125e-5 0
+/end COMPU_METHOD
+*/</code></pre>
+<p class="note">地址 0x1FFF8010 仅为示意，实际由链接结果决定；A2L 关键字细节以 ASAM MCD-2 MC 标准与所用工具为准 <span class="tg tg-check">【待核对】</span>。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>标定修改后不生效</h5><dl>
+<dt>现象</dt><dd>CANape 修改 Kp，行为不变。</dd>
+<dt>可能根因</dt><dd>代码在初始化时把 Cal_ 复制到局部变量后不再读取；编译器优化（非 volatile）；在参考页而非工作页修改。</dd>
+<dt>排查</dt><dd>查代码读取位置；读回地址内容。</dd>
+<dt>修复</dt><dd>在使用处读取标定量（或提供刷新机制）；volatile；页切换配置。</dd>
+<dt>验证</dt><dd>修改即生效。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>CANape 显示乱码 / 数值错误</h5><dl>
+<dt>现象</dt><dd>新编译版本后部分信号显示异常。</dd>
+<dt>可能根因</dt><dd>A2L 未随 ELF 更新，地址错位。</dd>
+<dt>排查</dt><dd>EPK 检查。</dd>
+<dt>修复</dt><dd>构建流程自动生成 A2L。</dd>
+<dt>验证</dt><dd>EPK 一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>DAQ 丢帧</h5><dl>
+<dt>现象</dt><dd>高速记录时数据有缺口。</dd>
+<dt>可能根因</dt><dd>CAN 带宽不足（信号太多 / 频率太高）。</dd>
+<dt>排查</dt><dd>计算带宽：信号字节 × 事件频率 vs 总线容量。</dd>
+<dt>修复</dt><dd>降频、减少信号、使用 CAN FD 或片上缓存后上传。</dd>
+<dt>验证</dt><dd>无丢帧。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>结构体成员对齐与 A2L 偏移不一致（编译器填充）。</li>
+<li>量产软件保留 XCP 标定写权限：需要安全访问控制。</li>
+<li>Q 格式变更（如 Kp 从 Q15 改 Q12）未同步 A2L（A08 高频故障）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D08" id="quiz-D08"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：DAQ 信号分组、标定量清单、COMPU_METHOD 换算、A2L 与 ELF 一致性、带宽计算。</li></ul></div>
+</section>
+
+<!-- ================= 模块 D 综合自测 ================= -->
+<section class="chap" id="D-test" data-title="模块 D 章节综合自测卷">
+<h2 class="chap-h">模块 D 章节综合自测卷</h2>
+<p class="chap-sub">从 D01~D08 题库随机抽取 16 道客观题 + 2 道主观题，交卷统一判分。</p>
+<div class="exam" data-scope="D" data-nobj="16" data-nsub="2" data-key="examD"></div>
+</section>
 <!--SEGMENT_INSERT_POINT: 后续分段的 section 插入到此注释之前，结业试卷保持在全文最末 -->
 
 <!-- ================= 结业综合大试卷 ================= -->
@@ -4821,6 +5817,170 @@ SPECS.push({host:'anim-C13',title:'死区效应：电压误差随电流方向翻
   pfn(ctx,P2,x=>ed(x*D2R),0,360,720,C.q,2);
   let pk=0;for(let i=0;i<360;i++)pk=Math.max(pk,Math.abs(ed(i*D2R)));
   info(ctx,C,['ΔV = Td/Ts·Vdc = '+dV.toFixed(3)+' V（12 V）',['误差 / 基波 = '+(dV/p.v*100).toFixed(0)+' %',dV/p.v>0.1?C.bad:C.ok],'q 轴误差峰值 = '+pk.toFixed(3)+' V（6 倍频）',st.tog.comp?['已补偿：残差来自线性区',C.ok]:['未补偿',C.warn]],P2.b.x+8,P2.b.y+16);}});
+})();
+
+</script>
+<script>
+/* ===================== 模块 D 题库 ===================== */
+FOC_Q.push(
+/* ---------- D01 ---------- */
+{id:'D01-s1',sec:'D01',type:'single',q:'哪种离散化方法可能把稳定的连续系统变成不稳定的离散系统？',opts:['前向欧拉','后向欧拉','双线性 Tustin','零阶保持精确离散'],ans:0,exp:'前向欧拉把 s 平面左半部分映射到以 (1,0) 为中心的区域外延，Ts·|极点| 较大时离散极点落到单位圆外。',links:['D01']},
+{id:'D01-s2',sec:'D01',type:'single',q:'一阶低通前向欧拉离散 y[k] = y[k−1] + (Ts/τ)(x[k−1] − y[k−1])，发散条件是？',opts:['Ts/τ > 0.1','Ts/τ > 1','Ts/τ > 2','永远不会发散'],ans:2,exp:'极点 1 − Ts/τ，|1 − Ts/τ| > 1 即 Ts/τ > 2 时发散；1 < Ts/τ < 2 时振荡衰减。',links:['D01']},
+{id:'D01-t1',sec:'D01',type:'tf',q:'Tustin 变换会把连续频率轴压缩，需要在关键频点做预畸变。',ans:true,exp:'ωd = (2/Ts)·atan(ωa·Ts/2)，在接近奈奎斯特时偏差显著；陷波器等对频率敏感的设计需预畸变。',links:['D01']},
+{id:'D01-t2',sec:'D01',type:'tf',q:'选择合适的离散化方法可以消除 FOC 的 1.5Ts 控制延迟。',ans:false,exp:'延迟来自采样—计算—PWM 更新的时序，与离散化方法无关；只能通过时序优化或补偿处理。',links:['D01','B06']},
+{id:'D01-sa',sec:'D01',type:'short',q:'写出一阶低通 1/(τs+1) 的后向欧拉与 Tustin 差分方程，并说明各自特点。',ans:'后向：y[k] = y[k−1] + Ts/(τ+Ts)·(x[k] − y[k−1])，总稳定、实现简单、相位滞后略大；Tustin：y[k] = [(2τ−Ts)·y[k−1] + Ts·(x[k] + x[k−1])]/(2τ+Ts)，稳定性保持、低频精度高、奈奎斯特处增益为 0，频率轴压缩。fc ≪ fs 时两者几乎相同。',exp:'两个公式 + 特点。',links:['D01','A05']},
+{id:'D01-an',sec:'D01',type:'analysis',q:'SIL 对比中，手写 C 代码的观测器输出与 Simulink 模型存在约 1 个采样周期的时间差，且高转速时误差增大。请分析并给出处理方法。',ans:'<b>分析：</b>一拍时间差 → 离散方法或执行顺序不一致：模型中积分器可能是前向（用上一拍输入），代码用后向（用本拍输入），或代码中先更新状态后输出与模型相反。高转速误差增大 → 旋转项离散化误差随 ωe·Ts 增大，前向欧拉对旋转项精度差。<br><b>排查：</b>单位阶跃 / 单拍脉冲输入对比第一个非零输出时刻；逐模块比对（电流模型、低通、PLL）。<br><b>处理：</b>统一离散方法与计算顺序；旋转项使用精确旋转（乘 e^(jωeTs)）或 Tustin；把模型作为参考，代码以 S-Function 嵌入做 SIL。<br><b>验证：</b>SIL 逐点误差 < 1 LSB（定点）或 < 1e-5（浮点），全速范围一致。',exp:'时间差 → 离散方法 / 顺序；高速 → 旋转项精度。',links:['D01','D05','C10']},
+/* ---------- D02 ---------- */
+{id:'D02-s1',sec:'D02',type:'single',q:'Q15 × Q12 的 32 位乘积为 Q27，要得到 Q15 结果应右移？',opts:['12 位','15 位','27 位','3 位'],ans:0,exp:'27 − 15 = 12。',links:['D02']},
+{id:'D02-s2',sec:'D02',type:'single',q:'int16 中 32767 + 1 的结果（未做饱和）是？',opts:['32768','32767','−32768','0'],ans:2,exp:'回绕溢出；在控制量上意味着符号瞬间翻转，必须饱和。',links:['D02']},
+{id:'D02-t1',sec:'D02',type:'tf',q:'在 int16 中，abs(−32768) 的结果仍为 −32768。',ans:true,exp:'+32768 无法表示，需先饱和到 −32767 再取绝对值。',links:['D02']},
+{id:'D02-t2',sec:'D02',type:'tf',q:'只要 MCU 有 FPU，量产代码就完全不需要考虑定点问题。',ans:false,exp:'仍需考虑：ADC 码值换算、A2L 标定格式、与定点库兼容、float 精度（A06 角度累加）、执行时间确定性等。',links:['D02','X2']},
+{id:'D02-sa',sec:'D02',type:'short',q:'说明选择标幺基值时要检查的两个方向的约束。',ans:'上限：基值 ≥ 最大物理值（含故障、测试、保护阈值）× 裕量，否则饱和导致控制失真或诊断永远不触发（如 50 A 基值无法表示 60 A 电流极限）；下限：基值不能过大，否则最小有效控制量（小电流、积分增量）分辨率不足、量化误差大。还要考虑与采样量程匹配（每码对应 LSB 为整数倍便于移位）。',exp:'上限 + 下限 + 量程匹配。',links:['D02','X2']},
+{id:'D02-an',sec:'D02',type:'analysis',q:'耐久试验中偶发：高速大负载时 vq 突然从接近正满幅跳到负满幅一个周期，随后恢复，同时出现过流故障。请分析并给出定位与修复方法。',ans:'<b>分析：</b>「正满幅 → 负满幅」典型的 int16 回绕溢出：某个加法（PI 输出 + 前馈、积分 + 比例、Q 格式转换）在高速大负载下超过 32767 未饱和。高速时前馈 ωψf 很大，加上 PI 输出最容易超限。<br><b>定位：</b>① XCP 以主中断事件记录 vq、PI 输出、前馈；② 代码审查所有 int16 赋值处的中间运算；③ 构造单元测试：前馈 = 30000、PI 输出 = 5000。<br><b>修复：</b>所有求和用 int32 中间量 + Q15_Sat；PI 限幅扣除前馈（C05）。<br><b>验证：</b>边界测试通过；同工况耐久无复现。',exp:'符号翻转 → 回绕；高速 → 前馈大。',links:['D02','C05']},
+/* ---------- D03 ---------- */
+{id:'D03-s1',sec:'D03',type:'single',q:'下列哪项不应放在 FOC 主中断（20 kHz）中？',opts:['Park 变换','电流环 PI','Flash / NVM 写入','SVPWM 计算'],ans:2,exp:'Flash 操作耗时长且可能阻塞取指，必须在慢任务、停机时或专用机制中进行。',links:['D03']},
+{id:'D03-s2',sec:'D03',type:'single',q:'FOC 主中断执行 20 µs、周期 50 µs，其 CPU 负载为？',opts:['20%','40%','60%','2.5%'],ans:1,exp:'U = C/T = 20/50 = 40%。',links:['D03']},
+{id:'D03-t1',sec:'D03',type:'tf',q:'慢任务写入成对给定（idRef、iqRef）时，使用双缓冲可以避免中断读到不一致的组合。',ans:true,exp:'写另一块缓冲后原子切换下标，中断只读完整的一块。',links:['D03']},
+{id:'D03-t2',sec:'D03',type:'tf',q:'看门狗在后台循环中喂狗即可保证主中断正常运行。',ans:false,exp:'主中断失效时后台仍可能运行；应由各关键任务签到，全部签到后才喂狗。',links:['D03']},
+{id:'D03-sa',sec:'D03',type:'short',q:'列出 EPS 电机控制软件的典型中断 / 任务分层及各层内容。',ans:'硬件保护（比较器 → PWM 关断，无 CPU）；故障中断（记录、置 FAULT）；FOC 主中断 50 µs（采样、角度、Clarke/Park、电流环、SVPWM、快速诊断）；分频 2 kHz（弱磁）；1 ms（速度 / 位置环、给定生成、测速、诊断去抖、状态机）；10~100 ms（温度、热模型、降额、通信、NVM）；后台（XCP、自检）。',exp:'层次 + 内容。',links:['D03']},
+{id:'D03-an',sec:'D03',type:'analysis',q:'台架：打开 CANape 中 40 个以主中断事件采集的 DAQ 信号后，电机出现周期性（约每 10 ms 一次）的电流扰动；关闭 DAQ 后消失。请分析并给出方案。',ans:'<b>分析：</b>DAQ 采集在主中断事件中执行拷贝，40 个信号使主中断执行时间增加；若某些周期叠加其他工作（每 10 ms 的 DAQ 打包 / 通信）导致主中断超出预算或被推迟，PWM 更新错过一个周期，形成周期性扰动。也可能是 DAQ 拷贝过程中关中断。<br><b>排查：</b>GPIO / 计数测主中断 WCET 与开始时刻抖动；统计 10 ms 周期内最大值。<br><b>方案：</b>主中断事件只保留少量关键信号（分频采集），其余移到 1 ms / 10 ms 事件；缩短关中断时间；必要时片上缓存后低优先级上传。<br><b>验证：</b>满配 DAQ 下主中断 WCET 有余量，电流无扰动。',exp:'DAQ 负载 → 主中断超时 / 抖动。',links:['D03','D08']},
+/* ---------- D04 ---------- */
+{id:'D04-s1',sec:'D04',type:'single',q:'电机旋转中从 READY 进入 RUN 时，为避免电流冲击应？',opts:['直接使能 PWM，PI 从 0 开始','按当前转速预置反电动势前馈 / 积分器后再使能','先强制把电机刹停','把电流给定设为最大'],ans:1,exp:'旋转中存在反电动势，PI 输出从 0 开始相当于施加反向电压，造成冲击（飞车启动）。',links:['D04','C05']},
+{id:'D04-s2',sec:'D04',type:'single',q:'进入 FAULT 状态时，正确的执行顺序是？',opts:['先记录冻结帧，再关管','先关管，再清积分、记录','先通知上层，等待确认再关管','只置故障码，不关管'],ans:1,exp:'安全优先：关管必须最先执行。',links:['D04','C12']},
+{id:'D04-t1',sec:'D04',type:'tf',q:'算法模块设计成「输入结构 → 输出结构」的纯函数，便于在 PC 上做单元测试。',ans:true,exp:'不访问寄存器与全局状态，可脱离硬件测试。',links:['D04']},
+{id:'D04-t2',sec:'D04',type:'tf',q:'间歇性故障应允许无限次自动恢复，以保证可用性。',ans:false,exp:'应限制恢复次数，严重故障锁存，避免硬件反复受冲击。',links:['D04','C12']},
+{id:'D04-sa',sec:'D04',type:'short',q:'FOC 软件的分层结构通常包括哪些层？各层职责是什么？',ans:'① 硬件抽象层：PWM、ADC、旋变、GPIO 寄存器访问与触发配置；② 算法层：采样换算、角度、变换、电流环、SVPWM、观测器，纯计算；③ 给定与外环：MTPA、弱磁、速度 / 位置环、限幅；④ 诊断与安全：故障检测、降额、冻结帧；⑤ 应用 / 状态层：状态机、标定流程、与上层（EPS 助力算法 / RTE）接口。',exp:'五层职责。',links:['D04']},
+{id:'D04-an',sec:'D04',type:'analysis',q:'整车反馈：车辆行驶中 EPS 偶发复位后重新上线，方向盘会「咯噔」一下。台架复现：电机以 1500 rpm 被动转动时使能，iq 出现约 25 A 尖峰。请分析并给出修复。',ans:'<b>分析：</b>1500 rpm 时反电动势约 2.2 V；使能瞬间 PI 积分为 0、无前馈，控制器输出 vq ≈ 0，相当于对电机施加了 −2.2 V 的相对电压，电流迅速冲向负值 / 振荡，形成尖峰；同时偏移校准若在转动中执行也会出错。<br><b>修复：</b>① READY→RUN 前按当前转速计算并预置 vq = ωe·ψf（及解耦项）到积分器；② 角度与速度有效后再使能；③ 偏移校准在转动中跳过，使用 NVM 中上次值或零力矩时跟踪；④ 电流给定从 0 斜坡上升。<br><b>验证：</b>0~3000 rpm 被动转动时使能，电流尖峰 < 2 A，无手感冲击。',exp:'飞车启动预置。',links:['D04','C05','C01']},
+/* ---------- D05 ---------- */
+{id:'D05-s1',sec:'D05',type:'single',q:'MIL、SIL、PIL 中，哪一项能测量控制器在目标 MCU 上的执行时间？',opts:['MIL','SIL','PIL','都不能'],ans:2,exp:'PIL 在目标处理器上运行控制器代码，可测执行时间与数值一致性。',links:['D05']},
+{id:'D05-s2',sec:'D05',type:'single',q:'仿真中电流环表现理想、台架振荡，最应优先补充到模型中的是？',opts:['更精细的机械摩擦','采样—计算—PWM 的 1.5Ts 延迟与离散控制器','温度模型','CAN 通信'],ans:1,exp:'延迟直接影响电流环相位裕度，是仿真与台架差异的首要来源。',links:['D05','E03']},
+{id:'D05-t1',sec:'D05',type:'tf',q:'仿真搭建应从电机开环开始，逐步加入变换、电流环、非理想因素和外环。',ans:true,exp:'逐级验证，问题定位范围最小。',links:['D05']},
+{id:'D05-t2',sec:'D05',type:'tf',q:'Simulink 仿真曲线可以作为电流环性能「验证通过」的最终证据。',ans:false,exp:'仿真为 L1/L2 证据，最终验证以台架实测为准（X3）。',links:['D05','X3']},
+{id:'D05-sa',sec:'D05',type:'short',q:'说明为什么仿真要做参数偏差扫描，以及通常扫描哪些参数。',ans:'控制器用标称参数设计，真实电机存在批次差异、饱和与温度变化；扫描可评估鲁棒性（超调、稳定裕度、观测误差）。常扫：Ld、Lq（±30%）、Rs（温度 −40~150 °C 对应变化）、ψf（±10%）、Vdc（9~16 V）、死区 / 延迟、采样增益误差。',exp:'原因 + 参数列表。',links:['D05']},
+{id:'D05-an',sec:'D05',type:'analysis',q:'新同事搭建的 Simulink 模型中，给正 iq 时电机反转，但他认为「把 iq 符号取反」就能解决。请给出你的判断与正确排查方法。',ans:'<b>判断：</b>符号取反只是掩盖约定不一致，代码生成或与手写代码对照时会再次出错，且可能同时影响 d 轴、弱磁方向和观测器。<br><b>排查：</b>按六步法退回步骤 2：开环 V/f 正向拖动，检查 ① θe 是否随时间增加；② iα–iβ 是否逆时针；③ Park / 反 Park 与 Clarke 系数、β 方向是否与导读第三节一致；④ 对象模型中 θe = ∫pωm 的方向与转矩方向是否一致；⑤ 相序（A→B→C）。<br><b>修复：</b>修正不一致的环节，而非在输出处取反。<br><b>验证：</b>正 iq 正转、开环与闭环方向一致、dq 为直流。',exp:'找约定不一致，不要符号补丁。',links:['D05','B03']},
+/* ---------- D06 ---------- */
+{id:'D06-s1',sec:'D06',type:'single',q:'台架首次上电闭环前，最重要的安全措施是？',opts:['直接使用整车电池以获得真实工况','使用可限流的直流电源并验证硬件过流保护','关闭所有诊断以免误报','把电流环参数调到最大'],ans:1,exp:'方向或采样错误时闭环是正反馈，限流电源和硬件保护可防止损坏。',links:['D06']},
+{id:'D06-s2',sec:'D06',type:'single',q:'I/F 开环拖动时，转子能稳定跟随开环角度的条件是负载角 γ（电流矢量与转子 d 轴夹角）？',opts:['小于 90°','大于 90°','等于 180°','任意'],ans:0,exp:'Te = Kt·|i|·sin γ；γ < 90° 时负载增加会使 γ 与转矩同时增大（自恢复）；γ 超过 90° 后转矩随 γ 增大而下降，失步。',links:['D06']},
+{id:'D06-t1',sec:'D06',type:'tf',q:'I/F 运行时比较旋变角度与开环角度，若两者差值以恒定斜率漂移，说明极对数或方向配置有误。',ans:true,exp:'正常时差值近似常数（负载角 + 零位）。',links:['D06','C09']},
+{id:'D06-t2',sec:'D06',type:'tf',q:'可以跳过开环步骤，直接用旋变角度闭环调试，以节省时间。',ans:false,exp:'闭环下方向、采样、角度错误都表现为抖动 / 过流，无法区分；开环逐项验证可快速定位。',links:['D06']},
+{id:'D06-sa',sec:'D06',type:'short',q:'写出从 I/F 开环切入旋变闭环的条件与步骤。',ans:'条件：零位已标定；|θ旋变 − θIF| 小于阈值（如 ±10°）且稳定一段时间（如 200 ms）；转速稳定；无故障。步骤：① 预置电流环积分器为当前 vd、vq（扣除前馈）；② 切换角度源到旋变；③ 电流给定从 I/F 设定值斜坡过渡到上层力矩需求；④ 进入 RUN 状态，监控切换后电流与角度误差。',exp:'条件 + 步骤。',links:['D06','C05']},
+{id:'D06-an',sec:'D06',type:'analysis',q:'台架：I/F 拖动在 20 A、加速度 50 Hz/s 下稳定达到 600 rpm；把加速度提高到 300 Hz/s 后，约 0.15 s 时电机开始抖动并停转，电流仍在流动。请计算分析并给出参数调整建议。',ans:'<b>分析：</b>加速需要转矩 J·α_m：电频率加速度 300 Hz/s → 机械角加速度 2π×300/4 ≈ 471 rad/s²，J = 2×10⁻⁵ 时约 0.0094 N·m；若负载 / 摩擦接近能力上限（Kt·I = 0.021×20 = 0.42 N·m，空载应足够），更可能是加速过程中负载角瞬态超调越过 90°（转子惯性 + 低阻尼振荡），或开环电压在升速后饱和（反电动势 + 电阻压降超出电压上限）导致电流不能维持。<br><b>排查：</b>记录 angDiff（负载角）、vq 与限幅、iq 实际值；对比 50 Hz/s 时负载角曲线。<br><b>调整：</b>降低加速度或分段加速；提高 I/F 电流；增加阻尼（转速闭环后切入或角度差反馈修正）；在电压饱和前切入闭环。<br><b>验证：</b>多次启动 100% 成功，负载角峰值 < 60°。',exp:'负载角与电压两方面。',links:['D06','A06']},
+/* ---------- D07 ---------- */
+{id:'D07-s1',sec:'D07',type:'single',q:'扫频注入测电流环闭环频响时，注入幅值应？',opts:['尽量大以提高信噪比','较小（如额定 5% 量级），避免电压 / 电流饱和','等于额定电流','无所谓'],ans:1,exp:'饱和会使系统非线性，测得的频响不代表小信号特性。',links:['D07']},
+{id:'D07-s2',sec:'D07',type:'single',q:'若真实 Lq 因饱和比标定值小 40%，按标定值设计的电流环实际表现为？',opts:['带宽降低、响应变慢','带宽升高、相位裕度下降，可能出现谐振峰','完全不受影响','直流增益改变'],ans:1,exp:'开环增益 Kp/L 变大，穿越频率升高，延迟引起的相位滞后增大。',links:['D07','C11']},
+{id:'D07-t1',sec:'D07',type:'tf',q:'标定顺序应从内环到外环：先采样 / 角度 / 电流环，再 MTPA / 弱磁，最后速度环与观测器。',ans:true,exp:'外环标定依赖内环特性。',links:['D07']},
+{id:'D07-t2',sec:'D07',type:'tf',q:'在整车主观评价阶段随意修改电流环 Kp 是常规做法。',ans:false,exp:'底层参数应在台架冻结；修改会改变上层所有标定的基础。',links:['D07']},
+{id:'D07-sa',sec:'D07',type:'short',q:'片上单频点相关分析（sin/cos 相关）相比 DAQ 采集原始波形离线分析有什么优点？',ans:'① 不受 XCP / CAN 带宽与 DAQ 采样率限制，可测到接近 PWM/10 以上的频点而无混叠；② 数据量小，每个频点只需几个累加值；③ 对噪声有平均作用（相关积分）；④ 便于自动化扫频。需注意整数周期积分与浮点 / 定点精度。',exp:'带宽、数据量、抗噪。',links:['D07']},
+{id:'D07-an',sec:'D07',type:'analysis',q:'台架扫频结果：小电流（iq0 = 5 A）时 −3 dB 带宽 980 Hz、无谐振峰；大电流（iq0 = 45 A）时带宽 1.6 kHz、有 4 dB 谐振峰，阶跃超调 35%。请分析并给出标定方案。',ans:'<b>分析：</b>大电流下 Lq 饱和变小，Kp/Lq 增大 → 穿越频率上升，叠加 1.5Ts 延迟后相位裕度不足，出现谐振峰与超调。<br><b>方案：</b>① 测量 Lq(iq) 曲线（C11）；② 建立 Kp_q 随 |iq| 的调度表（Kp = ωc·Lq(iq)），Ki 同步按零极点对消调整；③ 以最不利工况（大电流、低温 / 高温）复测扫频；④ 必要时整体降低目标带宽保证裕度。<br><b>验证：</b>全电流范围带宽接近 1 kHz、谐振峰 < 1 dB、超调 < 10%。',exp:'饱和 → 增益调度。',links:['D07','C11','A08']},
+/* ---------- D08 ---------- */
+{id:'D08-s1',sec:'D08',type:'single',q:'gFoc.iq 为 Q15、基值 50 A，A2L 线性换算系数 a 应为？',opts:['32768/50','50/32768 ≈ 0.001526','1/50','50'],ans:1,exp:'phys = raw × 50/32768。',links:['D08']},
+{id:'D08-s2',sec:'D08',type:'single',q:'每次编译后 A2L 地址需要更新，最可靠的做法是？',opts:['手工修改地址','构建流程从 ELF 自动生成 / 更新 A2L，并用 EPK 校验','固定所有变量地址永不变化','不用 A2L'],ans:1,exp:'自动化 + 版本标识校验可避免错位。',links:['D08']},
+{id:'D08-t1',sec:'D08',type:'tf',q:'标定量在初始化时复制到局部变量后使用，会导致在线标定修改不生效。',ans:true,exp:'需在使用处读取或提供刷新机制。',links:['D08']},
+{id:'D08-t2',sec:'D08',type:'tf',q:'XCP DAQ 信号越多越好，不会影响实时性。',ans:false,exp:'DAQ 拷贝占用事件所在任务的执行时间，并受总线带宽限制。',links:['D08','D03']},
+{id:'D08-sa',sec:'D08',type:'short',q:'列出排查「电流环振荡」时 CANape 中应同时记录的最少信号组，并说明各自用途。',ans:'① idRef/iqRef 与 id/iq：看跟踪与振荡频率；② vd/vq 与 vSat、vdcPu：看是否电压饱和；③ thetaE 与 thetaEIncPerTs（转速）：判断是否与转速相关；④ ia/ib（或 iα/iβ）：看相电流与采样异常；⑤ 积分器状态：看是否积分饱和；⑥ isrMaxTicks：看是否超时。主中断事件分频采集，保证频率分辨率。',exp:'信号 + 用途。',links:['D08','E02']},
+{id:'D08-an',sec:'D08',type:'analysis',q:'标定工程师在 CANape 中把 Cal_IqKp_q12 物理值从 0.47 改为 0.60 V/A，电机立即剧烈振荡。读回原始值发现写入的是 32767 附近。请分析原因与预防措施。',ans:'<b>分析：</b>0.60 V/A 对应 Q12 原始值 0.60/7.8125e-5 = 7680，应完全正常；写入 32767 说明 A2L 中 COMPU_METHOD 与代码格式不一致（例如 A2L 仍按 Q15 + 不同基值换算，或单位换算系数错误），CANape 按错误系数换算后写入饱和值，实际 Kp 变为约 2.56 V/A，导致振荡。<br><b>预防：</b>① A2L 由代码中统一的格式描述自动生成；② 标定量设置合理的物理上下限（LOWER/UPPER LIMIT）；③ 关键参数修改后读回原始值核对；④ Q 格式变更走变更流程并同步 A2L 与标定数据。<br><b>验证：</b>写入—读回—物理值三者一致。',exp:'A2L 换算不一致 + 上下限保护。',links:['D08','A08','D02']}
+);
+
+</script>
+<script>
+/* ===================== 模块 D 交互动画 ===================== */
+(function(){
+'use strict';
+const {D2R,TAU,clamp,HH,split,inset,plotBox,pline,pfn,hl,vl,arrow,dline,info,legend,hr}=window.FOC_DRAW;
+const SPECS=window.FOC_ANIM_SPECS;
+/* 复数小工具 */
+const cx=(r,i)=>({r,i}),cadd=(a,b)=>cx(a.r+b.r,a.i+b.i),cmul=(a,b)=>cx(a.r*b.r-a.i*b.i,a.r*b.i+a.i*b.r),cdiv=(a,b)=>{const d=b.r*b.r+b.i*b.i;return cx((a.r*b.r+a.i*b.i)/d,(a.i*b.r-a.r*b.i)/d);},cabs=a=>Math.hypot(a.r,a.i),cexp=t=>cx(Math.cos(t),Math.sin(t));
+
+/* ---------- D01 离散化 ---------- */
+SPECS.push({host:'anim-D01',title:'一阶低通的三种离散化：前向 / 后向欧拉 / Tustin',h:HH,
+ params:[{k:'r',label:'fc / fs',min:0.01,max:0.4,step:0.005,v:0.05,dp:3}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),Ts=1,tau=1/(TAU*p.r),N=Math.min(400,Math.ceil(8*tau/Ts)+5);
+  const run=(m)=>{let y=0,xp=0;const ys=[0];for(let k=1;k<=N;k++){const x=1;if(m===0)y=y+(Ts/tau)*(xp-y);else if(m===1)y=y+Ts/(tau+Ts)*(x-y);else y=((2*tau-Ts)*y+Ts*(x+xp))/(2*tau+Ts);xp=x;ys.push(y);}return ys;};
+  const xs=[...Array(N+1).keys()],ym=[run(0),run(1),run(2)];let mx=1.2,mn=-0.2;ym[0].forEach(v=>{if(isFinite(v)){mx=Math.max(mx,Math.min(v,3));mn=Math.min(mn,Math.max(v,-2));}});
+  const P1=plotBox(ctx,C,inset(S.L,40,22,10,30),[0,N],[mn,mx],{nx:4,ny:4,title:'阶跃响应（横轴：采样序号）',xl:'k'});
+  pfn(ctx,P1,k=>1-Math.exp(-k*Ts/tau),0,N,200,C.muted,1.6,[5,4]);
+  [[0,C.bad],[1,C.acc],[2,C.ok]].forEach(([m,c])=>pline(ctx,P1,xs,ym[m].map(v=>clamp(v,-5,5)),c,1.8));
+  legend(ctx,C,[['连续',C.muted],['前向',C.bad],['后向',C.acc],['Tustin',C.ok]],P1.b.x+6,P1.b.y+P1.b.h-6);
+  const Hc=f=>1/Math.hypot(1,f/p.r);
+  const Hd=(m,f)=>{const z=cexp(TAU*f*Ts),zi=cdiv(cx(1,0),z);let H;if(m===0){H=cdiv(cx(Ts/tau,0),cadd(z,cx(-(1-Ts/tau),0)));}else if(m===1){const a=Ts/(tau+Ts);H=cdiv(cx(a,0),cadd(cx(1,0),cmul(cx(-(1-a),0),zi)));}else{const b=Ts/(2*tau+Ts),a=(2*tau-Ts)/(2*tau+Ts);H=cdiv(cmul(cx(b,0),cadd(cx(1,0),zi)),cadd(cx(1,0),cmul(cx(-a,0),zi)));}return cabs(H);};
+  const P2=plotBox(ctx,C,inset(S.R,40,22,10,30),[0.005,0.5],[-20,10],{nx:5,ny:6,title:'离散幅频 − 连续幅频（dB），横轴 f/fs',xl:'f / fs（0.5 = 奈奎斯特）'});
+  [[0,C.bad],[1,C.acc],[2,C.ok]].forEach(([m,c])=>pfn(ctx,P2,f=>20*Math.log10(Hd(m,f)/Hc(f)),0.005,0.5,200,c,1.8));vl(ctx,P2,[-20,10],p.r,C.warn);
+  const unstable=Ts/tau>2;
+  info(ctx,C,['Ts/τ = '+(Ts/tau).toFixed(3),unstable?['⚠ 前向欧拉：|1 − Ts/τ| > 1 → 发散',C.bad]:(Ts/tau>1?['前向欧拉：振荡衰减',C.warn]:['前向欧拉稳定',C.ok]),'在 fc 处误差：后向 '+(20*Math.log10(Hd(1,p.r)/Hc(p.r))).toFixed(2)+' dB，Tustin '+(20*Math.log10(Hd(2,p.r)/Hc(p.r))).toFixed(2)+' dB'],P2.b.x+8,P2.b.y+16);}});
+
+/* ---------- D02 定点溢出 ---------- */
+SPECS.push({host:'anim-D02',title:'定点表示：回绕 vs 饱和、小数位与量化误差',h:HH,
+ params:[{k:'A',label:'信号幅值（pu）',min:0.1,max:1.5,step:0.01,v:0.8,dp:2},{k:'K',label:'后续增益 K',min:0.5,max:2,step:0.01,v:1.0,dp:2},{k:'n',label:'小数位 n（Q(15−n).n）',min:4,max:15,step:1,v:15,dp:0}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),n=p.n,m=15-n,lsb=Math.pow(2,-n),hi=Math.pow(2,m)-lsb,lo=-Math.pow(2,m);
+  const q=v=>Math.round(v/lsb)*lsb;const wrap=v=>{let r=Math.round(v/lsb);r=((r+32768)%65536+65536)%65536-32768;return r*lsb;};const sat=v=>clamp(q(v),lo,hi);
+  const x=t=>p.A*Math.sin(TAU*t+st.t);const yr=Math.max(1.6,p.A*p.K*1.2,hi*1.1);
+  const P1=plotBox(ctx,C,inset(S.L,44,22,10,30),[0,1],[-yr,yr],{nx:4,ny:4,title:'K·x：理想（灰）回绕（红）饱和（蓝）',xl:'周期'});
+  hl(ctx,P1,[0,1],hi,C.warn);hl(ctx,P1,[0,1],lo,C.warn);
+  pfn(ctx,P1,t=>p.K*x(t),0,1,300,C.muted,1.4,[5,4]);pfn(ctx,P1,t=>wrap(p.K*q(x(t))),0,1,600,C.bad,1.6);pfn(ctx,P1,t=>sat(p.K*q(x(t))),0,1,600,C.acc,2);
+  const P2=plotBox(ctx,C,inset(S.R,44,22,10,30),[0,1],[-lsb*0.8,lsb*0.8],{nx:4,ny:4,title:'量化误差 q(x) − x（±0.5 LSB）',xl:'周期',yf:v=>v.toExponential(1)});
+  pfn(ctx,P2,t=>q(x(t))-x(t),0,1,600,C.d,1.4);
+  const ov=p.A*p.K>hi;
+  info(ctx,C,['格式 Q'+m+'.'+n+'：范围 ['+lo+', '+hi.toFixed(4)+']','LSB = '+lsb.toExponential(2),ov?['⚠ 超范围：回绕产生符号翻转',C.bad]:['未溢出',C.ok],ov?['饱和：只削顶，方向不变',C.acc]:''].filter(s=>s!==''),P2.b.x+8,P2.b.y+16);}});
+
+/* ---------- D03 中断时间轴 ---------- */
+SPECS.push({host:'anim-D03',title:'中断与任务时间轴：抢占、负载与关中断延迟',h:w=>w>=620?300:360,
+ params:[{k:'cf',label:'FOC 主中断执行时间',min:5,max:45,step:1,v:20,unit:'µs',dp:0},{k:'c1',label:'1 ms 任务执行时间',min:50,max:700,step:10,v:150,unit:'µs',dp:0},{k:'cs',label:'1 ms 任务内关中断时长',min:0,max:60,step:1,v:0,unit:'µs',dp:0}],
+ draw(ctx,w,h,st,C){const p=st.p,T=2000,L=70,R=w-12,X=t=>L+t/T*(R-L);const rows=[['FOC 50µs',40],['1 ms 任务',100],['后台/XCP',160]];
+  ctx.font='11px system-ui';rows.forEach(([n,y])=>{ctx.fillStyle=C.muted;ctx.textAlign='left';ctx.fillText(n,4,y+14);ctx.strokeStyle=C.grid;ctx.strokeRect(L,y,R-L,22);});
+  for(let t=0;t<=T;t+=500){ctx.fillStyle=C.muted;ctx.textAlign='center';ctx.fillText(t+' µs',X(t),210);}
+  /* 简单离散事件模拟，步长 1 µs */
+  let fPend=[],fRem=0,fStart=0,tRem=0,tStart=-1,crit=0,late=0,maxLate=0,busyF=0,busyT=0;const segF=[],segT=[],segB=[];let curB=null;
+  for(let t=0;t<T;t++){
+    if(t%50===0)fPend.push(t);
+    if(t%1000===0){tRem=p.c1;}
+    let run='b';
+    if(fRem===0&&fPend.length&&crit===0){const rel=fPend.shift();const d=t-rel;if(d>0){late++;maxLate=Math.max(maxLate,d);}fRem=p.cf;fStart=t;segF.push([t,t+p.cf,d>0]);}
+    if(fRem>0){fRem--;run='f';busyF++;}
+    else if(tRem>0){const done=p.c1-tRem;if(p.cs>0&&done>=p.c1*0.4&&done<p.c1*0.4+p.cs)crit=1;else crit=0;tRem--;run='t';busyT++;if(tRem===0)crit=0;}
+    else crit=0;
+    if(run==='t'){if(!segT.length||segT[segT.length-1][1]!==t)segT.push([t,t+1,crit]);else{segT[segT.length-1][1]=t+1;if(crit)segT[segT.length-1][2]=1;}}
+    if(run==='b'){if(!segB.length||segB[segB.length-1][1]!==t)segB.push([t,t+1]);else segB[segB.length-1][1]=t+1;}}
+  segF.forEach(([a,b,l])=>{ctx.fillStyle=l?C.bad:C.acc;ctx.fillRect(X(a),42,Math.max(1,X(b)-X(a)),18);});
+  segT.forEach(([a,b,c])=>{ctx.fillStyle=c?C.warn:C.ok;ctx.fillRect(X(a),102,Math.max(1,X(b)-X(a)),18);});
+  segB.forEach(([a,b])=>{ctx.fillStyle=C.muted;ctx.globalAlpha=0.35;ctx.fillRect(X(a),162,Math.max(1,X(b)-X(a)),18);ctx.globalAlpha=1;});
+  const U=(busyF+busyT)/T*100;
+  info(ctx,C,['FOC 负载 '+(p.cf/50*100).toFixed(0)+'%，总负载 ≈ '+U.toFixed(0)+'%',late?['⚠ 主中断被推迟 '+late+' 次，最大 '+maxLate+' µs',C.bad]:['主中断准时',C.ok],p.cf>=50?['⚠ 主中断执行时间 ≥ 周期：超载',C.bad]:'橙色 = 1 ms 任务关中断区'],X(1050),h>300?240:236);}});
+
+/* ---------- D06 I/F 启动 ---------- */
+SPECS.push({host:'anim-D06',title:'I/F 启动：开环角度、负载角 γ 与失步',h:HH,
+ params:[{k:'I',label:'I/F 电流幅值',min:2,max:40,step:1,v:20,unit:'A',dp:0},{k:'acc',label:'电频率加速度',min:5,max:400,step:5,v:50,unit:'Hz/s',dp:0},{k:'TL',label:'负载转矩',min:0,max:0.8,step:0.01,v:0.1,unit:'N·m',dp:2}],
+ draw(ctx,w,h,st,C){const p=st.p,J=2e-5,B=1.5e-3,pp=4,Kt=0.021,dt=5e-5,Tend=1.2,N=Tend/dt,fmax=40;
+  /* 对齐后起动：转子 d 轴与电流矢量重合（γ = 0）；γ = 电流矢量与转子 d 轴夹角，Te = Kt·I·sin γ */
+  let th=0,thr=0,wm=0;const tx=[],fx=[],wx=[],dx=[];let slip=-1;
+  for(let k=0;k<N;k++){const t=k*dt,f=Math.min(fmax,p.acc*t);th+=TAU*f*dt;const g=th-thr;const Tm=Kt*p.I*Math.sin(g);
+    const TL=Math.abs(wm)>0.5?p.TL*Math.sign(wm):clamp(Tm,-p.TL,p.TL);wm+=(Tm-TL-B*wm)/J*dt;thr+=pp*wm*dt;
+    if(slip<0&&g>Math.PI/2+0.2)slip=t;
+    if(k%40===0){tx.push(t);fx.push(f*60/pp);wx.push(wm*60/TAU);dx.push(clamp(g/D2R,-180,400));}}
+  const S=split(w,h),fr=st.t===0?1:clamp((st.t%5)/4,0.02,1),n=Math.max(2,Math.floor(tx.length*fr));
+  const P1=plotBox(ctx,C,inset(S.L,46,22,10,30),[0,Tend],[-200,800],{nx:4,ny:5,title:'转速 rpm：开环给定（灰）转子（蓝）',xl:'时间 s'});
+  pline(ctx,P1,tx.slice(0,n),fx.slice(0,n),C.muted,1.6,[5,4]);pline(ctx,P1,tx.slice(0,n),wx.slice(0,n),C.acc,2);
+  const P2=plotBox(ctx,C,inset(S.R,46,22,10,30),[0,Tend],[-180,400],{nx:4,ny:4,title:'负载角 γ（电流矢量与转子 d 轴夹角，°电角度）',xl:'时间 s'});
+  hl(ctx,P2,[0,Tend],90,C.bad);pline(ctx,P2,tx.slice(0,n),dx.slice(0,n),C.d,2);
+  const need=p.TL+J*TAU*p.acc/pp,cap=Kt*p.I;
+  info(ctx,C,['最大电磁转矩 Kt·|I| = '+cap.toFixed(3)+' N·m','需要：负载 + 摩擦 + J·α ≈ '+(need+B*TAU*fmax/pp).toFixed(3)+' N·m',slip>=0?['⚠ 失步于 t = '+slip.toFixed(2)+' s',C.bad]:['跟随成功，γ < 90°',C.ok]],P2.b.x+8,P2.b.y+16);}});
+
+/* ---------- D07 扫频 ---------- */
+SPECS.push({host:'anim-D07',title:'扫频注入测电流环闭环频响（含 1 拍延迟的离散模型）',h:HH,
+ params:[{k:'lr',label:'真实 Lq / 标定 L̂',min:0.4,max:1.6,step:0.05,v:1.0,dp:2},{k:'ks',label:'Kp 缩放',min:0.3,max:2.5,step:0.05,v:1.0,dp:2}],
+ draw(ctx,w,h,st,C){const p=st.p,Ts=50e-6,R=0.012,Lh=75e-6,wc=TAU*1000;
+  const T=(f,L,kp,ki)=>{const a=Math.exp(-R*Ts/L),b=(1-a)/R,z=cexp(TAU*f*Ts),zi=cdiv(cx(1,0),z);
+    const P=cdiv(cmul(cx(b,0),zi),cadd(cx(1,0),cmul(cx(-a,0),zi)));const Cc=cadd(cx(kp,0),cdiv(cx(ki*Ts,0),cadd(cx(1,0),cmul(cx(-1,0),zi))));
+    const G=cmul(cmul(Cc,P),zi);return cdiv(G,cadd(cx(1,0),G));};
+  const kp=wc*Lh*p.ks,ki=wc*R*p.ks;
+  const P=plotBox(ctx,C,inset({x:0,y:0,w,h},50,22,14,30),[1.5,4],[-20,10],{nx:5,ny:6,title:'闭环幅频 |iq/iqRef|（dB）：设计（虚线）与「实测」（点）',xl:'频率 Hz（对数，30 Hz ~ 10 kHz）',xf:v=>{const f=Math.pow(10,v);return f>=1000?(f/1000).toFixed(f>=10000?0:1)+'k':f.toFixed(0);}});
+  pfn(ctx,P,lg=>20*Math.log10(cabs(T(Math.pow(10,lg),Lh,wc*Lh,wc*R))),1.5,4,200,C.muted,1.6,[5,4]);hl(ctx,P,[1.5,4],-3,C.warn);
+  const nPts=st.t===0?30:Math.min(30,1+Math.floor(st.t*6)%31);let bw=null,pk=-99;
+  for(let i=0;i<30;i++){const lg=1.5+2.5*i/29,f=Math.pow(10,lg),m=20*Math.log10(cabs(T(f,Lh*p.lr,kp,ki)));pk=Math.max(pk,m);if(bw===null&&m<-3)bw=f;
+    if(i<nPts){ctx.fillStyle=C.bad;ctx.beginPath();ctx.arc(P.X(lg),P.Y(clamp(m,-20,10)),3.5,0,TAU);ctx.fill();}}
+  const Lz=(f,L)=>{const a=Math.exp(-R*Ts/L),b=(1-a)/R,z=cexp(TAU*f*Ts),zi=cdiv(cx(1,0),z);const P=cdiv(cmul(cx(b,0),zi),cadd(cx(1,0),cmul(cx(-a,0),zi)));const Cc=cadd(cx(kp,0),cdiv(cx(ki*Ts,0),cadd(cx(1,0),cmul(cx(-1,0),zi))));return cmul(cmul(Cc,P),zi);};
+  let fcx=null;for(let lg=1.5;lg<4;lg+=0.002){if(cabs(Lz(Math.pow(10,lg),Lh*p.lr))<1){fcx=Math.pow(10,lg);break;}}
+  const Lc=fcx?Lz(fcx,Lh*p.lr):null,pm=Lc?180+Math.atan2(Lc.i,Lc.r)/D2R:null;
+  info(ctx,C,['开环穿越 fc ≈ '+(fcx?fcx.toFixed(0)+' Hz':'—')+'，相位裕度 ≈ '+(pm!==null?((pm+360)%360).toFixed(0)+'°':'—'),['Kp = '+kp.toFixed(3)+' V/A，Ki = '+ki.toFixed(1),C.fg],['闭环 −3 dB ≈ '+(bw?bw.toFixed(0)+' Hz（延迟使其高于 fc）':'> 10 kHz'),C.fg],[ '谐振峰 = '+Math.max(0,pk).toFixed(2)+' dB',pk>1?C.bad:C.ok],p.lr<1?'真实电感偏小（饱和）→ 带宽升高、相位裕度下降':(p.lr>1?'真实电感偏大 → 带宽降低':'参数匹配')],P.b.x+8,P.b.y+P.b.h*0.58);}});
 })();
 
 </script>

@@ -1,0 +1,274 @@
+
+<!-- ================= D03 ================= -->
+<section class="chap" id="D03" data-title="D03 中断架构">
+<h2 class="chap-h">D03 中断架构：主中断、慢速任务、标定任务、故障快速通路</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 3 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>软件运行时结构：决定每段代码在什么时刻、以什么优先级执行</td></tr>
+<tr><th>输入 / 输出</th><td>输入：功能列表与时间要求；输出：中断 / 任务划分、优先级、数据交换机制</td></tr>
+<tr><th>工程价值</th><td>FOC 主中断不能被阻塞、不能超时；慢任务与通信不能破坏中断数据一致性</td></tr>
+<tr><th>上下游依赖</th><td>上游 B05、B06；下游 D04、D08、C12</td></tr>
+<tr><th>适用角色</th><td>MCU 底层、软件架构</td></tr>
+<tr><th>前置数学依赖</th><td>无（时间预算计算）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>不同功能的时间尺度相差 4 个数量级（2 µs 硬件保护、50 µs 电流环、1 ms 速度环、100 ms 热模型），必须分层调度。</div>
+<div><b>② 量产怎么做</b>硬件故障 → PWM 硬件关断（无需 CPU）；ADC 完成中断（最高软件优先级）跑 FOC；1 ms / 10 ms 周期任务（RTOS 或定时器中断）；XCP / CAN 在低优先级处理。</div>
+<div><b>③ 如何证明</b>最坏执行时间（WCET）测量、CPU 负载统计、中断抖动测量、数据一致性代码审查与压力测试。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>MCU 中断优先级与嵌套配置（Cortex-M NVIC），是否使用 RTOS / AUTOSAR OS。</li>
+<li>各功能的周期与最坏执行时间估计。</li>
+<li>不满足：XCP 读写、Flash 操作、长时间关中断阻塞 FOC 主中断 → 电流环周期性失控。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>层级</th><th>触发</th><th>周期</th><th>内容</th><th>优先级</th></tr>
+<tr><td>硬件保护</td><td>比较器 / 驱动故障</td><td>—</td><td>PWM 故障输入直接关管</td><td>硬件（无需 CPU）</td></tr>
+<tr><td>故障中断</td><td>PWM 故障标志</td><td>事件</td><td>记录、状态机置 FAULT</td><td>最高</td></tr>
+<tr><td>FOC 主中断</td><td>ADC 转换完成</td><td>50 µs</td><td>采样换算、角度、Clarke/Park、电流环、SVPWM、快速诊断</td><td>高</td></tr>
+<tr><td>2 kHz 任务</td><td>主中断分频</td><td>500 µs</td><td>弱磁环、MTPA 查表（可放 1 ms）</td><td>主中断内分频或中优先级</td></tr>
+<tr><td>1 ms 任务</td><td>定时器 / OS</td><td>1 ms</td><td>速度 / 位置环、给定生成、测速、诊断去抖、状态机</td><td>中</td></tr>
+<tr><td>10 ms / 100 ms</td><td>OS</td><td>10~100 ms</td><td>温度、热模型、降额、NVM、通信信号</td><td>低</td></tr>
+<tr><td>后台</td><td>空闲</td><td>—</td><td>XCP 协议处理、自检</td><td>最低</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+CPU 负载 U = Σ (Ci / Ti)；主中断负载 = C_foc / 50 µs
+示例 <span class="tg tg-case">【案例假设】</span>：C_foc = 20 µs → 40%；1 ms 任务 150 µs → 15%；其余 10% → 总 65%，余量 35%
+单调速率调度可调度性（Liu &amp; Layland 上界，n 个任务）：U ≤ n·(2^(1/n) − 1)（充分条件，n = 3 时 0.78）
+跨层数据：单个对齐 32 位读写原子；多变量用双缓冲 / 序号校验 / 短时关中断</div>
+<div id="anim-D03"></div>
+<div class="anim-note"><b>动画在演示什么：</b>2 ms 时间轴上的执行情况：FOC 主中断（每 50 µs）、1 ms 任务（被主中断抢占后继续）、后台 XCP。若某段代码关中断，会推迟主中断。<br>
+<b>拖动滑块：</b>增大主中断执行时间或 1 ms 任务时间，CPU 负载上升；「关中断时长」超过主中断剩余余量时，主中断被推迟（红色）——这意味着采样到更新的延迟变化，电流环出现抖动。<br>
+<b>正常：</b>主中断准时、负载有余量。<b>异常：</b>红色推迟 / 超载。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>NVIC 优先级：PWM 故障 &gt; ADC（FOC）&gt; 定时器（1 ms）&gt; 通信。</li>
+<li>主中断只做确定性计算：禁止 Flash 写、禁止阻塞调用、禁止可变长度循环。</li>
+<li>跨任务数据：慢任务 → 中断（给定、标定量）用双缓冲 + 「发布」标志；中断 → 慢任务（测量值）用快照结构。</li>
+<li>关中断临界区 &lt; 数 µs，并计入主中断抖动预算。</li>
+<li>执行时间监控：每个任务入口出口时间戳，记录最大值并通过 XCP 读出（B06）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>示波器 GPIO：主中断方波稳定 20 kHz、宽度稳定；1 ms 任务方波被切成多段（抢占）属正常。</li>
+<li>主中断开始时刻抖动 &lt; 1 µs；若有偶发推迟 → 查关中断代码。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 慢任务 → 中断：双缓冲发布给定（避免中断读到半更新的 id/iq 对）*/
+typedef struct { q15_t idRef, iqRef; } REF_tst;
+static REF_tst s_refBuf[2];
+static volatile uint8_t s_refIdx = 0u;           /* 中断读取的缓冲区下标 */
+
+void Ref_Publish_1ms(q15_t idRef, q15_t iqRef)   /* 1 ms 任务调用 */
+{
+    uint8_t w = (uint8_t)(s_refIdx ^ 1u);         /* 写另一块 */
+    s_refBuf[w].idRef = idRef;
+    s_refBuf[w].iqRef = iqRef;
+    __DMB();                                      /* 保证写入顺序 */
+    s_refIdx = w;                                 /* 单字节写入原子：发布 */
+}
+
+void Ref_Fetch_Isr(void)                          /* FOC 主中断调用 */
+{
+    const REF_tst *r = &amp;s_refBuf[s_refIdx];
+    gFoc.idRef = r-&gt;idRef;
+    gFoc.iqRef = r-&gt;iqRef;
+}
+
+/* 主中断分频：2 kHz 弱磁 */
+void FOC_FastLoop_Isr(void)
+{
+    static uint8_t s_div = 0u;
+    /* ... 采样、变换、电流环、SVPWM（B03）... */
+    if (++s_div &gt;= 10u) { s_div = 0u; gFoc.idRef = FOC_FieldWeakenAdjust(gFoc.idRefMtpa); }
+}</code></pre>
+<p class="note">双缓冲在「慢任务写一次、中断读多次」时可靠；若慢任务写入周期短于中断读取周期（不会发生于本例），需要更复杂的三缓冲或序号机制。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>XCP 测量变量多时电流环抖动</h5><dl>
+<dt>现象</dt><dd>CANape 加入大量 DAQ 信号后电流出现周期性扰动。</dd>
+<dt>可能根因</dt><dd>XCP DAQ 采集在主中断中执行或长时间关中断拷贝。</dd>
+<dt>排查</dt><dd>测主中断执行时间随 DAQ 信号数量的变化。</dd>
+<dt>修复</dt><dd>DAQ 事件放到低优先级或限制主中断事件中的信号数量（D08）。</dd>
+<dt>验证</dt><dd>满配 DAQ 下主中断 WCET 仍有余量。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>偶发 iq 给定「跳一下」</h5><dl>
+<dt>现象</dt><dd>id/iq 给定偶发出现不成对的组合（id 新、iq 旧）。</dd>
+<dt>可能根因</dt><dd>慢任务直接写全局变量，中断在两次写之间读取。</dd>
+<dt>排查</dt><dd>代码审查跨上下文变量。</dd>
+<dt>修复</dt><dd>双缓冲发布。</dd>
+<dt>验证</dt><dd>压力测试无复现。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>NVM 写入时电机抖一下</h5><dl>
+<dt>现象</dt><dd>保存标定 / 故障记录时电流异常。</dd>
+<dt>可能根因</dt><dd>Flash 擦写期间从同一 Flash 块取指令 / 关中断，主中断被延迟。</dd>
+<dt>排查</dt><dd>GPIO 测主中断间隔。</dd>
+<dt>修复</dt><dd>使用独立 Data Flash / EEPROM 仿真区，关键中断代码放 RAM 执行，或只在停机时写。</dd>
+<dt>验证</dt><dd>写入期间主中断间隔不变。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>在主中断里调用 printf / 日志函数。</li>
+<li>浮点上下文保存：Cortex-M4F 中断使用 FPU 时的惰性压栈会增加中断延迟，需计入。</li>
+<li>主中断依赖 ADC 完成中断，而 ADC 被其他功能（温度采样）插入转换，导致中断时刻漂移。</li>
+<li><span class="tg tg-red">【风险红线】</span>看门狗只在后台喂：主中断死循环时后台仍在运行喂狗，看门狗失效。应由多层任务共同签到后喂狗。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D03" id="quiz-D03"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：分层与优先级、主中断禁止事项、跨上下文一致性、CPU 负载计算、看门狗签到。</li>
+<li>面试高频：「电机控制软件的中断怎么设计？」</li></ul></div>
+</section>
+
+<!-- ================= D04 ================= -->
+<section class="chap" id="D04" data-title="D04 代码架构">
+<h2 class="chap-h">D04 代码架构：FOC 结构体划分、环间数据流、状态机</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 4 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>软件静态结构：模块划分、数据结构、运行状态</td></tr>
+<tr><th>输入 / 输出</th><td>输入：功能需求、AUTOSAR / 非 AUTOSAR 平台；输出：模块接口、结构体、状态机</td></tr>
+<tr><th>工程价值</th><td>可测试、可标定、可复用；状态机决定上电、故障、模式切换的安全性</td></tr>
+<tr><th>上下游依赖</th><td>上游 D03；下游 D06、D07、D08</td></tr>
+<tr><th>适用角色</th><td>软件架构、全部开发者</td></tr>
+<tr><th>前置数学依赖</th><td>无</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>FOC 链路 10+ 个模块、100+ 个标定量，没有清晰结构就无法单元测试，也无法让标定工程师理解。</div>
+<div><b>② 量产怎么做</b>按「硬件抽象 / 算法 / 应用」分层；算法模块纯函数化（输入结构 → 输出结构）；单一全局运行数据结构 + 标定结构；明确状态机。</div>
+<div><b>③ 如何证明</b>模块单元测试覆盖率、状态机转移测试（含非法转移）、代码静态分析（MISRA）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>平台约束：是否 AUTOSAR（若是，电机控制常以复杂驱动 CDD 形式实现，与 RTE 接口交互 <span class="tg tg-check">【待核对：以项目架构为准】</span>）。</li>
+<li>编码规范：MISRA C、命名规则（本教程：g 前缀全局、Cal_ 标定、s_ 静态）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<h4 class="sub">分层与模块</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>层</th><th>模块</th><th>职责</th></tr>
+<tr><td>硬件抽象（HAL）</td><td>Pwm_*, Adc_*, Res_*（旋变）, Gpio_*</td><td>寄存器访问、触发配置，不含算法</td></tr>
+<tr><td>算法（FOC 核心）</td><td>Foc_Sense, Foc_Angle, Foc_Transform, Foc_CurCtrl, Foc_Svpwm, Foc_Obs</td><td>纯计算，输入输出结构体，可在 PC 上单元测试</td></tr>
+<tr><td>给定与外环</td><td>Foc_RefGen（MTPA / 弱磁 / 限幅）, Foc_SpdCtrl, Foc_PosCtrl</td><td>1 ms 级</td></tr>
+<tr><td>诊断与安全</td><td>Foc_Diag, Foc_Derate</td><td>故障检测、降额、冻结帧</td></tr>
+<tr><td>应用 / 状态</td><td>Foc_Sm（状态机）, Foc_Calib（标定流程）</td><td>模式、上电流程、XCP 接口</td></tr>
+</table></div>
+<h4 class="sub">状态机（EPS 电机控制层）</h4>
+<div class="tbl-wrap">
+<svg class="flow-svg" viewBox="0 0 980 200" role="img" aria-label="FOC 状态机">
+<g><rect class="bx" x="10" y="20" width="110" height="40" rx="6"/><text x="65" y="44" text-anchor="middle">INIT 上电</text></g>
+<path class="ln" d="M120,40 L150,40"/>
+<g><rect class="bx" x="151" y="20" width="120" height="40" rx="6"/><text x="211" y="38" text-anchor="middle">OFFSET_CAL</text><text class="sm" x="211" y="54" text-anchor="middle">偏移校准 PWM 关</text></g>
+<path class="ln" d="M271,40 L301,40"/>
+<g><rect class="bx" x="302" y="20" width="100" height="40" rx="6"/><text x="352" y="38" text-anchor="middle">READY</text><text class="sm" x="352" y="54" text-anchor="middle">PWM 关，待命</text></g>
+<path class="ln" d="M402,40 L432,40"/>
+<g><rect class="bx math" x="433" y="20" width="120" height="40" rx="6"/><text x="493" y="38" text-anchor="middle">RUN_TORQUE</text><text class="sm" x="493" y="54" text-anchor="middle">主模式（有感）</text></g>
+<path class="ln" d="M553,40 L583,40"/>
+<g><rect class="bx" x="584" y="20" width="130" height="40" rx="6"/><text x="649" y="38" text-anchor="middle">RUN_SENSORLESS</text><text class="sm" x="649" y="54" text-anchor="middle">旋变故障降级</text></g>
+<g><rect class="bx" x="302" y="120" width="120" height="40" rx="6"/><text x="362" y="138" text-anchor="middle">CALIB</text><text class="sm" x="362" y="154" text-anchor="middle">零位/辨识/扫频</text></g>
+<g><rect class="bx" x="584" y="120" width="130" height="40" rx="6"/><text x="649" y="138" text-anchor="middle">FAULT</text><text class="sm" x="649" y="154" text-anchor="middle">关管+锁存+冻结帧</text></g>
+<path class="ln" d="M352,60 L360,118"/><path class="ln" d="M380,118 L372,60"/>
+<path class="ln" d="M493,60 L600,118"/><path class="ln" d="M649,60 L649,118"/><path class="ln" d="M584,150 L424,150"/>
+<text class="sm" x="430" y="172">故障清除且 PWM 关</text>
+<text class="sm" x="520" y="96">任意运行态检测到故障</text>
+</svg></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>状态机用静态图 + 转移表更清晰。</p>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>转移</th><th>条件</th><th>动作</th></tr>
+<tr><td>INIT → OFFSET_CAL</td><td>供电稳定、驱动就绪、转速 ≈ 0</td><td>PWM 关，开始累加</td></tr>
+<tr><td>OFFSET_CAL → READY</td><td>校准完成且范围合法</td><td>写偏移；失败 → FAULT</td></tr>
+<tr><td>READY → RUN_TORQUE</td><td>上层使能 + 无故障 + 角度有效</td><td>PI 清零 / 预置、前馈按当前转速初始化、PWM 使能</td></tr>
+<tr><td>RUN_TORQUE → RUN_SENSORLESS</td><td>角度故障且转速高于无感可用阈值</td><td>角度源切换、限制力矩</td></tr>
+<tr><td>任意 → FAULT</td><td>故障置位</td><td>先关管，再清积分、记录</td></tr>
+<tr><td>FAULT → READY</td><td>可恢复故障清除 + 上层复位请求</td><td>重新自检</td></tr>
+<tr><td>READY ⇄ CALIB</td><td>标定模式请求（XCP，仅开发 / 产线权限）</td><td>运行标定流程</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>定义 FOC_tst（运行数据，导读中给出并逐章扩充）、FOC_CAL_tst（标定量，可放在独立内存段便于 XCP 页切换）。</li>
+<li>算法函数签名统一：<code>void Foc_X_Run(const IN_tst*, OUT_tst*, STATE_tst*)</code>，便于 PC 单元测试。</li>
+<li>状态机在 1 ms 任务中运行；主中断只读取状态决定执行哪些模块。</li>
+<li>每个转移写测试用例，包括非法请求（如 FAULT 中请求 RUN）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>上电时序：INIT → OFFSET_CAL（约 0.1 s）→ READY，记录状态变量与 PWM 使能信号。</li>
+<li>故障注入：任意运行态 → FAULT 时 PWM 立即关闭，状态与故障码正确。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>typedef enum { FOC_ST_INIT, FOC_ST_OFFSET_CAL, FOC_ST_READY, FOC_ST_RUN_TORQUE,
+               FOC_ST_RUN_SENSORLESS, FOC_ST_CALIB, FOC_ST_FAULT } FOC_State_ten;
+
+void Foc_Sm_1ms(void)
+{
+    switch (gFoc.state) {
+    case FOC_ST_INIT:
+        if (Pwr_IsStable() &amp;&amp; (labs(gFoc.spdRpmFilt) &lt; 30)) { Pwm_DisableAll(); gFoc.state = FOC_ST_OFFSET_CAL; }
+        break;
+    case FOC_ST_OFFSET_CAL:
+        if (gFoc.offsetDone) { gFoc.state = Diag_AnyFault() ? FOC_ST_FAULT : FOC_ST_READY; }
+        break;
+    case FOC_ST_READY:
+        if (gApp.enableReq &amp;&amp; !Diag_AnyFault() &amp;&amp; Angle_IsValid()) {
+            FOC_PiResetAll();
+            FOC_CurrentLoop_PresetFromSpeed(gFoc.wePu_q15);   /* 旋转中使能：预置反电动势前馈 */
+            Pwm_EnableAll();
+            gFoc.state = FOC_ST_RUN_TORQUE;
+        } else if (gApp.calibReq) { gFoc.state = FOC_ST_CALIB; }
+        break;
+    case FOC_ST_RUN_TORQUE:
+        if (!gApp.enableReq) { Pwm_DisableAll(); gFoc.state = FOC_ST_READY; }
+        else if (!Angle_IsValid() &amp;&amp; Obs_IsUsable()) { Angle_SelectSource(ANG_SRC_OBS); gFoc.state = FOC_ST_RUN_SENSORLESS; }
+        break;
+    case FOC_ST_FAULT:
+        if (Diag_Recoverable() &amp;&amp; gApp.resetReq) { gFoc.state = FOC_ST_READY; }
+        break;
+    default: break;
+    }
+    if (Diag_AnyFault() &amp;&amp; (gFoc.state != FOC_ST_FAULT)) { FOC_EmergencyOff(Diag_FirstCode()); }  /* C12 */
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电机转动中使能，瞬间大电流</h5><dl>
+<dt>现象</dt><dd>车辆行驶中 EPS 复位后重新使能，冲击明显。</dd>
+<dt>可能根因</dt><dd>使能时 PI 输出为 0，但反电动势存在，相当于给电机加了一个「反电压」。</dd>
+<dt>排查</dt><dd>记录使能瞬间转速、vq、iq。</dd>
+<dt>修复</dt><dd>按当前转速预置 vq = ωe·ψf（飞车启动）。</dd>
+<dt>验证</dt><dd>不同转速下使能电流平滑。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>FAULT 后自动恢复反复触发</h5><dl>
+<dt>现象</dt><dd>间歇性故障导致电机频繁启停。</dd>
+<dt>可能根因</dt><dd>恢复条件过松，无次数限制。</dd>
+<dt>排查</dt><dd>故障记录中的恢复次数。</dd>
+<dt>修复</dt><dd>恢复次数上限、严重故障锁存到下次上电。</dd>
+<dt>验证</dt><dd>间歇故障注入表现符合设计。</dd></dl></div>
+<div class="issue"><h5>易错点：算法模块直接访问寄存器</h5><dl>
+<dt>现象</dt><dd>算法无法在 PC 上测试，换 MCU 要改算法。</dd>
+<dt>根因</dt><dd>分层被破坏。</dd>
+<dt>排查</dt><dd>代码依赖分析。</dd>
+<dt>修复</dt><dd>HAL 接口隔离。</dd>
+<dt>验证</dt><dd>算法模块 PC 单元测试通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>状态判断分散在多个模块：难以分析所有转移；状态机集中在一个函数。</li>
+<li>标定模式在量产软件中可被意外触发：需要权限保护（Seed&amp;Key / 产线模式）。</li>
+<li>全局结构体被多个任务写：明确每个字段的唯一写者。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D04" id="quiz-D04"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：分层、纯函数算法、状态机转移条件与动作、飞车启动、故障锁存、唯一写者原则。</li></ul></div>
+</section>

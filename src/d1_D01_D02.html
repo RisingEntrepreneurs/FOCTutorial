@@ -1,0 +1,226 @@
+
+<!-- ================= D01 ================= -->
+<section class="chap" id="D01" data-title="D01 离散化">
+<h2 class="chap-h">D01 离散化：连续域公式转离散——前向欧拉、后向欧拉、双线性变换</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 1 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>所有连续域设计（PI、滤波器、观测器、电机模型）落到 MCU 的必经步骤</td></tr>
+<tr><th>输入 / 输出</th><td>输入：传递函数 G(s) / 微分方程、采样周期 Ts；输出：差分方程 y[k] = f(y[k−1], x[k], …)</td></tr>
+<tr><th>工程价值</th><td>离散化方法不同，同一组参数在高频处的增益与相位不同；Ts 与带宽之比越小差异越大</td></tr>
+<tr><th>上下游依赖</th><td>上游 A05~A08；下游 D02 定点、D05 仿真模型一致性</td></tr>
+<tr><th>适用角色</th><td>算法、模型开发</td></tr>
+<tr><th>前置数学依赖</th><td>A05 差分、A06 离散积分、A07 传递函数</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>MCU 只能每 Ts 计算一次；s 必须映射到 z。映射方法决定稳定性保持、频率畸变和代码形式。</div>
+<div><b>② 量产怎么做</b>积分器多用后向欧拉（PI 位置式）；滤波器、观测器在带宽接近采样频率时用双线性（Tustin）或精确零阶保持（ZOH）离散；模型与代码使用同一方法。</div>
+<div><b>③ 如何证明</b>离散模型与连续模型在目标带宽内的伯德图对比（幅值误差、相位误差）；SIL 中代码与模型逐点一致。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>已知 Ts（电流环 50 µs、速度环 1 ms）与被离散对象的带宽。</li>
+<li>经验：带宽 ≤ fs/20 时三种方法差异小；接近 fs/5 时差异显著。</li>
+<li>不满足：前向欧拉离散高带宽对象可能把稳定系统变成不稳定。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（z = e^(sTs) 的三种近似）
+前向欧拉：s ≈ (z − 1)/Ts           稳定域映射不保持：稳定连续极点可能映射到单位圆外
+后向欧拉：s ≈ (z − 1)/(z·Ts)       总是保持稳定（甚至把部分不稳定变为稳定），引入额外相位滞后
+双线性 Tustin：s ≈ (2/Ts)·(z − 1)/(z + 1)   稳定性保持；频率轴压缩（预畸变 ωa = (2/Ts)·tan(ωd·Ts/2) 可校正关键频点）
+零阶保持 ZOH 精确离散（对象建模用）：一阶 1/(τs+1) → y[k] = a·y[k−1] + (1 − a)·x[k−1]，a = e^(−Ts/τ)
+例：一阶低通 1/(τs + 1)
+   前向：y[k] = y[k−1] + (Ts/τ)·(x[k−1] − y[k−1])           Ts/τ &gt; 2 时发散
+   后向：y[k] = y[k−1] + Ts/(τ+Ts)·(x[k] − y[k−1])        A05 使用的形式
+   Tustin：y[k] = [(2τ − Ts)·y[k−1] + Ts·(x[k] + x[k−1])]/(2τ + Ts)
+PI：C(s) = Kp + Ki/s → 后向：u[k] = Kp·e[k] + I[k]，I[k] = I[k−1] + Ki·Ts·e[k]（A08）</div>
+<div id="anim-D01"></div>
+<div class="anim-note"><b>动画在演示什么：</b>一阶低通（截止频率 fc）在采样频率 fs 下用三种方法离散，左图为阶跃响应，右图为幅频误差（离散 − 连续，dB）。<br>
+<b>拖动滑块：</b>fc/fs 从 0.01 增加到 0.4：后向欧拉响应变慢、Tustin 在奈奎斯特附近幅值压到 0、前向欧拉在 fc/fs 较大时出现振荡甚至发散（Ts/τ &gt; 2 即 fc/fs &gt; 0.318）。<br>
+<b>正常：</b>fc/fs ≤ 0.05 三者几乎重合。<b>异常：</b>前向欧拉发散 / 振荡。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>确定每个模块的执行周期 Ts，并写入模块头文件（参数与 Ts 绑定，A05 踩坑）。</li>
+<li>选择离散方法：积分器后向；低通后向或 Tustin；对象模型（观测器中的电机模型）ZOH 或前向（需检查稳定性条件）。</li>
+<li>离线计算系数（MATLAB c2d 或手算），以标定量形式存储；若 Ts 可变（变周期任务），系数需在线计算。</li>
+<li>与 Simulink 模型的离散方法一致（D05），SIL 逐点比对。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>fc/fs 小：三种方法阶跃响应几乎相同。</li>
+<li>C10 SMO 电流模型用前向欧拉：Ts/Ls·Rs 很小，稳定；但高转速时反电动势变化快，需检查精度。</li>
+<li>速度环 1 ms、带宽 40 Hz：fc/fs = 0.04，方法差异可忽略；电流环 50 µs、带宽 1 kHz：fc/fs = 0.05，差异小但延迟（1.5Ts）不可忽略。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 通用一阶低通（Tustin），float 版本用于 1 ms 任务；系数离线计算 */
+typedef struct { float b0, b1, a1, x1, y1; } LPF1_tst;
+
+void Lpf1_InitTustin(LPF1_tst *f, float fc_Hz, float Ts)
+{
+    float tau = 1.0f / (6.2831853f * fc_Hz);
+    float den = 2.0f * tau + Ts;
+    f-&gt;b0 = Ts / den;  f-&gt;b1 = Ts / den;
+    f-&gt;a1 = (2.0f * tau - Ts) / den;
+    f-&gt;x1 = 0.0f;      f-&gt;y1 = 0.0f;
+}
+static inline float Lpf1_Run(LPF1_tst *f, float x)
+{
+    float y = f-&gt;b0 * x + f-&gt;b1 * f-&gt;x1 + f-&gt;a1 * f-&gt;y1;
+    f-&gt;x1 = x;  f-&gt;y1 = y;
+    return y;
+}
+
+/* 用法：速度信号 50 Hz 低通，Ts = 1 ms */
+static LPF1_tst s_spdLpf;
+void App_Init(void) { Lpf1_InitTustin(&amp;s_spdLpf, 50.0f, 1.0e-3f); }</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>观测器在高转速发散</h5><dl>
+<dt>现象</dt><dd>SMO / 龙伯格在额定转速以上估计值振荡发散。</dd>
+<dt>可能根因</dt><dd>前向欧拉离散的模型在高 ωe·Ts 时失稳（旋转项 jωe 离散化误差）。</dd>
+<dt>排查</dt><dd>离线计算离散系统特征值随 ωe 变化；降低 Ts 对比。</dd>
+<dt>修复</dt><dd>改用后向 / Tustin / 精确离散；或旋转项用 e^(jωeTs) 精确旋转。</dd>
+<dt>验证</dt><dd>全转速范围观测收敛。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>代码与仿真结果在阶跃处差一拍</h5><dl>
+<dt>现象</dt><dd>SIL 对比中代码输出总比模型晚一个采样。</dd>
+<dt>可能根因</dt><dd>模型用前向（使用 x[k−1]），代码用后向（x[k]），或反之。</dd>
+<dt>排查</dt><dd>对比单位阶跃第一个非零输出时刻。</dd>
+<dt>修复</dt><dd>统一离散方法。</dd>
+<dt>验证</dt><dd>SIL 逐点误差 &lt; 1 LSB。</dd></dl></div>
+<div class="issue"><h5>易错点：改了任务周期没改系数</h5><dl>
+<dt>现象</dt><dd>速度滤波从 1 ms 任务移到 2 ms 任务后响应变慢一倍。</dd>
+<dt>根因</dt><dd>系数含 Ts。</dd>
+<dt>排查</dt><dd>代码审查系数来源。</dd>
+<dt>修复</dt><dd>系数由 Ts 计算或按任务周期分别标定。</dd>
+<dt>验证</dt><dd>截止频率实测正确。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>Tustin 的频率压缩：设计 2 kHz 陷波器在 20 kHz 采样下会偏到更低频，需预畸变。</li>
+<li>离散化不能消除执行延迟：1.5Ts 延迟是额外的，与离散方法无关。</li>
+<li>Simulink「Discrete-Time Integrator」默认方法要与代码核对（A06 易错点）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D01" id="quiz-D01"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：三种映射公式与稳定性、一阶低通三种差分方程、fc/fs 经验、预畸变、模型与代码一致。</li>
+<li>面试高频：「前向欧拉为什么可能不稳定？」</li></ul></div>
+</section>
+
+<!-- ================= D02 ================= -->
+<section class="chap" id="D02" data-title="D02 定点实现">
+<h2 class="chap-h">D02 定点实现：Q 格式选择、溢出保护、缩放、三角函数查表</h2>
+<p class="chap-sub">模块 D · 嵌入式落地实战 · 第 2 节（浮点 vs 定点对比见 X2）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>所有中断内算法的数值表示</td></tr>
+<tr><th>输入 / 输出</th><td>输入：物理量范围、精度要求；输出：Q 格式、基值、运算宏</td></tr>
+<tr><th>工程价值</th><td>溢出导致的符号翻转是最危险的定点错误之一（电压反向、电流失控）</td></tr>
+<tr><th>上下游依赖</th><td>上游 A01 标幺；下游全部中断代码、D08 A2L 换算</td></tr>
+<tr><th>适用角色</th><td>MCU 底层、算法</td></tr>
+<tr><th>前置数学依赖</th><td>A01 线性映射与 Q15</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>无 FPU 或对确定性执行时间有要求的平台依赖定点；即便有单精度 FPU（S32K146 为 Cortex-M4F），量产代码中定点仍常用于确定性、与历史代码 / 库兼容、以及 A2L 标定直观。</div>
+<div><b>② 量产怎么做</b>统一标幺基值 + Q15 为主、增益用 Q12、积分状态 Q30；所有乘法 int32 中间量 + 饱和；溢出风险点做静态分析与边界单元测试。</div>
+<div><b>③ 如何证明</b>SIL 定点 vs 浮点模型误差统计；边界值单元测试（−32768、32767、最大 / 最小组合）；MIL→SIL→PIL 一致。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>每个信号的物理范围（含故障工况）、所需分辨率。</li>
+<li>编码规范：整数提升、负数右移约定（A01 踩坑）、饱和库函数。</li>
+<li>不满足：基值过小 → 饱和失真 / 诊断失效（B07、C07、C12 的基值陷阱）；基值过大 → 分辨率不足。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-fix">【定点实现】</span>
+Qm.n（有符号 16 位，m + n = 15）：值 = int / 2ⁿ，范围 [−2^m, 2^m − 2⁻ⁿ]，分辨率 2⁻ⁿ
+   Q15：[−1, 1)，LSB 3.05e−5；Q12：[−8, 8)，LSB 2.44e−4
+乘法：Qa × Qb = Q(a+b)（32 位）→ 右移 (a + b − c) 得 Qc
+加法：同格式才能相加；结果可能溢出 → 用 int32 中间量再饱和
+除法：尽量避免；用预计算倒数（如 1/Vdc 每周期一次）
+舍入：右移为向负无穷截断，平均误差 −0.5 LSB；需要时 (x + (1 &lt;&lt; (s−1))) &gt;&gt; s 四舍五入
+溢出两种结果：回绕（wrap，int16 默认行为：32767 + 1 = −32768）vs 饱和（钳在边界）——控制量必须饱和
+基值选择准则：基值 ≥ 最大物理值 × 1.2（含故障 / 测试工况），并检查分辨率是否满足最小控制量
+   案例反思：I_BASE = 50 A 与 C07 的 60 A 电流极限、C12 的过流阈值冲突（X2 给出修正方案）</div>
+<div id="anim-D02"></div>
+<div class="anim-note"><b>动画在演示什么：</b>一个正弦电压给定 vq = A·sin(ωt) 用 Q 格式表示后再做 ×K 增益运算（模拟 PI 输出累加）。比较「回绕」与「饱和」两种溢出处理，以及小数位数对量化误差的影响。<br>
+<b>拖动滑块：</b>幅值 × 增益超过格式范围时，回绕版本出现正负跳变（真实电机中就是电压瞬间反向，可能过流）；饱和版本只是削顶。减少小数位 n，量化台阶变明显。<br>
+<b>正常：</b>不超范围、误差 ≤ 0.5 LSB。<b>异常：</b>回绕跳变（红色）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>建立 foc_fix.h</b>：类型（q15_t、q12_t）、饱和、乘法、乘加、四舍五入宏，全项目唯一来源（X2 给出完整可复制版本）。</li>
+<li><b>信号字典</b>：每个变量的格式、基值、范围写在注释和 A2L（B07 / D08）。</li>
+<li><b>溢出分析</b>：对每个加法 / 乘法写出最坏范围，标注是否需要饱和。</li>
+<li><b>查表</b>：sin 表 1025 点 Q15（A03），atan2 用八分区 + 小表或 CORDIC，sqrt 用整数开方（A02）。</li>
+<li><b>测试</b>：边界单元测试 + 随机输入与 double 参考比对（误差统计）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>定点与浮点电流环阶跃对比：差异在 LSB 量级，若出现系统性偏差 → 截断累积（积分器位宽不足，A06）。</li>
+<li>出现突然跳变 → 回绕溢出。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* foc_fix.h 核心片段（完整版见 X2）*/
+typedef int16_t q15_t;
+typedef int16_t q12_t;
+typedef int32_t q30_t;
+
+#define Q15(x)        ((q15_t)((x) &gt;= 0.999969f ? 32767 : ((x) &lt;= -1.0f ? -32768 : (int32_t)((x) * 32768.0f + ((x) &gt;= 0 ? 0.5f : -0.5f)))))
+#define Q12(x)        ((q12_t)((int32_t)((x) * 4096.0f + ((x) &gt;= 0 ? 0.5f : -0.5f))))
+
+static inline q15_t Q15_Add(q15_t a, q15_t b) { return Q15_Sat((int32_t)a + b); }
+static inline q15_t Q15_MulRnd(q15_t a, q15_t b) { return Q15_Sat(((int32_t)a * b + (1 &lt;&lt; 14)) &gt;&gt; 15); }
+static inline q15_t Q15_MulQ12(q15_t x, q12_t k) { return Q15_Sat(((int32_t)x * k) &gt;&gt; 12); }
+
+/* 乘加：y = a·b + c·d（Park 用），int32 中间量不溢出（|a·b + c·d| ≤ 2³¹ 当 |a|,|c| ≤ 32767）*/
+static inline q15_t Q15_MAC2(q15_t a, q15_t b, q15_t c, q15_t d)
+{
+    return Q15_Sat(((int32_t)a * b + (int32_t)c * d) &gt;&gt; 15);
+}</code></pre>
+<p class="note">Q15 宏中常量表达式仅在编译期（初始化标定量）使用；中断中不要出现浮点到定点的运行时转换（若使用 FPU 也要计入执行时间）。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>偶发电流尖峰、电压反向</h5><dl>
+<dt>现象</dt><dd>大电流 / 高速工况偶发 vq 符号翻转，电流冲击。</dd>
+<dt>可能根因</dt><dd>某处 int16 加法未饱和（如 PI 输出 + 前馈）回绕。</dd>
+<dt>排查</dt><dd>XCP 高速记录相关变量；代码审查所有 int16 加减；用 −32768/32767 构造单元测试。</dd>
+<dt>修复</dt><dd>int32 中间量 + 饱和。</dd>
+<dt>验证</dt><dd>边界测试通过，耐久无复现。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>小电流时控制「发涩」、有死区感</h5><dl>
+<dt>现象</dt><dd>iq 给定 &lt; 0.5 A 时实际电流不跟随。</dd>
+<dt>可能根因</dt><dd>积分器 Q15 截断（A06）；Ki·Ts 的 Q15 值太小，量化后为 0 或误差大。</dd>
+<dt>排查</dt><dd>计算最小误差下每步积分增量的 LSB 数。</dd>
+<dt>修复</dt><dd>积分状态 Q30；KiTs 用更高精度格式。</dd>
+<dt>验证</dt><dd>小信号阶跃无稳态误差。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>CANape 显示值与代码内部不一致</h5><dl>
+<dt>现象</dt><dd>标定量写入 0.5，代码行为像 0.25。</dd>
+<dt>可能根因</dt><dd>A2L 中 COMPU_METHOD 用 Q15，代码中按 Q14 使用。</dd>
+<dt>排查</dt><dd>读原始十六进制值核对。</dd>
+<dt>修复</dt><dd>A2L 由代码头文件自动生成或统一检查（D08）。</dd>
+<dt>验证</dt><dd>物理值一致。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>(−32768) × (−32768) &gt;&gt; 15 = 32768 超出 Q15：乘法后也必须饱和（A01）。</li>
+<li>abs(−32768) 在 int16 中仍为 −32768：取绝对值前先饱和到 −32767。</li>
+<li>编译器整数提升：int16 × int16 在 C 中先提升为 int（32 位），但赋值回 int16 会截断——必须显式处理。</li>
+<li>混合基值：两个不同基值的量直接相加，结果无物理意义。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="D02" id="quiz-D02"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：Qm.n 范围与分辨率、乘法格式规则、饱和 vs 回绕、基值选择准则、积分位宽、abs(−32768)。</li>
+<li>面试高频：「定点乘法怎么做？怎么防溢出？」</li></ul></div>
+</section>
