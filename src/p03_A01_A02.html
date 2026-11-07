@@ -1,0 +1,285 @@
+
+<!-- ================= A01 ================= -->
+<section class="chap" id="A01" data-title="A01 基础代数">
+<h2 class="chap-h">A01 基础代数：线性映射、两点标定、标幺化与限幅</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 1 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>FOC 最前端：ADC 原始码值 → 物理电流 → 标幺 Q15；同样用于母线电压、温度、旋变角度换算</td></tr>
+<tr><th>输入 / 输出</th><td>输入：ADC 码值 N、标定偏移 N0、增益 K；输出：电流 A、标幺值、Q15 整数</td></tr>
+<tr><th>工程价值</th><td>所有后续计算都建立在「数值代表什么物理量」之上；换算错一处，Clarke/Park/PI 全部失真</td></tr>
+<tr><th>上下游依赖</th><td>下游：C01 电流采样校准、D02 定点实现、C05 PI 标幺参数</td></tr>
+<tr><th>适用角色</th><td>全部角色；MCU 底层与标定工程师必修</td></tr>
+<tr><th>前置数学依赖</th><td>无（本节为起点）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>MCU 只认识整数码值。不会线性映射与移项，就无法把 ADC 读数变成电流，也无法写出 di/dt = (v − R·i)/L 这类后续公式。</div>
+<div><b>② 量产怎么做</b>上电 PWM 关闭时做偏移校准，产线/台架做两点增益标定；中断内用整数乘加 + 移位完成换算，统一标幺基值。</div>
+<div><b>③ 如何证明</b>静止零电流时读数 &lt; 0.1 A；对比钳形表/功率分析仪，增益误差 &lt; 1%；满量程不削顶。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>信号：两相电流 ADC 码值；硬件：采样电阻 + 运放偏置在 ADC 中点。</li>
+<li>标定参数：<code>Cal_IaOffset_cnt</code>、<code>Cal_IaGainCorr_q15</code>（B 相同理）。</li>
+<li>不满足的现象：偏移未校准 → 静止有「假电流」，运行中 dq 电流出现电频率一次脉动；量程不足 → 波形削顶，过流保护失效或误报。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<p><span class="tg tg-theory">【理论公式】</span>线性映射（一次函数）：</p>
+<div class="formula">I = (<span class="fv">N</span> − <span class="fv">N0</span>) · <span class="fv">K</span>
+  N：ADC 码值；N0：零电流对应码值（偏移）；K：A/码值（增益）
+案例：±50 A ↔ 0~4095 → K = 100 A / 4096 = 0.024414 A/cnt，N0 理想 = 2048 <span class="tg tg-case">【案例假设】</span></div>
+<p><span class="tg tg-theory">【理论公式】</span>两点标定（二元一次方程组）：已知 (N1, I1)、(N2, I2) 两组实测点</p>
+<div class="formula">K  = (I2 − I1) / (N2 − N1)
+N0 = N1 − I1 / K</div>
+<p><span class="tg tg-theory">【理论公式】</span>移项求解（后续每章都在用）：由 RL 电压方程 v = R·i + L·di/dt</p>
+<div class="formula">di/dt = (v − R·i) / L        ← 「把要求的量单独放到等号一边」</div>
+<p><span class="tg tg-theory">【理论公式】</span>标幺化与 Q15：</p>
+<div class="formula">i_pu  = I / I_BASE                     （I_BASE = 50 A）
+i_q15 = round(i_pu · 32768)，范围 [−32768, 32767]
+案例巧合设计：每个 ADC 码对应 Q15 增量 = K·32768/I_BASE = 0.024414×32768/50 = 16（恰为 2⁴，可用移位）</div>
+<p><span class="tg tg-theory">【理论公式】</span>限幅（分段函数）：sat(x) = x_max（x &gt; x_max）；x_min（x &lt; x_min）；x（其他）。</p>
+
+<div id="anim-A01"></div>
+<div class="anim-note"><b>动画在演示什么：</b>一个真实正弦相电流经过「硬件零点」变成 ADC 码，再用「软件偏移 + 增益修正」换算回电流和 Q15。左图是换算直线（蓝）与真实直线（灰虚线），右图是时域对比。<br>
+<b>拖动滑块：</b>让「软件偏移」≠「硬件零点」，蓝线整体平移，时域出现直流偏置；增益修正 ≠ 1，峰值被放大/缩小；电流峰值 &gt; 50 A，ADC 卡在 0/4095，波形削顶。<br>
+<b>正常现象：</b>灰蓝重合，偏移误差显示绿色。<b>异常：</b>偏置、比例错误、削顶（红色提示）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol>
+<li><b>上电偏移校准</b>（目的：得到 N0）：PWM 输出关闭、运放上电稳定 ≥ 数十 ms 后，每 PWM 周期采样，累加 1024 次求平均（右移 10 位）。中断约束：只读 ADC，不运行电流环。标定量：结果写入 <code>Cal_IaOffset_cnt</code>，超出 2048 ± 100 视为采样电路故障。</li>
+<li><b>两点增益标定</b>（台架/产线）：直流注入已知电流（如 A 进 B 出 +20 A），用精密表计读 I，代入两点公式得增益修正，写入 <code>Cal_IaGainCorr_q15</code>。</li>
+<li><b>中断内换算</b>：<code>(adc − off)</code> 用 int32 运算 → 左移 4 位得 Q15 → 乘增益修正（Q15×Q15 &gt;&gt; 15）→ 饱和到 int16。</li>
+<li><b>溢出保护</b>：(adc − off) 范围约 ±2100，×16 后可达 ±33600，<b>超出 int16，必须先在 int32 中运算再饱和</b>。</li>
+<li><b>第三相</b>：星接无中线，ic = −ia − ib（A03 证明）。</li>
+</ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>正常：PWM 关闭时 ia、ib 在 0 附近，噪声峰峰值 ≤ 若干码；运行时三相正弦幅值一致、相差 120°。</li>
+<li>偏移误差：相电流中心线偏离 0；在 dq 中表现为<b>以电频率脉动的纹波</b>（直流量经 Park 变成一倍频交流）。</li>
+<li>增益不一致（A/B 相差几个 %）：dq 中出现 <b>2 倍电频率</b>纹波。</li>
+<li>削顶：波形顶部平直，过流判断失效。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<p><span class="tg tg-fix">【定点实现】</span>Q15 基础工具（全书共用，D02 会扩展）：</p>
+<pre><code>#include &lt;stdint.h&gt;
+typedef int16_t q15_t;
+
+#define Q15_MAX   ((int32_t)32767)
+#define Q15_MIN   ((int32_t)-32768)
+
+static inline q15_t Q15_Sat(int32_t x)
+{
+    if (x &gt; Q15_MAX) { return (q15_t)Q15_MAX; }
+    if (x &lt; Q15_MIN) { return (q15_t)Q15_MIN; }
+    return (q15_t)x;
+}
+
+/* Q15 × Q15：(-1)×(-1) = +1.0 超出 Q15，必须饱和 */
+static inline q15_t Q15_Mul(q15_t a, q15_t b)
+{
+    return Q15_Sat(((int32_t)a * (int32_t)b) &gt;&gt; 15);
+}</code></pre>
+<p><span class="tg tg-fix">【定点实现】</span>偏移校准与中断换算：</p>
+<pre><code>#define OFFS_CAL_SHIFT   (10u)            /* 1024 次平均 */
+#define OFFS_VALID_MIN   (1948)           /* 2048 - 100  【案例假设】 */
+#define OFFS_VALID_MAX   (2148)
+
+static uint32_t s_offAccA = 0u, s_offAccB = 0u;
+static uint16_t s_offCnt  = 0u;
+
+/* PWM 关闭状态下，在 PWM 中断中调用；返回 1 表示完成 */
+uint8_t FOC_OffsetCal_Isr(void)
+{
+    s_offAccA += gFoc.adcIa;
+    s_offAccB += gFoc.adcIb;
+    s_offCnt++;
+    if (s_offCnt &gt;= (1u &lt;&lt; OFFS_CAL_SHIFT)) {
+        int16_t offA = (int16_t)(s_offAccA &gt;&gt; OFFS_CAL_SHIFT);
+        int16_t offB = (int16_t)(s_offAccB &gt;&gt; OFFS_CAL_SHIFT);
+        if ((offA &gt;= OFFS_VALID_MIN) &amp;&amp; (offA &lt;= OFFS_VALID_MAX) &amp;&amp;
+            (offB &gt;= OFFS_VALID_MIN) &amp;&amp; (offB &lt;= OFFS_VALID_MAX)) {
+            Cal_IaOffset_cnt = offA;
+            Cal_IbOffset_cnt = offB;
+        } else {
+            Diag_SetFault(DIAG_ISENSE_OFFSET);   /* 采样电路异常 */
+        }
+        return 1u;
+    }
+    return 0u;
+}
+
+/* ADC → Q15：每码 = 16 LSB（±50 A 量程 / I_BASE 50 A） */
+static inline q15_t FOC_AdcToIq15(uint16_t adc, int16_t off, q15_t gainCorr)
+{
+    int32_t x = ((int32_t)adc - (int32_t)off) * 16;      /* 先在 int32 中运算 */
+    x = (x * (int32_t)gainCorr) &gt;&gt; 15;                   /* 增益修正 Q15     */
+    return Q15_Sat(x);
+}
+
+void FOC_CurrentConvert_Isr(void)
+{
+    gFoc.ia = FOC_AdcToIq15(gFoc.adcIa, Cal_IaOffset_cnt, Cal_IaGainCorr_q15);
+    gFoc.ib = FOC_AdcToIq15(gFoc.adcIb, Cal_IbOffset_cnt, Cal_IbGainCorr_q15);
+    gFoc.ic = Q15_Sat(-(int32_t)gFoc.ia - (int32_t)gFoc.ib);
+}</code></pre>
+<p class="note">说明：增益修正 Cal_IaGainCorr_q15 的标称值 32767（≈1.0）；若需要 &gt; 1.0 的修正，改用 Q14 格式。<code>Diag_SetFault</code> 属于 C12 诊断模块接口。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>静止时相电流读数不为零</h5><dl>
+<dt>现象</dt><dd>PWM 关闭，CANape 显示 ia ≈ +1.2 A，ib ≈ −0.4 A。</dd>
+<dt>可能根因</dt><dd>偏移校准时运放未稳定；校准时 PWM 已开（有真实电流）；NVM 中旧标定值覆盖了上电校准值。</dd>
+<dt>排查顺序</dt><dd>① 读 Cal_IaOffset_cnt 与 ADC 原始均值对比 → ② 查校准触发时序（与 PWM 使能、运放供电的先后）→ ③ 查是否有写覆盖。</dd>
+<dt>修复</dt><dd>校准延后至供电稳定；校准期间强制 PWM 关闭；增加有效范围判断。</dd>
+<dt>验证波形</dt><dd>静止 ia/ib 均值 &lt; 0.1 A；运行时 iq 频谱一倍电频率分量明显下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>大电流时波形削顶</h5><dl>
+<dt>现象</dt><dd>堵转大电流测试时相电流顶部平直，过流保护不动作。</dd>
+<dt>可能根因</dt><dd>运放输出饱和早于 ADC 满量程；量程设计不足；偏移偏离中点导致单边量程变小。</dd>
+<dt>排查顺序</dt><dd>示波器同时测运放输出与 ADC 码值 → 计算正负方向剩余量程。</dd>
+<dt>修复</dt><dd>量程至少覆盖最大保护阈值 × 1.2；软件增加「ADC 码值接近 0/4095」诊断。</dd>
+<dt>验证波形</dt><dd>阶跃到保护阈值，波形完整，保护按设定值触发。</dd></dl></div>
+<div class="issue"><h5>数学易错点：无符号减法回绕</h5><dl>
+<dt>现象</dt><dd>电流偶尔跳到 +2000 A 量级。</dd>
+<dt>可能根因</dt><dd>写成 <code>(uint32_t)adc - off</code>，adc &lt; off 时结果回绕成大正数。</dd>
+<dt>排查顺序</dt><dd>在电流为负的半周抓数据；静态代码检查（MISRA 本质类型规则）。</dd>
+<dt>修复</dt><dd>两个操作数都先转 int32 再相减。</dd>
+<dt>验证</dt><dd>负半周波形连续；单元测试覆盖 adc = 0、off = 2148。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li><b>整数除法截断</b>：先乘后除（<code>a*b/c</code>），并确认乘积不溢出。</li>
+<li><b>负数右移</b>：C 标准中负数右移是实现定义；Arm 编译器为算术右移，但需在编码规范中明确并做单元测试。</li>
+<li><b>基值混用</b>：电流环用 50 A 基值、保护模块用 100 A 基值，比较阈值时直接相比 → 保护点差一倍。全项目只用一套基值头文件。</li>
+<li><b>Q15 无法表示 +1.0</b>：最大 32767/32768；-1 × -1 必须饱和。</li>
+<li><b>温漂</b>：偏移随温度变化，长时间运行可考虑在零矢量/停机期间周期性重校准。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A01" id="quiz-A01"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：两点标定公式、偏移校准时序、Q15 换算与饱和、int32 中间运算。</li>
+<li>高频出现于：综合卷换算计算题、面试「为什么要标幺化」、台架「静止有电流」问题定位。</li></ul></div>
+</section>
+
+<!-- ================= A02 ================= -->
+<section class="chap" id="A02" data-title="A02 平面矢量">
+<h2 class="chap-h">A02 平面矢量：模长、角度、合成、投影与坐标旋转</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 2 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>Clarke（三相合成为一个空间矢量）、Park（投影到 dq）、电压矢量限幅、电流矢量限幅</td></tr>
+<tr><th>输入 / 输出</th><td>输入：分量 (x, y) 或模长 + 角度；输出：合成矢量、投影分量、模长、角度</td></tr>
+<tr><th>工程价值</th><td>FOC 的核心思想就是「把三相电流看成一根旋转的箭头」；不会矢量就看不懂任何坐标变换</td></tr>
+<tr><th>上下游依赖</th><td>上游 A01；下游 A03、A04、B03、C02、C03、C04、C07</td></tr>
+<tr><th>适用角色</th><td>算法工程师必修；底层工程师需理解限幅与 atan2</td></tr>
+<tr><th>前置数学依赖</th><td>A01（勾股定理在本节补齐）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>三相绕组产生的磁势是空间叠加的；只有把它们合成一个矢量，才能谈「电流方向对准 q 轴」。</div>
+<div><b>② 量产怎么做</b>中断内用乘加完成投影；电压矢量按 Vdc/√3 做圆限幅（d 轴优先）；角度用 atan2 查表或 CORDIC。</div>
+<div><b>③ 如何证明</b>CANape 画 iα–iβ XY 图应为圆；限幅生效时 √(vd²+vq²) 不超过 Vdc/√3。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A01 线性运算。本节补齐勾股定理：直角三角形斜边² = 两直角边平方和。</li>
+<li>信号：αβ 或 dq 分量；母线电压 Vdc（用于限幅）。</li>
+<li>不满足：方形限幅（vd、vq 各自限幅）导致合成电压超出 SVPWM 线性区，电流畸变。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+矢量 v = (x, y)；模长 |v| = √(x² + y²)；角度 θ = atan2(y, x)（四象限）
+合成：a + b = (ax + bx, ay + by)        ← 平行四边形法则
+点积：a · b = ax·bx + ay·by = |a||b|cos∠(a,b)
+投影：v 在单位矢量 e 方向上的分量 = v · e
+旋转坐标系（新轴 d 与 x 轴夹角 φ，q 超前 d 90°）：
+   vd =  x·cosφ + y·sinφ
+   vq = −x·sinφ + y·cosφ        ← 这就是 Park 变换的几何本质
+电压限幅（SVPWM 线性区内切圆）：√(vd² + vq²) ≤ Vdc/√3（12 V 时 6.93 V）</div>
+<div id="anim-A02"></div>
+<div class="anim-note"><b>动画在演示什么：</b>两个矢量 a、b 合成 a+b（平行四边形），并把合成矢量投影到一套旋转坐标轴 d、q 上。右图记录 d、q 分量随坐标轴旋转的变化。<br>
+<b>拖动滑块：</b>改变 a、b 的模长和角度，合成矢量随之改变；启动后坐标轴 φ 逆时针旋转，固定矢量在旋转坐标系里的分量变成正弦——这正是「静止矢量在旋转坐标系中看是交流」，反之旋转矢量在同步旋转坐标系中看是直流（A04）。<br>
+<b>正常：</b>投影垂足落在轴上，d²+q² 恒等于 |a+b|²。<b>异常判断：</b>若你的代码算出的 d²+q² 不守恒，说明 sin/cos 或符号写错。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>投影</b>：4 次 Q15 乘法 + 2 次加减，int32 累加后右移 15 位再饱和。</li>
+<li><b>模长</b>：平方和在 Q30（int32）中计算，整数开方得 Q15；仅在慢任务或限幅时使用，避免中断内频繁开方。</li>
+<li><b>角度</b>：atan2 用「八分区 + 查表」或 CORDIC；禁止 <code>atan(y/x)</code>（丢象限、x=0 除零）。</li>
+<li><b>电压限幅（d 轴优先）</b>：先限 vd，再按 √(Vmax² − vd²) 限 vq。Vmax 每周期由 Vdc 实时计算，标定量可设裕量系数。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>稳态 iα–iβ XY 图：圆；椭圆 → 两相增益不一致；圆心偏移 → 偏移误差。</li>
+<li>限幅生效时：vd、vq 的合成模长贴住 Vmax，iq 跟踪误差增大（进入弱磁前的典型现象）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<p><span class="tg tg-fix">【定点实现】</span>整数开方与电压圆限幅：</p>
+<pre><code>/* 输入 Q30（非负），输出 Q15：sqrt(x·2^30) = sqrt(x)·2^15 */
+static q15_t Q15_SqrtQ30(int32_t xQ30)
+{
+    uint32_t x = (xQ30 &gt; 0) ? (uint32_t)xQ30 : 0u;
+    uint32_t r = 0u;
+    uint32_t b = 1uL &lt;&lt; 30;
+    while (b &gt; x) { b &gt;&gt;= 2; }
+    while (b != 0u) {
+        if (x &gt;= (r + b)) { x -= (r + b); r = (r &gt;&gt; 1) + b; }
+        else              { r &gt;&gt;= 1; }
+        b &gt;&gt;= 2;
+    }
+    return (q15_t)((r &gt; 32767u) ? 32767u : r);
+}
+
+/* d 轴优先圆限幅；vMax = Vdc/√3 的标幺值（12 V 时 6.93/16 = 0.433 → 14189） */
+void FOC_VoltLimit(q15_t *vd, q15_t *vq, q15_t vMax)
+{
+    int32_t vqMax;
+    if (*vd &gt;  vMax) { *vd = vMax; }
+    if (*vd &lt; -vMax) { *vd = (q15_t)(-vMax); }
+    vqMax = Q15_SqrtQ30(((int32_t)vMax * vMax) - ((int32_t)(*vd) * (*vd)));
+    if (*vq &gt;  vqMax) { *vq = (q15_t)vqMax; }
+    if (*vq &lt; -vqMax) { *vq = (q15_t)(-vqMax); }
+}</code></pre>
+<p class="note">d 轴优先 vs 等比例缩放：EPS 力矩模式中，d 轴电压承担弱磁与解耦，优先保证 d 轴可维持磁场控制；等比例缩放保持电压方向不变，实现简单但弱磁区 id 控制易失效。两者均为业内常见做法，按项目验证选择。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速段电流出现 6 倍频畸变、噪声变大</h5><dl>
+<dt>现象</dt><dd>接近基速时相电流波形平顶化，电机啸叫。</dd>
+<dt>可能根因</dt><dd>vd、vq 各自限幅（方形），合成模长可达 √2·Vmax，进入过调制。</dd>
+<dt>排查顺序</dt><dd>记录 vd、vq，离线计算 √(vd²+vq²)，与 Vdc/√3 比较。</dd>
+<dt>修复</dt><dd>改为圆限幅；过调制需按 C04 明确设计，不能「意外进入」。</dd>
+<dt>验证</dt><dd>电流 FFT 中 5、7 次谐波下降；合成电压不超过限值。</dd></dl></div>
+<div class="issue"><h5>数学易错点：atan(y/x) 丢象限</h5><dl>
+<dt>现象</dt><dd>无感观测器估计角度在某半圈跳 180°。</dd>
+<dt>可能根因</dt><dd>atan 只返回 (−90°, 90°)。</dd>
+<dt>排查</dt><dd>构造 x &lt; 0 的测试矢量。</dd>
+<dt>修复</dt><dd>atan2 四象限实现。</dd>
+<dt>验证</dt><dd>匀速旋转时角度输出为连续锯齿波。</dd></dl></div>
+<div class="issue"><h5>数学易错点：限幅后积分器继续累积</h5><dl>
+<dt>现象</dt><dd>退出电压饱和时 iq 大超调。</dd>
+<dt>可能根因</dt><dd>电压限幅在 PI 之外，PI 不知道输出被截断。</dd>
+<dt>排查</dt><dd>观察限幅前后 vq 差值与积分器值。</dd>
+<dt>修复</dt><dd>把限幅结果反馈给 PI 做抗饱和（A08）。</dd>
+<dt>验证</dt><dd>阶跃退饱和超调 &lt; 10%。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>β 轴方向约定不统一（有的资料 β 指向 −120°）：全项目在一个头文件中写死约定，并用 XY 图验证正转为逆时针圆。</li>
+<li>平方和溢出：Q15² 为 Q30，两个相加可达 2³¹，需保证输入已限幅或用 uint32 / int64。</li>
+<li>Vmax 用标称 12 V 常量而不用实测 Vdc：低压 9 V 冷启动时实际可用电压下降 25%，限幅失真。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A02" id="quiz-A02"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：投影 = 点积、旋转坐标系分量公式、atan2、Vdc/√3 圆限幅。</li>
+<li>面试高频：「Park 变换的几何意义是什么？」答：把电流矢量投影到随转子旋转的 d、q 轴上。</li></ul></div>
+</section>

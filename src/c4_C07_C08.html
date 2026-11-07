@@ -1,0 +1,238 @@
+
+<!-- ================= C07 ================= -->
+<section class="chap" id="C07" data-title="C07 弱磁控制">
+<h2 class="chap-h">C07 弱磁控制：电压极限椭圆、电流极限圆、负 d 轴去磁与切换逻辑</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 7 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>给定生成：MTPA 之后修正 idRef，并约束 iqRef</td></tr>
+<tr><th>输入 / 输出</th><td>输入：电压利用率（|v| / vMax 或 vSat 标志）、ωe、Vdc；输出：idRef 修正量、iqRef 上限</td></tr>
+<tr><th>工程价值</th><td>12 V 系统中，案例电机满电流 MTPA 时基速仅约 3200 rpm，8000 rpm 必须依赖弱磁</td></tr>
+<tr><th>上下游依赖</th><td>上游 C05（电压饱和信息）、C06；下游 C05 给定</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A02 圆 / 椭圆、A08 PI、B02 反电动势</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>反电动势 ∝ 转速；超过可用电压后电流无法再注入，力矩崩溃。负 id 产生与永磁体反向的磁链，降低定子磁链幅值，换取转速。</div>
+<div><b>② 量产怎么做</b>电压闭环弱磁（PI 调节 Δid，使电压利用率保持在 ~95%）为主，叠加前馈查表加快响应；iq 按电流圆与电压椭圆同时限幅。</div>
+<div><b>③ 如何证明</b>扫转速到最高转速：电压利用率稳定在目标值、无振荡；转矩–转速外特性曲线达标；急加速 / 电压跌落时不失控。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>电流环有动态电压限幅与 vSat 标志（C05）；Vdc 实时值。</li>
+<li>准确的 Ld、ψf（前馈表）；电流极限 Cal_IsMax（案例 60 A 峰值 <span class="tg tg-case">【案例假设】</span>）。</li>
+<li>不满足：没有弱磁 → 基速以上力矩迅速下降、电流畸变；弱磁过深 → 效率低、可能退磁风险。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（稳态，忽略 Rs 压降）
+电压极限：vd² + vq² ≤ Vmax²，vd ≈ −ωe·Lq·iq，vq ≈ ωe·(Ld·id + ψf)
+   ⇒ (Ld·id + ψf)² + (Lq·iq)² ≤ (Vmax/ωe)²   —— 椭圆，中心 (−ψf/Ld, 0)，随转速收缩
+电流极限：id² + iq² ≤ Imax²   —— 圆
+特征电流：Ich = ψf/Ld；若 Ich ≤ Imax，理论上可无限升速（椭圆中心在圆内）
+案例 <span class="tg tg-case">【案例假设】</span>Vmax = 0.95 × 12/√3 = 6.58 V，Ich = 77.8 A &gt; Imax = 60 A（最高转速有限，空载理论值约 1.96 万 rpm）
+   60 A MTPA 基速 ≈ 3230 rpm；35 A MTPA 基速 ≈ 3930 rpm（未计 Rs 压降）
+   各转速满电流最大力矩：3000 rpm 1.39 N·m，5000 rpm 1.10 N·m，8000 rpm 0.70 N·m（id ≈ −55.6 A，iq ≈ 22.6 A）
+<span class="tg tg-disc">【离散实现】</span>电压闭环弱磁（常见量产流派）：
+   e_v = Vtarget − |v|（或 e_v = Vtarget − |vq_unsat|）
+   Δid = PI_fw(e_v)，限幅 [Δid_min, 0]（只允许去磁方向）
+   idRef = min(idMTPA, idMTPA + Δid)；iqRef 限幅 √(Imax² − idRef²)
+另一流派：查表 / 公式前馈（idFW = (Vmax/ωe − ψf)/Ld 等），响应快但依赖参数；常与电压环结合</div>
+<div id="anim-C07"></div>
+<div class="anim-note"><b>动画在演示什么：</b>dq 电流平面上的电流极限圆（灰）与电压极限椭圆（蓝，随转速缩小），绿色为可行区域，橙点为在可行区内力矩最大的工作点，绿色虚线为 MTPA 轨迹。<br>
+<b>拖动滑块：</b>转速升高 → 椭圆收缩，工作点被迫离开 MTPA 线沿圆向左（负 id）移动，力矩下降；降低 Vdc（如 9 V 冷启动）椭圆更小；增大 Imax 改变可行区。<br>
+<b>正常：</b>基速以下工作点在 MTPA 上，基速以上沿圆 / 椭圆交点移动。<b>异常：</b>可行区为空（无法维持该转速）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>电压利用率：|v| = √(vd² + vq²)（来自 C05），目标 Vtarget = Cal_FwVoltK × vMax（如 0.95）。</li>
+<li>弱磁 PI（1 ms 或更快，建议 1~2 kHz）：输出 Δid ≤ 0，积分器上下限 [−Imax, 0]。</li>
+<li>idRef = min(idMTPA, idMTPA + Δid)；再限 idRef ≥ −Cal_IdMinFw（防止过深退磁，按电机允许值）。</li>
+<li>iqRef 限幅：√(Imax² − idRef²)（电流圆）；可再加电压椭圆限幅（前馈表）。</li>
+<li>弱磁 PI 带宽远低于电流环（如 50~100 Hz），避免两环相互作用。</li>
+<li>转速下降时 Δid 自然回到 0（误差变正，积分退回）；加上回退速率限制。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>扫转速：基速以下 Δid = 0；基速以上 Δid 逐渐变负，|v| 稳定在 Vtarget，iq 上限下降。</li>
+<li>急加速：|v| 短时超调，Δid 迅速响应；若振荡 → 弱磁 PI 带宽过高或与电流环耦合。</li>
+<li>电压跌落：Vtarget 随之下降，Δid 立即加深。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile q15_t Cal_FwVoltK_q15 = 31130;     /* 0.95 */
+volatile q15_t Cal_IsMax_q15   = 32767;     /* 50 A：Q15 基值 50 A 的上限，见下方说明 */
+volatile q15_t Cal_IdMinFw_q15 = -32768;    /* -50 A：去磁下限，按电机供应商允许值 【待核对】*/
+static PI_tst s_piFw = { .kp_q12 = 0, .kiTs_q15 = 0, .integ_q30 = 0, .outMax = 0, .outMin = -32768 };
+
+/* 2 kHz 任务（每 10 个 PWM 周期）*/
+q15_t FOC_FieldWeakenAdjust(q15_t idMtpa)
+{
+    q15_t vMax = Q15_Mul(Q15_Mul(gFoc.vdcPu, Q15_INV_SQRT3), Cal_VmaxK_q15);
+    q15_t vTgt = Q15_Mul(vMax, Cal_FwVoltK_q15);
+    q15_t vAbs = Q15_SqrtQ30((int32_t)gFoc.vd * gFoc.vd + (int32_t)gFoc.vq * gFoc.vq);
+    q15_t dId;
+    int32_t id;
+
+    s_piFw.kp_q12   = Cal_FwKp_q12;
+    s_piFw.kiTs_q15 = Cal_FwKiTs_q15;
+    dId = PI_Run(&amp;s_piFw, Q15_Sat((int32_t)vTgt - vAbs));   /* |v| &gt; vTgt → 误差为负 → Δid 变负 */
+    id  = (int32_t)idMtpa + dId;
+    if (id &gt; idMtpa)          { id = idMtpa; }
+    if (id &lt; Cal_IdMinFw_q15) { id = Cal_IdMinFw_q15; }
+    return (q15_t)id;
+}
+
+/* 电流圆限幅：id 优先 */
+void FOC_CurrentLimit(q15_t *idRef, q15_t *iqRef, q15_t isMax)
+{
+    int32_t iqMax;
+    if (*idRef &lt; -isMax) { *idRef = (q15_t)(-isMax); }
+    iqMax = Q15_SqrtQ30((int32_t)isMax * isMax - (int32_t)(*idRef) * (*idRef));
+    if (*iqRef &gt;  iqMax) { *iqRef = (q15_t)iqMax; }
+    if (*iqRef &lt; -iqMax) { *iqRef = (q15_t)(-iqMax); }
+}</code></pre>
+<p class="note"><b>基值陷阱：</b>第三部分按 Imax = 60 A 分析，但 Q15 电流基值 50 A 只能表示到 +50 A（32767）。直接写 <code>Cal_IsMax_q15 = 39322</code> 会在 int16 中溢出成负数，电流限幅彻底失效。因此代码中电流极限只能取 50 A；若项目确需 60 A，应把 I_BASE 提高到 ≥ 64 A（同时重算 A01 的每码 LSB 与全部 PI 标幺参数），或对电流限幅使用 Q14 等更宽格式——这在 X2「浮点 vs 定点」中作为典型案例讨论。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>弱磁区电流 / 转速振荡</h5><dl>
+<dt>现象</dt><dd>5000 rpm 以上 id 以 10~50 Hz 摆动，转速波动。</dd>
+<dt>可能根因</dt><dd>弱磁 PI 带宽过高，与电流环 / 速度环耦合；|v| 计算含 PWM 噪声。</dd>
+<dt>排查</dt><dd>降低弱磁 Ki 观察；对 |v| 加轻度滤波。</dd>
+<dt>修复</dt><dd>弱磁环带宽降到电流环 1/10 以下；Vtarget 预留裕量。</dd>
+<dt>验证</dt><dd>扫转速 |v| 平稳，无振荡。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速突加负载「失步」</h5><dl>
+<dt>现象</dt><dd>7000 rpm 突加负载后电流失控，转速骤降，报过流或失步。</dd>
+<dt>可能根因</dt><dd>iqRef 未受电压椭圆约束，电流环饱和后进入不可控区；弱磁响应慢。</dd>
+<dt>排查</dt><dd>记录 vSat、Δid、iqRef 时序。</dd>
+<dt>修复</dt><dd>iq 上限同时考虑电压椭圆；弱磁前馈；给定斜率限制。</dd>
+<dt>验证</dt><dd>高速负载阶跃不失控。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>冷启动低压时最高转速大幅下降并抖动</h5><dl>
+<dt>现象</dt><dd>9 V 母线下高速段抖动。</dd>
+<dt>可能根因</dt><dd>Vtarget 未随 Vdc 更新；Vdc 采样滤波过重。</dd>
+<dt>排查</dt><dd>记录 Vdc 与 vMax。</dd>
+<dt>修复</dt><dd>vMax 每周期由实测 Vdc 计算。</dd>
+<dt>验证</dt><dd>9~16 V 全范围扫转速平稳。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>弱磁深度与退磁：负 id 过大可能使磁钢局部退磁（尤其高温），去磁电流上限需与电机供应商确认。</li>
+<li><span class="tg tg-red">【风险红线】</span>深弱磁高速运行时若 PWM 突然关闭（故障关管），反电动势远超母线电压，经体二极管向电源回馈大电流并可能过压。故障处理应评估主动短路（ASC）与关管两种策略（主驱常用 ASC；12 V EPS 以项目安全分析为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>弱磁环在力矩为零时也可能被需要（空载高速）。</li>
+<li>弱磁 PI 积分器在低速未清零，再次加速时起始 Δid 不为零。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C07" id="quiz-C07"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：电压椭圆方程与中心、特征电流、电压闭环弱磁结构、iq 限幅、带宽分离、关管过压风险。</li>
+<li>面试高频：「弱磁原理？电压闭环弱磁怎么做？」</li></ul></div>
+</section>
+
+<!-- ================= C08 ================= -->
+<section class="chap" id="C08" data-title="C08 速度环 / 位置环">
+<h2 class="chap-h">C08 速度环与位置环：前馈、低通滤波与微分噪声抑制</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 8 节（串级原理见 B05）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>电流环外层：位置 → 速度 → iqRef</td></tr>
+<tr><th>输入 / 输出</th><td>输入：θRef / ωRef、反馈角度与速度、负载估计；输出：iqRef</td></tr>
+<tr><th>工程价值</th><td>EPS 中用于台架测试、回正控制、终端位置保护等；工业伺服的核心</td></tr>
+<tr><th>上下游依赖</th><td>上游 A05 测速、C09 角度；下游 C05</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A05、A07、A08</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>纯反馈 PI 对跟踪运动指令总有滞后；前馈把「已知需要的速度 / 力矩」直接送入，反馈只修正误差。</div>
+<div><b>② 量产怎么做</b>位置环 P + 速度前馈；速度环 PI + 加速度（力矩）前馈；D 项必须带低通或用「反馈微分」形式。</div>
+<div><b>③ 如何证明</b>正弦 / 梯形位置指令跟踪误差；加前馈前后对比；负载扰动恢复时间。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>电流环验证通过；速度反馈分辨率与延迟已知（A05）。</li>
+<li>转动惯量 J、摩擦估计（用于力矩前馈）。</li>
+<li>不满足：前馈参数错误会引入额外误差；速度信号噪声被 D 项放大。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+位置环：ωRef = Kp_θ·(θRef − θ) + K_vff·dθRef/dt
+速度环：iqRef = PI_ω(ωRef − ω) + K_aff·J·dωRef/dt / Kt
+   前馈完美时，跟踪误差理论上为 0，反馈环只处理扰动与模型误差
+D 项噪声抑制：D(s) = Kd·s/(τd·s + 1)（带低通的微分）
+   「微分先行」：对反馈求微分而不是对误差求微分，避免给定阶跃产生冲击
+<span class="tg tg-disc">【离散实现】</span>前馈中的 dθRef/dt 用给定的差分（给定无噪声），不用反馈的差分</div>
+<div id="anim-C08"></div>
+<div class="anim-note"><b>动画在演示什么：</b>位置环跟踪正弦位置指令（对象为理想速度环 + 积分）。上图位置给定与实际，下图跟踪误差。<br>
+<b>拖动滑块：</b>增大指令频率，纯 P 位置环误差增大（相位滞后）；勾选「速度前馈」误差显著减小；「前馈增益」偏离 1 时误差又出现；「速度环带宽」低时即使有前馈也有残余误差。<br>
+<b>正常：</b>前馈 = 1 时误差接近 0。<b>异常：</b>误差随频率增长。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>给定轨迹规划（梯形 / S 曲线）同时输出 θRef、ωRef_ff、αRef_ff。</li>
+<li>位置环（1 ms）：ωRef = Kp·eθ + K_vff·ωRef_ff，限幅最大速度。</li>
+<li>速度环（1 ms）：iqRef = PI(eω) + K_aff·αRef_ff·J/Kt，限幅电流；抗饱和。</li>
+<li>角度误差 eθ 使用多圈累计角度（int32），处理过零。</li>
+<li>D 项（若用）：反馈微分 + 一阶低通，截止频率 3~5 倍环路带宽以上。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>无前馈：误差与指令速度近似成正比（速度型误差 = ω/Kp）。</li>
+<li>有前馈：误差主要来自内环动态和前馈参数误差。</li>
+<li>负载阶跃：速度短暂跌落后由积分恢复。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile int16_t Cal_SpdKp_q12   = 2048;   /* 速度环 Kp（标幺）【案例假设】 */
+volatile int16_t Cal_SpdKiTs_q15 = 33;
+volatile q15_t   Cal_PosKp_q15   = 6554;   /* 位置环 Kp */
+volatile q15_t   Cal_VffK_q15    = 32767;  /* 速度前馈增益 ≈ 1 */
+
+/* 1 ms：位置环（多圈角度，单位：机械 uint16 码 × 圈数）*/
+int32_t FOC_PositionLoop_1ms(int32_t posRef, int32_t posFb, int32_t spdFf_rpm)
+{
+    int32_t e   = posRef - posFb;                                  /* 多圈 int32，无过零问题 */
+    int32_t spd = (int32_t)(((int64_t)e * Cal_PosKp_q15) &gt;&gt; 15)   /* 码 → rpm 的比例并入 Kp */
+                + (int32_t)(((int64_t)spdFf_rpm * Cal_VffK_q15) &gt;&gt; 15);
+    if (spd &gt;  2000) { spd =  2000; }                              /* 最大速度 【案例假设】 */
+    if (spd &lt; -2000) { spd = -2000; }
+    return spd;                                                    /* → FOC_SpeedLoop_1ms (B05) */
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>加 D 项后电机发出「沙沙」噪声</h5><dl>
+<dt>现象</dt><dd>速度环加 D 项后电流噪声明显增加。</dd>
+<dt>可能根因</dt><dd>D 项放大测速量化噪声（A05）。</dd>
+<dt>排查</dt><dd>关闭 D 对比 iqRef 频谱。</dd>
+<dt>修复</dt><dd>D 项加低通或取消 D；用加速度前馈替代。</dd>
+<dt>验证</dt><dd>噪声恢复，跟踪性能不下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>位置环在零点附近来回抖动</h5><dl>
+<dt>现象</dt><dd>定位后电机在 ±1 码间振荡。</dd>
+<dt>可能根因</dt><dd>位置分辨率与速度环积分 + 摩擦形成极限环；Kp 过高。</dd>
+<dt>排查</dt><dd>观察误差在 ±1 码间跳变。</dd>
+<dt>修复</dt><dd>小误差死区或降低增益；提升位置分辨率。</dd>
+<dt>验证</dt><dd>静止时 iqRef 平稳。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>位置跨圈时跳变</h5><dl>
+<dt>现象</dt><dd>运行一圈后位置误差突然变成 65535 码。</dd>
+<dt>可能根因</dt><dd>位置误差直接用单圈 uint16 计算。</dd>
+<dt>排查</dt><dd>跨圈时记录 posFb。</dd>
+<dt>修复</dt><dd>多圈累加：pos += (int16)(θ[k] − θ[k−1])。</dd>
+<dt>验证</dt><dd>连续多圈运动误差连续。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>前馈与反馈执行周期不同步导致相位不匹配。</li>
+<li>速度前馈用反馈速度（含噪声）而不是给定速度。</li>
+<li>EPS 位置类功能（如终端保护）直接作用于转向手感，必须与上层功能安全设计一致。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C08" id="quiz-C08"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：前馈原理与来源、微分先行与带低通 D、多圈位置、带宽分离。</li>
+<li>面试高频：「为什么要加速度前馈？」「D 项为什么要滤波？」</li></ul></div>
+</section>

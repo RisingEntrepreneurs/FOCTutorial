@@ -1355,6 +1355,2340 @@ volatile int16_t Cal_IqKiTs_q15 = 386;</code></pre>
 <div class="exam" data-scope="A" data-nobj="16" data-nsub="2" data-key="examA"></div>
 </section>
 
+
+<!-- ================= B01 ================= -->
+<section class="chap" id="B01" data-title="B01 为什么用 FOC">
+<h2 class="chap-h">B01 为什么要用 FOC？V/F、DTC 与 FOC 的工程取舍</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 1 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>方案选型阶段：决定整个控制软件架构</td></tr>
+<tr><th>输入 / 输出</th><td>输入：应用需求（力矩精度、动态、噪声、转速范围、成本）；输出：控制方案与传感器方案</td></tr>
+<tr><th>工程价值</th><td>EPS 直接作用在方向盘手感上：力矩脉动、延迟、噪声都会被驾驶员感知，选错方案后期无法靠标定弥补</td></tr>
+<tr><th>上下游依赖</th><td>下游：B04 矢量控制思想、F01 FOC vs DTC、F02 有感 vs 无感</td></tr>
+<tr><th>适用角色</th><td>系统 / 算法工程师；嵌入式工程师需理解选型理由</td></tr>
+<tr><th>前置数学依赖</th><td>A02 矢量、A04 复数（理解「控制矢量」）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>V/F 只控制电压幅值和频率，不直接控制力矩；EPS 需要毫秒级、低脉动的力矩响应，只有直接控制 dq 电流的方案才能满足。</div>
+<div><b>② 量产怎么做</b>EPS、电驱主流采用带位置传感器的 FOC + 电流环 20 kHz 执行；风机、水泵等对力矩不敏感的场合仍常用 V/F 或无感 FOC。</div>
+<div><b>③ 如何证明</b>力矩阶跃响应时间、力矩脉动百分比、低速平稳性、噪声主观评价——用台架扭矩传感器数据对比，而不是看仿真。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>需求：力矩精度、带宽、转速范围、功能安全等级（EPS 常见为 ASIL D 相关要求，具体以项目安全目标为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>硬件：有无位置传感器、电流采样方式、MCU 算力（FOC 每周期需数十 µs 级计算余量）。</li>
+<li>不满足：算力或采样不支持 20 kHz 电流环 → 力矩带宽不足，手感「发木」。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>三类方案控制的核心量
+V/F：     控制 |V| 与 f，保持 V/f ≈ 常数（磁通近似恒定）；力矩是「结果」而非被控量
+DTC：     直接控制定子磁链 |ψs| 与电磁转矩 Te，滞环比较 + 开关表选电压矢量
+FOC：     控制 dq 电流：Te = 1.5·p·[ψf·iq + (Ld − Lq)·id·iq]（B02 推导）
+           → 力矩 ≈ 正比 iq（SPMSM 严格正比），电流环带宽即力矩带宽</div>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>维度</th><th>V/F</th><th>DTC</th><th>FOC</th></tr>
+<tr><td>力矩控制</td><td>间接，开环</td><td>直接，滞环</td><td>直接，经电流环</td></tr>
+<tr><td>开关频率</td><td>固定</td><td>变化（滞环），噪声频谱宽</td><td>固定（SVPWM），噪声可控</td></tr>
+<tr><td>力矩脉动</td><td>大</td><td>较大（滞环宽度决定）</td><td>小</td></tr>
+<tr><td>低速性能</td><td>差</td><td>依赖磁链估计，低速差</td><td>有位置传感器时零速满力矩</td></tr>
+<tr><td>参数依赖</td><td>低</td><td>定子电阻</td><td>电感、磁链（解耦、MTPA、弱磁）</td></tr>
+<tr><td>算力 / 采样要求</td><td>低</td><td>高采样率</td><td>中等，需精确同步采样</td></tr>
+<tr><td>EPS 适用性</td><td>不适用</td><td>少见</td><td>主流</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>本节是方案取舍，用对比表更清楚；三种方案的动态差异在 B04（矢量控制）与 F01（FOC vs DTC）中演示。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（方案落地评估）</h3>
+<ol><li><b>算力预算</b>：20 kHz 主中断 50 µs 周期，FOC 主链路（采样换算、Clarke、Park、2×PI、反 Park、SVPWM、诊断）通常占用一部分；需在 PIL 实测执行时间，保留余量给诊断与通信 <span class="tg tg-check">【待核对：具体占比以 S32K146 实测为准】</span>。</li>
+<li><b>外设能力</b>：PWM 中心对齐 + 互补 + 死区 + 硬件故障关断；ADC 由 PWM 定时硬件触发（不能软件触发，否则抖动）。</li>
+<li><b>位置传感</b>：EPS 要求零速满力矩 → 旋变为主，无感算法作为降级备份。</li>
+<li><b>标定接口</b>：XCP 测量与标定，确保所有 Cal_ 量可在线改。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>FOC：力矩阶跃时 iq 在 ~0.35 ms 量级跟踪到位（1 kHz 带宽），相电流为正弦。</li>
+<li>V/F：负载突变时电流冲击大、转速掉落，力矩响应慢且可能失步。</li>
+<li>DTC：相电流含较宽频谱的纹波，听感为「沙沙」宽频噪声。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* EPS 控制模式枚举（D04 状态机使用）*/
+typedef enum {
+    FOC_MODE_TORQUE = 0,   /* 力矩模式：上层 EPS 助力算法给 iqRef（主模式） */
+    FOC_MODE_SPEED,        /* 速度模式：台架 / 回正 / 测试用              */
+    FOC_MODE_POSITION      /* 位置模式：标定、终端保护等特殊功能          */
+} FOC_Mode_ten;
+
+/* 上层（1 ms）给出目标电磁力矩，转换为 iq 给定（SPMSM 近似；IPMSM 用 C06 MTPA 表）*/
+#define FOC_KT_NM_PER_A   (0.021f)   /* 1.5·p·ψf = 1.5×4×3.5e-3 【案例假设】 */
+q15_t FOC_TorqueToIqRef(float teRef_Nm)
+{
+    float iq_A = teRef_Nm / FOC_KT_NM_PER_A;
+    return Q15_Sat((int32_t)(iq_A / FOC_I_BASE * 32768.0f));   /* 1 ms 任务内，可用浮点 */
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>力矩响应「发木」、手感延迟</h5><dl>
+<dt>现象</dt><dd>驾驶员快速打方向时助力滞后。</dd>
+<dt>可能根因</dt><dd>电流环带宽不足（参数保守 / 执行周期过长）、上层力矩给定滤波过重、通信延迟。</dd>
+<dt>排查顺序</dt><dd>① iq 给定 vs 反馈阶跃 → ② 上层给定到 iqRef 的延迟 → ③ 各级滤波器截止频率。</dd>
+<dt>修复</dt><dd>按 A08 重新设计电流环；削减上层冗余滤波。</dd>
+<dt>验证</dt><dd>扭矩传感器测力矩阶跃响应时间满足需求。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>低速转向有「颗粒感」</h5><dl>
+<dt>现象</dt><dd>慢打方向盘感到周期性顿挫。</dd>
+<dt>可能根因</dt><dd>齿槽转矩、电流偏移（一倍频）、角度误差、死区（六倍频）。</dd>
+<dt>排查顺序</dt><dd>按频率分解：计算顿挫频率与电频率的倍数关系。</dd>
+<dt>修复</dt><dd>对应 A01 偏移、C09 零位、C13 死区 / 齿槽补偿。</dd>
+<dt>验证</dt><dd>力矩脉动频谱中对应阶次下降。</dd></dl></div>
+<div class="issue"><h5>选型易错点：用 V/F 做低成本降级模式</h5><dl>
+<dt>现象</dt><dd>传感器故障后 V/F 降级运行时电机失步、方向盘抖。</dd>
+<dt>可能根因</dt><dd>V/F 无力矩控制，EPS 负载随转向剧烈变化。</dd>
+<dt>排查</dt><dd>负载突变试验。</dd>
+<dt>修复</dt><dd>降级用无感 FOC 或安全关断策略（按功能安全设计）。</dd>
+<dt>验证</dt><dd>故障注入试验通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>只看仿真比较方案：DTC 仿真曲线可能很漂亮，但开关频率不固定带来的 EMC、噪声问题仿真不体现。</li>
+<li>低估参数依赖：FOC 的解耦、MTPA、弱磁都依赖 Ld、Lq、ψf，参数辨识（C11）必须进入项目计划。</li>
+<li>把「能转」当成「能量产」：V/F 一天就能让电机转起来，但离满足 EPS 力矩指标差距很大。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B01" id="quiz-B01"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：三方案控制量差异、FOC 力矩 ∝ iq、EPS 为何选有感 FOC。</li>
+<li>面试高频：「FOC 和 DTC 的本质区别？」——控制电流矢量（固定开关频率）vs 直接控制磁链和转矩（滞环）。</li></ul></div>
+</section>
+
+<!-- ================= B02 ================= -->
+<section class="chap" id="B02" data-title="B02 PMSM 基础">
+<h2 class="chap-h">B02 永磁同步电机基础：SPMSM / IPMSM、磁阻转矩、反电动势</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 2 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>被控对象模型：所有算法的「物理基础」</td></tr>
+<tr><th>输入 / 输出</th><td>输入：id、iq、ωe；输出：电磁转矩 Te、反电动势、dq 电压</td></tr>
+<tr><th>工程价值</th><td>理解为何 IPMSM 要用负 id（MTPA、弱磁），为何高速电压不够</td></tr>
+<tr><th>上下游依赖</th><td>上游 A04 dq 方程；下游 C05、C06、C07、C10、C11</td></tr>
+<tr><th>适用角色</th><td>全部</td></tr>
+<tr><th>前置数学依赖</th><td>A03、A04</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>不知道转矩公式中的磁阻项，就不会理解 IPMSM 的 MTPA；不知道反电动势随转速增长，就无法理解弱磁。</div>
+<div><b>② 量产怎么做</b>用 dq 模型 + 实测参数表（Ld、Lq 随电流变化）建立仿真与查表；反电动势常数在台架对拖测得。</div>
+<div><b>③ 如何证明</b>对拖测线反电动势幅值与转速成正比、与设计 ψf 一致；扭矩传感器测 Te–iq 曲线与公式一致。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>数学：A04 dq 电压方程。物理：磁体产生转子磁链 ψf，定子电流产生旋转磁场。</li>
+<li>参数：p、Rs、Ld、Lq、ψf（导读案例表）。</li>
+<li>不满足：把 IPMSM 当 SPMSM 用 id = 0 控制 → 同电流下力矩偏小、高速提前电压饱和。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（幅值不变 Clarke 约定，来源：PMSM 矢量控制经典教材通用式）
+磁链：ψd = Ld·id + ψf，ψq = Lq·iq
+电压：vd = Rs·id + Ld·did/dt − ωe·Lq·iq
+      vq = Rs·iq + Lq·diq/dt + ωe·Ld·id + ωe·ψf      ← ωe·ψf 即反电动势
+转矩：Te = 1.5·p·(ψd·iq − ψq·id) = 1.5·p·[ψf·iq + (Ld − Lq)·id·iq]
+             永磁转矩 ↑        磁阻转矩 ↑（IPMSM：Ld &lt; Lq，id &lt; 0 时为正）
+SPMSM：Ld ≈ Lq，磁阻转矩 ≈ 0 → Te = 1.5·p·ψf·iq，id = 0 控制即最优
+反电动势峰值（相）：E = ωe·ψf；ke（线反电动势有效值/krpm）可由 ψf 换算
+案例 <span class="tg tg-case">【案例假设】</span>：Kt = 1.5×4×3.5 mWb = 0.021 N·m/A（峰值电流）
+   iq = 35 A（额定峰值）、id = 0：Te = 0.735 N·m（电机轴，EPS 经减速机构放大）
+   3000 rpm：E = 1256.6 × 3.5e-3 = 4.40 V；8000 rpm：11.7 V &gt; Vdc/√3 = 6.93 V</div>
+<div id="anim-B02"></div>
+<div class="anim-note"><b>动画在演示什么：</b>固定电流幅值 |is|，改变电流角 β（从 +d 轴逆时针量起，β = 90° 即纯 q 轴），绘制永磁转矩、磁阻转矩、总转矩随 β 的变化。<br>
+<b>拖动滑块：</b>Ld = Lq（SPMSM）时总转矩最大点在 β = 90°；Ld &lt; Lq（IPMSM）时最大点右移到 β &gt; 90°（即 id &lt; 0），这就是 MTPA 的来源（C06）。增大 |is| 时磁阻转矩占比增加。<br>
+<b>正常：</b>曲线平滑、最大点随凸极比移动。<b>注意：</b>实际 Ld、Lq 随电流饱和变化，量产 MTPA 用实测表。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>参数结构体</b>：Rs、Ld、Lq、ψf 以标定量存放（Cal_ 前缀），用于解耦前馈、MTPA、弱磁、观测器。</li>
+<li><b>温度修正</b>：Rs 随铜温升高（约 +0.39%/°C），ψf 随磁钢温度降低（钕铁硼常见约 −0.1%/°C 量级 <span class="tg tg-check">【待核对：以磁钢供应商数据为准】</span>），慢任务按温度估计更新。</li>
+<li><b>转矩估计</b>：用 Te 公式在 1 ms 任务中估算实际力矩，供上层监控（功能安全对力矩合理性检查常用）。</li>
+<li><b>定点</b>：转矩计算涉及三个量相乘，在慢任务用浮点或 int64，避免 Q 格式链式溢出。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>对拖（PWM 关闭）：线反电动势正弦，幅值 ∝ 转速；THD 低。若含明显 5、7 次谐波 → 力矩脉动来源之一。</li>
+<li>同电流扫电流角：IPMSM 实测最大力矩点在 β &gt; 90°；若在 90° 附近，说明凸极比小或零位偏差（C09）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 电机参数标定量（物理单位 float，慢任务使用；快环使用其 Q 格式副本）【案例假设】*/
+volatile float Cal_Rs_mOhm   = 12.0f;
+volatile float Cal_Ld_uH     = 45.0f;
+volatile float Cal_Lq_uH     = 75.0f;
+volatile float Cal_PsiF_mWb  = 3.5f;
+
+/* 1 ms 任务：电磁转矩估算（N·m），输入为 A */
+float FOC_TorqueEst(float id_A, float iq_A)
+{
+    float psiF = Cal_PsiF_mWb * 1.0e-3f;
+    float dL   = (Cal_Ld_uH - Cal_Lq_uH) * 1.0e-6f;      /* IPMSM: 负值 */
+    return 1.5f * (float)FOC_POLE_PAIRS * (psiF * iq_A + dL * id_A * iq_A);
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>同 iq 力矩比设计值低 10%</h5><dl>
+<dt>现象</dt><dd>扭矩传感器读数持续偏低。</dd>
+<dt>可能根因</dt><dd>ψf 实际偏小（磁钢温度高 / 批次差）、零位偏差导致电流不在 q 轴、Clarke 系数约定错误（2/3 vs √(2/3)）。</dd>
+<dt>排查顺序</dt><dd>① 对拖测反电动势反推 ψf → ② 零位检查 → ③ 核对 Clarke 系数。</dd>
+<dt>修复</dt><dd>更新 ψf 标定；修正零位；统一系数。</dd>
+<dt>验证</dt><dd>多温度点 Te–iq 曲线与公式一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高温下最高转速提高、低温下下降</h5><dl>
+<dt>现象</dt><dd>不同环境温度最高转速差异明显。</dd>
+<dt>可能根因</dt><dd>ψf 随温度变化 → 反电动势变化；弱磁表未按温度修正。</dd>
+<dt>排查</dt><dd>记录不同温度的 vq 稳态与反电动势。</dd>
+<dt>修复</dt><dd>弱磁用电压闭环（C07）而非纯查表；或表按温度插值。</dd>
+<dt>验证</dt><dd>−40 / 25 / 85 °C 性能一致性满足需求。</dd></dl></div>
+<div class="issue"><h5>易错点：把 ke 单位混淆</h5><dl>
+<dt>现象</dt><dd>由供应商 ke 反推的 ψf 差 √3 或 √2 倍。</dd>
+<dt>根因</dt><dd>ke 可能是线电压有效值 / 线电压峰值 / 相电压峰值，单位 V/krpm 或 V·s/rad。</dd>
+<dt>排查</dt><dd>与供应商确认定义；自行对拖测量。</dd>
+<dt>修复</dt><dd>统一换算：ψf = 相电压峰值 / ωe。</dd>
+<dt>验证</dt><dd>vq 稳态 ≈ ωe·ψf（id = 0、低电流）。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>Ld、Lq 当常数：IPMSM 的 Lq 随 iq 增大饱和下降明显，大电流时 MTPA 和解耦误差变大。</li>
+<li>只测线间电感：LCR 线间读数随转子位置变化，需要按位置找最大 / 最小值推算 Ld、Lq（C11）。</li>
+<li><span class="tg tg-red">【风险红线】</span>高速对拖时 PWM 关闭，若反电动势峰值超过母线电压，经体二极管向电池回馈，可能引起过压；12 V 系统 8000 rpm 线反电动势峰值约 20 V（√3 × 11.7 V），必须评估。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B02" id="quiz-B02"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：转矩公式两项、IPMSM 负 id 增力矩、反电动势 ∝ 转速、ψf 温度特性。</li>
+<li>面试高频：「IPMSM 为什么要用负 d 轴电流？」——获得磁阻转矩（MTPA）和削弱磁场（弱磁）。</li></ul></div>
+</section>
+
+<!-- ================= B03 ================= -->
+<section class="chap" id="B03" data-title="B03 坐标系">
+<h2 class="chap-h">B03 坐标系：三相静止 abc、两相静止 αβ、同步旋转 dq</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 3 节（C02 / C03 给出完整实现，本节建立整体认识）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>采样之后、电流环之前（Clarke、Park）；电流环之后、SVPWM 之前（反 Park）</td></tr>
+<tr><th>输入 / 输出</th><td>abc 三相量 ⇄ αβ 两相交流量 ⇄ dq 两相直流量</td></tr>
+<tr><th>工程价值</th><td>把三个耦合的正弦量变成两个独立的直流量，PI 才能做到无稳态误差</td></tr>
+<tr><th>上下游依赖</th><td>上游 A02~A04；下游 C02、C03、C04</td></tr>
+<tr><th>适用角色</th><td>全部</td></tr>
+<tr><th>前置数学依赖</th><td>A02 投影、A03 和差角、A04 复数旋转</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>PI 跟踪正弦给定必然有幅值衰减和相位滞后（且随频率变大）；变换到 dq 后给定是常数，PI 积分即可消除误差。</div>
+<div><b>② 量产怎么做</b>Clarke 用两相电流（第三相不参与，ic = −ia − ib 隐含）；Park / 反 Park 共用每周期一次查表的 sin/cos。</div>
+<div><b>③ 如何证明</b>CANape 同屏观察：abc 正弦、αβ 圆形 XY 图、dq 水平直线；任一层异常即可定位到对应变换。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>信号：两相电流（C01 校准后）、电角度 θe（C09）。</li>
+<li>约定：全书统一的 α 轴、β 方向、Park 符号（导读第三节）。</li>
+<li>不满足：约定不一致（尤其从不同厂商例程拷代码）→ 方向反、dq 振荡。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（幅值不变）
+Clarke： iα = (2/3)·(ia − ib/2 − ic/2) = ia（当 ia+ib+ic = 0）
+         iβ = (2/3)·(√3/2)·(ib − ic)   = (ia + 2·ib)/√3
+Park：   id =  iα·cosθ + iβ·sinθ
+         iq = −iα·sinθ + iβ·cosθ
+反 Park：vα = vd·cosθ − vq·sinθ
+         vβ = vd·sinθ + vq·cosθ
+反 Clarke（SVPWM 的 min-max 实现会用到）：
+         va = vα；vb = −vα/2 + (√3/2)·vβ；vc = −vα/2 − (√3/2)·vβ</div>
+<div id="anim-B03"></div>
+<div class="anim-note"><b>动画在演示什么：</b>同一组正弦三相电流在三个坐标系中的样子：左为三相时域波形，中为 αβ 平面矢量（轨迹为圆），右为 dq 输出（直流）。三个视图严格使用上面公式和全书方向约定。<br>
+<b>拖动滑块：</b>改变电流幅值和电流角 γ，dq 两条直线随之平移；「B 相增益误差」使 αβ 轨迹变成椭圆、dq 出现 2 倍频纹波；「A 相偏移」使圆心偏移、dq 出现 1 倍频纹波。<br>
+<b>正常：</b>圆 + 直线。<b>异常：</b>椭圆 / 偏心 / 纹波，对应 C01 采样问题。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>顺序：采样换算 → Clarke → 读取 sin/cos → Park → 电流环 → 反 Park（补偿角）→ SVPWM。</li>
+<li>Clarke 定点：<code>iBeta = (ia + 2·ib) × (1/√3)</code>，1/√3 的 Q15 为 18919；中间量 int32。</li>
+<li>Park/反 Park 定点见 A04 <code>Cplx_RotNeg / Cplx_RotPos</code>。</li>
+<li>每一步结果写入 gFoc 结构体，便于 XCP 测量（D08）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>正常：iα 与 ia 重合；iβ 超前 iα 90°（正转）；dq 稳态直流。</li>
+<li>反转（θ 减小）：iβ 滞后 iα 90°，XY 圆顺时针，dq 仍为直流。</li>
+<li>不同异常对应纹波频率：1×fe 偏移、2×fe 增益 / 写反、6×fe 死区 / 谐波。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>#define Q15_INV_SQRT3   (18919)        /* 1/√3 = 0.57735 */
+
+void FOC_Clarke_Isr(void)
+{
+    int32_t b = ((int32_t)gFoc.ia + 2 * (int32_t)gFoc.ib) * Q15_INV_SQRT3;
+    gFoc.iAlpha = gFoc.ia;
+    gFoc.iBeta  = Q15_Sat(b &gt;&gt; 15);
+}
+/* 完整中断链路（C 模块逐一展开）*/
+void FOC_FastLoop_Isr(void)
+{
+    FOC_CurrentConvert_Isr();   /* A01 / C01 */
+    FOC_AngleUpdate_Isr();      /* A03 / C09 */
+    FOC_Clarke_Isr();           /* C02 */
+    FOC_Park_Isr();             /* C03 */
+    FOC_CurrentLoop_Isr();      /* C05 */
+    FOC_InvPark_Isr();          /* C03 */
+    FOC_Svpwm_Isr();            /* C04 */
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>XY 图是椭圆</h5><dl>
+<dt>现象</dt><dd>iα–iβ 轨迹为倾斜椭圆，dq 有 2 倍频纹波。</dd>
+<dt>可能根因</dt><dd>A、B 相增益不一致（采样电阻 / 运放增益偏差）。</dd>
+<dt>排查</dt><dd>直流注入法分别标定两相增益（C01）。</dd>
+<dt>修复</dt><dd>写入 Cal_IaGainCorr / Cal_IbGainCorr。</dd>
+<dt>验证</dt><dd>XY 图为圆，2 倍频纹波消失。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>XY 圆旋转方向与转向相反</h5><dl>
+<dt>现象</dt><dd>正转时 XY 图顺时针。</dd>
+<dt>可能根因</dt><dd>相序接反、β 公式符号错误、角度方向反。</dd>
+<dt>排查</dt><dd>开环正向拖动，同时看 θe 是否增加、XY 是否逆时针。</dd>
+<dt>修复</dt><dd>统一相序或软件交换 B、C 相（同时注意 PWM 映射）。</dd>
+<dt>验证</dt><dd>两者方向一致后 dq 为直流。</dd></dl></div>
+<div class="issue"><h5>易错点：拷贝厂商例程的坐标约定</h5><dl>
+<dt>现象</dt><dd>混用两个例程后 dq 符号混乱。</dd>
+<dt>根因</dt><dd>有的库 Park 输出 iq 符号或 β 方向定义不同；有的用功率不变系数。</dd>
+<dt>排查</dt><dd>用 0°/90° 固定角度 + 已知输入做单元测试。</dd>
+<dt>修复</dt><dd>在一个头文件写死约定。</dd>
+<dt>验证</dt><dd>单元测试全部通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>Park 与反 Park 的角度时刻不同（延迟补偿，A03），不能为了省时间共用一组 sin/cos。</li>
+<li>Clarke 用三相电流时（三电阻采样），三相和不为零的误差会被平均掉，但要处理采样窗口不足时的相选择（C01）。</li>
+<li>反 Clarke 用于 SVPWM 时，电压基值需与 Vdc 关联，否则调制比错误。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B03" id="quiz-B03"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：三组公式、圆 / 直线判据、纹波频率与根因对应。</li>
+<li>高频出现：台架定位采样问题、面试「为什么要做坐标变换」。</li></ul></div>
+</section>
+
+<!-- ================= B04 ================= -->
+<section class="chap" id="B04" data-title="B04 矢量控制思想">
+<h2 class="chap-h">B04 矢量控制思想：把交流电机当成直流电机控制</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 4 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>整体思想：dq 电流环即「励磁电流 + 电枢电流」两个独立控制通道</td></tr>
+<tr><th>输入 / 输出</th><td>输入：idRef（磁场通道）、iqRef（转矩通道）；输出：电磁转矩</td></tr>
+<tr><th>工程价值</th><td>理解为何 FOC 的力矩响应快、线性好，以及为何角度精度是一切的前提</td></tr>
+<tr><th>上下游依赖</th><td>上游 B02、B03；下游 C05、C06、C07</td></tr>
+<tr><th>适用角色</th><td>全部</td></tr>
+<tr><th>前置数学依赖</th><td>A02 投影、A04 复数</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>直流电机靠换向器保证电枢磁场与主磁场始终正交，力矩 ∝ 电枢电流。PMSM 没有换向器，FOC 用「角度 + Park」做电子换向。</div>
+<div><b>② 量产怎么做</b>用旋变角度实时把电流矢量放在 q 轴附近（或 MTPA 角）；id 与 iq 各自一个 PI，并加解耦前馈消除交叉影响。</div>
+<div><b>③ 如何证明</b>恒 iq 下扫转速，力矩常数恒定；改变 iq 力矩线性变化（扭矩传感器）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>准确的电角度（误差每 10° 电角度，SPMSM 力矩损失约 1.5%，且产生 d 轴分量）。</li>
+<li>电流环能够独立控制 id、iq（C05 解耦）。</li>
+<li>不满足：角度错 → 「电子换向」错位 → 力矩下降甚至反向（误差 &gt; 90° 时）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+直流电机：Te = Kt·Ia（换向器保证 90°）
+PMSM（SPMSM）：Te = 1.5·p·ψf·|is|·sinβ，β 为电流矢量与 d 轴夹角
+   β = 90°（纯 q 轴）时转矩最大 → 对应直流电机的「正交」
+角度误差 ε 时：实际 iq = |is|·cos ε，实际 id = −|is|·sin ε（符号取决于误差方向）
+   ε = 10° → 力矩损失 1 − cos10° = 1.5%；ε = 90° → 力矩为 0；ε &gt; 90° → 力矩反向</div>
+<div id="anim-B04"></div>
+<div class="anim-note"><b>动画在演示什么：</b>转子（磁链 ψf 方向即真实 d 轴，灰色）逆时针旋转；控制器按「控制器认为的角度」把电流矢量 is（橙）放在 q 轴上。柱条显示实际转矩占最大值的比例。<br>
+<b>拖动滑块：</b>「角度误差 ε」模拟零位标定错误：电流不再与磁链正交，转矩下降；ε 超过 90° 时转矩变负（电机反向 / 抱死）。「电流角 β」相当于主动给 id。<br>
+<b>正常：</b>ε = 0 时电流与 ψf 始终正交，转矩 100%。<b>异常：</b>转矩不足、反向。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>给定生成：力矩模式下，iqRef 来自上层力矩需求；idRef 来自 MTPA（C06）或弱磁（C07）。</li>
+<li>两个 PI 独立：d 轴 PI 输出 vd，q 轴 PI 输出 vq。</li>
+<li>解耦前馈：vd += −ωe·Lq·iq，vq += ωe·(Ld·id + ψf)（C05）。</li>
+<li>角度：采样时刻角度用于 Park，补偿后角度用于反 Park（A03）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>iq 阶跃，id 基本不动（解耦良好）；若 id 随 iq 阶跃产生明显扰动 → 解耦不足或角度误差。</li>
+<li>相电流幅值 ∝ 力矩需求，频率跟随转速。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 1 ms 任务：力矩需求 → dq 电流给定（MTPA / 弱磁在 C06 / C07 展开）*/
+void FOC_RefGen_1ms(float teReq_Nm)
+{
+    q15_t iqRef = FOC_TorqueToIqRef(teReq_Nm);          /* B01 */
+    q15_t idRef = FOC_MtpaIdRef(iqRef);                 /* C06 查表 */
+    idRef = FOC_FieldWeakenAdjust(idRef);               /* C07 电压闭环 */
+    FOC_CurrentLimit(&amp;idRef, &amp;iqRef, Cal_IsMax_q15);   /* 电流圆限幅：id 优先 */
+    gFoc.idRef = idRef;
+    gFoc.iqRef = iqRef;
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>上电闭环后电机反向或「抱死」</h5><dl>
+<dt>现象</dt><dd>给正 iq，电机反转或堵住不动且电流很大。</dd>
+<dt>可能根因</dt><dd>角度误差接近 180°（零位错 / 方向反）或接近 90°（无转矩，大电流）。</dd>
+<dt>排查</dt><dd>开环对齐法确认零位；检查 θe 方向与相序。</dd>
+<dt>修复</dt><dd>零位标定、方向统一（C09、D06）。</dd>
+<dt>验证</dt><dd>正 iq 正转，力矩常数正确。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>iq 阶跃时 id 跟着跳</h5><dl>
+<dt>现象</dt><dd>id 出现与 iq 阶跃同步的尖峰，转速越高越明显。</dd>
+<dt>可能根因</dt><dd>交叉耦合 ωL·i 未前馈解耦。</dd>
+<dt>排查</dt><dd>不同转速做阶跃对比。</dd>
+<dt>修复</dt><dd>加入解耦前馈（C05）。</dd>
+<dt>验证</dt><dd>高速阶跃时 id 扰动显著减小。</dd></dl></div>
+<div class="issue"><h5>易错点：认为「电流对准 q 轴就是最优」</h5><dl>
+<dt>现象</dt><dd>IPMSM 用 id = 0，大电流时效率和力矩都偏低。</dd>
+<dt>根因</dt><dd>忽略磁阻转矩。</dd>
+<dt>排查</dt><dd>扫电流角找最大力矩点。</dd>
+<dt>修复</dt><dd>MTPA（C06）。</dd>
+<dt>验证</dt><dd>同力矩电流下降。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>「直流电机类比」只在 dq 稳态成立；动态中 dq 交叉耦合和反电动势是扰动，需要前馈。</li>
+<li>只验证正转：零位误差正反转影响相反，必须正反转都验证。</li>
+<li><span class="tg tg-red">【风险红线】</span>角度方向接反时闭环是正反馈，电流瞬间冲到限值：首次闭环务必小电流、限幅、过流保护使能。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B04" id="quiz-B04"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：电子换向思想、角度误差 → 力矩 cos ε、超过 90° 反向、解耦。</li>
+<li>面试高频：「FOC 为什么能把交流电机当直流电机控制？」</li></ul></div>
+</section>
+
+<!-- ================= B05 ================= -->
+<section class="chap" id="B05" data-title="B05 控制环层级">
+<h2 class="chap-h">B05 控制环层级：电流环（力矩环）→ 速度环 → 位置环</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 5 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>串级控制结构：外环输出 = 内环给定</td></tr>
+<tr><th>输入 / 输出</th><td>位置环：θRef → ωRef；速度环：ωRef → iqRef；电流环：iRef → vdq</td></tr>
+<tr><th>工程价值</th><td>决定任务划分（20 kHz / 1 kHz / 更慢）和每个环的带宽上限</td></tr>
+<tr><th>上下游依赖</th><td>上游 A08；下游 C05、C08、D03</td></tr>
+<tr><th>适用角色</th><td>算法、软件架构</td></tr>
+<tr><th>前置数学依赖</th><td>A07 带宽、A08 PI</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>外环看到的内环必须「足够快、近似为 1」，否则两个环相互作用产生振荡；带宽分离是串级设计的基本前提。</div>
+<div><b>② 量产怎么做</b>电流环 20 kHz 执行、带宽约 1 kHz；速度环 1 kHz 执行、带宽数十到一百多 Hz；位置环更低。EPS 主模式是力矩模式，速度 / 位置环用于台架和特殊功能。</div>
+<div><b>③ 如何证明</b>逐级阶跃：先验证电流环，再闭速度环，最后位置环；每级超调、上升时间、稳态误差分别达标。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>电流环已调好并验证（否则外环参数没有意义）。</li>
+<li>速度反馈质量足够（A05）：低速分辨率、滤波延迟。</li>
+<li>不满足：外环带宽接近内环 → 振荡；速度噪声大 → iq 给定抖。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+带宽分离经验：f_外 ≤ f_内 / (5 ~ 10)
+电流环闭环近似：Ti(s) ≈ 1/(s/ωci + 1)
+机械方程：J·dωm/dt = Te − TL − B·ωm
+速度环对象（电流环理想时）：G_ω(s) = Kt / (J·s + B)
+速度 PI 常用对称最优 / 极点配置；工程上常按目标带宽 ωcs 取 Kp_s ≈ ωcs·J/Kt，再整定 Ki
+<span class="tg tg-case">【案例假设】</span>电机侧折算转动惯量 J = 2×10⁻⁵ kg·m²（EPS 含减速机构后折算值会更大，按实测）</div>
+<div id="anim-B05"></div>
+<div class="anim-note"><b>动画在演示什么：</b>速度环 PI + 一阶电流环（带宽 f_i）+ 惯量对象的串级仿真（离散 1 ms 速度环），速度给定在 0.05 s 阶跃到 1000 rpm，0.25 s 加阶跃负载。<br>
+<b>拖动滑块：</b>减小电流环带宽或增大速度环带宽，使比值低于 5，可见超调与振荡增加；增大速度滤波时间常数也会降低相位裕度。<br>
+<b>正常：</b>比值 ≥ 10 时速度响应平滑、负载扰动后快速恢复。<b>异常：</b>持续振荡、iq 打到限幅。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>任务分配：电流环在 PWM 中断（50 µs）；速度环在 1 ms 任务；位置环在 1 ms 或 5 ms 任务。</li>
+<li>外环输出限幅：速度环输出 iqRef 限幅到电流极限；位置环输出速度限幅。</li>
+<li>跨任务数据：1 ms 任务写 iqRef，中断读；int16 写入天然原子，结构体多字段需双缓冲或关中断拷贝（D03）。</li>
+<li>抗饱和：速度环积分在 iqRef 饱和时冻结（A08 PI_Run 复用）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>逐级验收：电流阶跃 → 速度阶跃 → 位置阶跃，每级都抓给定、反馈、控制量三条波形。</li>
+<li>速度环振荡频率接近电流环带宽 → 带宽分离不足；接近速度滤波截止频率 → 滤波相位滞后。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>static PI_tst s_spdPi = {
+    .kp_q12 = 0, .kiTs_q15 = 0, .integ_q30 = 0,
+    .outMax = 22938, .outMin = -22938          /* ±35 A 峰值：35/50 × 32768 【案例假设】 */
+};
+
+/* 1 ms 任务：速度环（仅速度模式启用）*/
+void FOC_SpeedLoop_1ms(int32_t spdRef_rpm)
+{
+    int32_t err = spdRef_rpm - gFoc.spdRpmFilt;
+    q15_t   errPu = Q15_Sat((err * 32768) / 8000);    /* 速度基值 8000 rpm 【案例假设】 */
+    s_spdPi.kp_q12   = Cal_SpdKp_q12;
+    s_spdPi.kiTs_q15 = Cal_SpdKiTs_q15;
+    gFoc.iqRef = PI_Run(&amp;s_spdPi, errPu);
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>速度环持续低频振荡</h5><dl>
+<dt>现象</dt><dd>速度在给定附近 ±50 rpm、约 20 Hz 摆动。</dd>
+<dt>可能根因</dt><dd>速度环带宽过高、速度滤波相位滞后、机械谐振（联轴器、减速机构）。</dd>
+<dt>排查</dt><dd>降低 Kp 观察频率是否变化；扫频找机械谐振点。</dd>
+<dt>修复</dt><dd>带宽回调；滤波器改到 3~5 倍带宽以上；谐振点加陷波。</dd>
+<dt>验证</dt><dd>阶跃超调 &lt; 10%，无持续振荡。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>加载后速度恢复很慢</h5><dl>
+<dt>现象</dt><dd>负载扰动后数百 ms 才回到给定。</dd>
+<dt>可能根因</dt><dd>Ki 过小、iqRef 饱和期间积分冻结后恢复慢、负载超过电流能力。</dd>
+<dt>排查</dt><dd>看 iqRef 是否贴限幅、积分器值。</dd>
+<dt>修复</dt><dd>调整 Ki；加转矩前馈（C08）。</dd>
+<dt>验证</dt><dd>负载阶跃恢复时间满足需求。</dd></dl></div>
+<div class="issue"><h5>易错点：外环先调</h5><dl>
+<dt>现象</dt><dd>速度环怎么调都不好。</dd>
+<dt>根因</dt><dd>电流环本身未验证，外环在补偿内环问题。</dd>
+<dt>排查</dt><dd>先单独做电流阶跃。</dd>
+<dt>修复</dt><dd>从内到外逐级调试。</dd>
+<dt>验证</dt><dd>各级指标独立达标。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>速度环执行周期与测速窗口不一致，导致速度信号「台阶 + 重复」。</li>
+<li>外环在模式切换（力矩 → 速度）时积分器未预置，iqRef 跳变。</li>
+<li>EPS 力矩模式下没有速度环，但必须有<b>速度限制</b>（防止电机空转超速），通常用速度相关的力矩衰减实现。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B05" id="quiz-B05"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：带宽分离 5~10 倍、从内到外调试、任务周期划分、跨任务数据一致性。</li>
+<li>面试高频：「串级控制为什么内环要快？」</li></ul></div>
+</section>
+
+<!-- ================= B06 ================= -->
+<section class="chap" id="B06" data-title="B06 PWM/ADC/中断时序">
+<h2 class="chap-h">B06 时序：PWM、ADC 采样、中断与算法执行时序对 FOC 的决定性影响</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 6 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>硬件与软件的交界：决定采到的电流是否「真实平均值」、控制延迟有多大</td></tr>
+<tr><th>输入 / 输出</th><td>输入：PWM 计数器、ADC 触发配置；输出：采样时刻、中断时刻、占空比生效时刻</td></tr>
+<tr><th>工程价值</th><td>时序错一点，所有算法都会表现异常（噪声、偏移、振荡），且仿真完全看不出来</td></tr>
+<tr><th>上下游依赖</th><td>下游：C01、C04、C05、D03</td></tr>
+<tr><th>适用角色</th><td>MCU 底层、算法</td></tr>
+<tr><th>前置数学依赖</th><td>A07 延迟相位</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>相电流含 PWM 纹波；只有在纹波中点（中心对齐 PWM 的计数器顶点 / 底点）采样，读到的才是周期平均值。</div>
+<div><b>② 量产怎么做</b>PWM 计数器到达指定点时硬件触发 ADC，转换完成触发中断；中断算出新占空比写影子寄存器，下一周期加载。</div>
+<div><b>③ 如何证明</b>示波器同时抓 PWM、ADC 触发脚（或 GPIO 翻转）和相电流；用 GPIO 测中断执行时间。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>硬件：PWM 模块支持中心对齐、死区、影子寄存器同步加载；ADC 支持硬件触发与延时。</li>
+<li><span class="tg tg-vendor">【厂商参考】</span>S32K1 系列常见链路：FTM 产生 PWM → TRGMUX / PDB 产生带延时的 ADC 触发 → ADC 转换完成中断。具体寄存器配置以 NXP S32K1xx 参考手册与 SDK 为准 <span class="tg tg-check">【待核对】</span>。</li>
+<li>不满足：软件触发 ADC → 采样时刻随中断延迟抖动 → 电流噪声大。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+中心对齐 PWM：载波为三角波，周期 Ts = 1/fpwm（案例 50 µs）
+   低边电阻采样：在计数器顶点（三相下管都导通，零矢量 000 中段）采样
+   电感电流纹波在开关中点对称 → 中点采样 ≈ 周期平均值
+<span class="tg tg-disc">【离散实现】</span>单采样单更新时序：
+   k·Ts 采样 → 中断计算（耗时 tc）→ 写影子寄存器 → (k+1)·Ts 加载生效 → 对电流影响中心约在 (k+1.5)·Ts
+   ⇒ 总等效延迟 ≈ 1.5·Ts = 75 µs（A03 角度补偿、A07 相位裕度均基于此）
+采样窗口约束（低边）：下管导通时间 ≥ ADC 采样保持时间 + 运放建立时间 + 死区
+   ⇒ 最大占空比受限，例如需 ≥ 3 µs 窗口则 Dmax ≈ 1 − 3/50 = 94% <span class="tg tg-case">【案例假设】</span></div>
+<div id="anim-B06"></div>
+<div class="anim-note"><b>动画在演示什么：</b>两个 PWM 周期的中心对齐载波（三角波）、A 相比较值、A 相上管 PWM、A 相电流纹波、ADC 采样点（红点）和中断执行条，以及新占空比生效时刻。<br>
+<b>本动画约定：</b>顶点采样、下一个顶点加载（单采样单更新）。<b>拖动滑块：</b>「采样点偏移」让采样离开中点，读到的电流偏离平均值（偏差随占空比变化 → 表现为电流畸变）；「占空比」增大到窗口不足时提示低边采样失效；「中断执行时间」超过一个周期时提示溢出。<br>
+<b>正常：</b>红点落在纹波中点，平均值误差 ≈ 0。<b>异常：</b>误差随占空比变化、采样窗口不足、中断超时。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>PWM：中心对齐、互补、死区（案例 1 µs <span class="tg tg-case">【案例假设】</span>）、影子寄存器在计数器顶点加载（与采样同一时刻，中断有接近一个周期的预算，延迟 1.5Ts）。另一种做法是顶点采样、底点加载，可把延迟降到约 1Ts，但中断必须在半个周期内完成。</li>
+<li>ADC 触发：计数器顶点 + 固定延时（补偿驱动与运放延迟），两相同时采样（双 ADC 并行）或尽量紧邻。</li>
+<li>中断：ADC 转换完成中断 = FOC 主中断，最高优先级（故障中断除外）。</li>
+<li>执行时间监控：入口 / 出口翻转 GPIO 或读定时器计数，记录最大值 <code>gDiag.isrMaxTicks</code>。</li>
+<li>占空比限幅：保证低边采样窗口，超过时进入「单相采样 + 重构」或限制调制比（C01、C04）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>示波器：ADC 触发脉冲应稳定落在 PWM 中心，抖动 &lt; 数十 ns。</li>
+<li>中断 GPIO 高电平宽度稳定，最大值有足够余量。</li>
+<li>相电流采样点落在开关噪声之外（离开边沿 ≥ 振铃衰减时间）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 【伪代码】时序配置要点（寄存器名以 NXP SDK / 参考手册为准）*/
+void FOC_TimingInit(void)
+{
+    Pwm_InitCenterAligned(20000u /*Hz*/, 1000u /*ns 死区*/);
+    Pwm_SetReloadPoint(PWM_RELOAD_AT_PEAK);       /* 影子寄存器在顶点加载（与采样点同一时刻）*/
+    AdcTrig_AtCounterPeak(400u /*ns 延时*/);        /* 中点采样 + 驱动延迟补偿 */
+    Adc_EnableConvCompleteIrq(FOC_ISR_PRIO_HIGH);  /* FOC 主中断 */
+}
+
+/* 主中断入口：执行时间测量 */
+void ADC0_IRQHandler(void)
+{
+    uint32_t t0 = Tmr_Now();
+    FOC_FastLoop_Isr();
+    uint32_t dt = Tmr_Now() - t0;
+    if (dt &gt; gDiag.isrMaxTicks) { gDiag.isrMaxTicks = dt; }
+    if (dt &gt; ISR_BUDGET_TICKS)  { Diag_SetFault(DIAG_ISR_OVERRUN); }
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电流噪声大、偶发尖刺</h5><dl>
+<dt>现象</dt><dd>gFoc.ia 有随机尖刺，电流环抖动。</dd>
+<dt>可能根因</dt><dd>采样点落在开关沿振铃中；ADC 触发不是硬件触发；另一相开关沿干扰。</dd>
+<dt>排查</dt><dd>示波器对齐 ADC 触发与相电压沿；不同占空比下观察尖刺是否出现在特定区间。</dd>
+<dt>修复</dt><dd>调整触发延时；限制占空比保证窗口；硬件 RC 滤波（注意相位）。</dd>
+<dt>验证</dt><dd>静态电流噪声峰峰值回到若干码。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>大占空比时电流测量错误</h5><dl>
+<dt>现象</dt><dd>高速大电压时某相电流读数跳变，电流环异常。</dd>
+<dt>可能根因</dt><dd>低边导通时间小于采样窗口。</dd>
+<dt>排查</dt><dd>记录该相占空比与异常时刻对应关系。</dd>
+<dt>修复</dt><dd>占空比上限；或选择导通时间充足的两相重构第三相。</dd>
+<dt>验证</dt><dd>全调制比范围电流连续。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>新增诊断后偶发失控</h5><dl>
+<dt>现象</dt><dd>增加功能后，偶发电流环异常。</dd>
+<dt>可能根因</dt><dd>中断超时，占空比在下一周期之后才更新（延迟变 2.5Ts）。</dd>
+<dt>排查</dt><dd>gDiag.isrMaxTicks。</dd>
+<dt>修复</dt><dd>非实时功能移到慢任务（D03）。</dd>
+<dt>验证</dt><dd>最坏执行时间留足余量。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>仿真默认「采样即时、计算零耗时、输出即时」，与真实 1.5Ts 延迟不符（D05 必须建模）。</li>
+<li>调试器断点停在中断里：PWM 仍在输出最后占空比 <span class="tg tg-red">【风险红线】</span>，可能过流；调试时启用「调试暂停时关 PWM」功能（如 MCU 支持）并开硬件保护。</li>
+<li>影子寄存器加载点与采样点配合错误，导致占空比在半周期中途变化，电流纹波不对称。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B06" id="quiz-B06"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：中点采样原理、1.5Ts 延迟来源、低边采样窗口、硬件触发、中断执行时间监控。</li>
+<li>台架与面试高频：「为什么在 PWM 中点采样？」「FOC 的控制延迟是多少？」</li></ul></div>
+</section>
+
+<!-- ================= B07 ================= -->
+<section class="chap" id="B07" data-title="B07 常用信号">
+<h2 class="chap-h">B07 常用信号：相电流、母线电压、电角度、机械角度、电角速度、机械角速度</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 7 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>所有模块共用的信号字典（变量名、单位、格式、来源）</td></tr>
+<tr><th>输入 / 输出</th><td>原始硬件信号 → 统一格式的 gFoc 字段</td></tr>
+<tr><th>工程价值</th><td>单位 / 基值 / 机械电气混淆是量产最常见的「低级大问题」，统一字典可从源头避免</td></tr>
+<tr><th>上下游依赖</th><td>下游：全部章节，尤其 D02、D08</td></tr>
+<tr><th>适用角色</th><td>全部，标定工程师必修</td></tr>
+<tr><th>前置数学依赖</th><td>A01 标幺、A03 电角度换算</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>速度环用机械 rpm、观测器用电 rad/s、角度补偿用 uint16 每周期增量，换算错一个 p 或 2π 就差 4 倍或 6.28 倍。</div>
+<div><b>② 量产怎么做</b>一个头文件定义所有基值与换算宏；A2L 中写明物理换算；变量名带单位后缀。</div>
+<div><b>③ 如何证明</b>CANape 中物理值与台架仪表（转速计、电压表、功率分析仪）逐项比对。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>硬件分压比、采样电阻、运放增益、旋变解码分辨率已确定。</li>
+<li>不满足：XCP 中显示的物理值不可信，标定无从谈起。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>信号</th><th>变量</th><th>格式 / 基值</th><th>来源与换算</th></tr>
+<tr><td>相电流</td><td>gFoc.ia / ib / ic</td><td>Q15，基值 50 A</td><td>ADC 双电阻，每码 16 LSB（A01）</td></tr>
+<tr><td>母线电压</td><td>gFoc.vdcPu</td><td>Q15，基值 16 V</td><td>分压采样，如 0~4095 ↔ 0~20 V <span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>机械角度</td><td>gFoc.thetaM</td><td>uint16，0~65535 ↔ 0~2π</td><td>AD2S1210 12 位结果左移 4 位</td></tr>
+<tr><td>电角度</td><td>gFoc.thetaE</td><td>uint16</td><td>θe = p·θm − 零位（uint16 自然取模）</td></tr>
+<tr><td>机械转速</td><td>gFoc.spdRpmFilt</td><td>int32 rpm</td><td>1 ms 窗口角度差分 + 低通（A05）</td></tr>
+<tr><td>电角速度</td><td>gFoc.thetaEIncPerTs</td><td>int16，uint16 角度/Ts</td><td>ωe(rad/s) = inc × 2π / 65536 / Ts</td></tr>
+<tr><td>相电压给定</td><td>gFoc.vd / vq / vAlpha / vBeta</td><td>Q15，基值 16 V</td><td>电流环输出</td></tr>
+<tr><td>占空比</td><td>gFoc.dutyA / B / C</td><td>Q15，0~1</td><td>SVPWM 输出（C04）</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+ωm(rad/s) = 2π·n/60；ωe = p·ωm；fe = p·n/60
+每周期电角度增量（uint16）：inc = ωe·Ts·65536/(2π) = p·n/60·Ts·65536
+   案例 3000 rpm：inc = 4×3000/60×50e-6×65536 = 655.4
+   8000 rpm：inc ≈ 1748（≈ 9.6°）
+母线电压标幺：vdcPu = Vdc/16 V；SVPWM 可用相电压上限 vMax = vdcPu/√3</div>
+<div id="anim-B07"></div>
+<div class="anim-note"><b>动画在演示什么：</b>4 对极转子（N/S 交替 8 个磁极）旋转。左图标注机械角度 θm；右图显示同一时刻电角度 θe = 4·θm 的锯齿波以及 uint16 码值。<br>
+<b>拖动滑块：</b>改变转速，右图锯齿频率是机械频率的 4 倍；「零位偏移」把电角度整体平移。<br>
+<b>正常：</b>机械一圈内电角度走 4 个完整锯齿。<b>异常判断：</b>若你在 CANape 中看到每机械圈锯齿数 ≠ 极对数，说明极对数配置或角度换算错误。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>建立 <code>foc_units.h</code>：所有基值、换算宏、Q 格式说明（D02 提供模板）。</li>
+<li>变量命名后缀：<code>_rpm</code>、<code>_q15</code>、<code>_cnt</code>、<code>_mOhm</code>，跨模块接口禁止无单位裸数。</li>
+<li>A2L：每个测量量配置 COMPU_METHOD，使 CANape 直接显示物理单位（D08）。</li>
+<li>母线电压采样也需滤波（但滤波过重会让 Vmax 跟不上负载突变，导致短时过调制）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>匀速时 θm 为锯齿（每机械转一次），θe 每机械转 4 次。</li>
+<li>母线电压在大电流加速时有压降和纹波；EPS 12 V 系统还要考虑车载电源波动（启动瞬间跌落）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* foc_units.h 片段 */
+#define SPD_BASE_RPM        (8000)
+#define VDC_ADC_FULL_V      (20.0f)                   /* 分压满量程 【案例假设】 */
+#define ANG_INC_PER_RPM_Q8  (56)                      /* p×Ts×65536/60 ×256 = 0.2185×256 ≈ 56 */
+
+static inline q15_t FOC_VdcAdcToPu(uint16_t adc)
+{   /* Vdc = adc/4096×20 V；pu = Vdc/16 → ×32768 → adc × 10 */
+    return Q15_Sat((int32_t)adc * 10);
+}
+static inline int16_t FOC_RpmToAngInc(int32_t rpm)
+{
+    return (int16_t)((rpm * ANG_INC_PER_RPM_Q8) &gt;&gt; 8);   /* 3000 rpm → 656 */
+}</code></pre>
+<p class="note">核对：adc × 10：4096 × 10 = 40960 → 超过 32767，即 Vdc &gt; 16 V 时饱和——Q15 基值 16 V 意味着 16 V 以上的过压无法表示，过压诊断（阈值 18 V）应直接比较 ADC 码值或使用更大基值。这类基值上限问题必须在设计时检查。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>CANape 显示转速是实际的 4 倍</h5><dl>
+<dt>现象</dt><dd>台架转速计 1000 rpm，CANape 显示 4000 rpm。</dd>
+<dt>可能根因</dt><dd>用电角度差分算转速却按机械换算。</dd>
+<dt>排查</dt><dd>检查测速输入是 thetaM 还是 thetaE。</dd>
+<dt>修复</dt><dd>机械转速用 thetaM，或除以 p。</dd>
+<dt>验证</dt><dd>与转速计一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>过压诊断永不触发</h5><dl>
+<dt>现象</dt><dd>母线升到 18 V 仍无报警。</dd>
+<dt>可能根因</dt><dd>vdcPu 基值 16 V，Q15 在 16 V 饱和，阈值 18 V 永远达不到。</dd>
+<dt>排查</dt><dd>手算基值上限。</dd>
+<dt>修复</dt><dd>过压诊断用 ADC 码值或单独基值。</dd>
+<dt>验证</dt><dd>过压注入试验触发。</dd></dl></div>
+<div class="issue"><h5>易错点：rad/s 与 Hz 混用</h5><dl>
+<dt>现象</dt><dd>解耦前馈差 2π 倍，高速电流振荡。</dd>
+<dt>根因</dt><dd>ωe 用了 fe。</dd>
+<dt>排查</dt><dd>手算 3000 rpm 时 ωe = 1256.6 rad/s。</dd>
+<dt>修复</dt><dd>统一换算宏。</dd>
+<dt>验证</dt><dd>vd 前馈与稳态 vd 一致。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>转速有正负：反转为负值，所有 int32/rpm 变量必须有符号；用 abs 前确认算法是否需要方向。</li>
+<li>旋变解码结果的位数配置改变（12→14 位）后左移位数未同步修改，角度错乱。</li>
+<li>母线电压基值选取要覆盖过压测试范围（如 ISO 16750-2 规定的车载电压试验，具体值以项目要求为准 <span class="tg tg-check">【待核对】</span>）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B07" id="quiz-B07"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：电 / 机角速度换算、uint16 每周期增量计算、基值上限、命名规范。</li>
+<li>标定高频：CANape 物理值核对、基值饱和导致诊断失效。</li></ul></div>
+</section>
+
+<!-- ================= 模块 B 综合自测 ================= -->
+<section class="chap" id="B-test" data-title="模块 B 章节综合自测卷">
+<h2 class="chap-h">模块 B 章节综合自测卷</h2>
+<p class="chap-sub">从 B01~B07 题库随机抽取 14 道客观题 + 2 道主观题，交卷统一判分。</p>
+<div class="exam" data-scope="B" data-nobj="14" data-nsub="2" data-key="examB"></div>
+</section>
+
+<!-- ================= C01 ================= -->
+<section class="chap" id="C01" data-title="C01 电流采样与校准">
+<h2 class="chap-h">C01 电流采样：偏移校准、增益校准、采样时序、噪声抑制</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 1 节（数学基础见 A01，时序基础见 B06）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>FOC 链路第一环：ADC → ia、ib、ic（Q15）</td></tr>
+<tr><th>输入 / 输出</th><td>输入：adcIa、adcIb、Cal_ 偏移 / 增益；输出：gFoc.ia / ib / ic</td></tr>
+<tr><th>工程价值</th><td>电流环的反馈就是它：采样误差 100% 进入力矩误差（电流环只能跟踪「测到的」电流）</td></tr>
+<tr><th>上下游依赖</th><td>上游：硬件采样电路、B06 时序；下游：C02 及全部控制</td></tr>
+<tr><th>适用角色</th><td>MCU 底层、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A01 线性映射与两点标定、A05 滤波、A06 平均（累加）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>偏移 → 1×fe 力矩脉动；增益差 → 2×fe 脉动；采样时刻错 → 噪声与畸变。没有干净的电流，后续所有环节都无从谈起。</div>
+<div><b>② 量产怎么做</b>上电关管偏移校准（每次上电）+ 产线增益标定（写 NVM）+ 运行中零矢量期间慢速偏移跟踪（可选）+ 范围诊断。</div>
+<div><b>③ 如何证明</b>静止零电流 &lt; 0.1 A；直流注入增益误差 &lt; 1%；运行 dq 电流 1×、2× fe 分量低于目标；示波器确认采样点位置。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>硬件：采样电阻（低边双电阻）+ 差分运放偏置到 ADC 中点；RC 抗混叠滤波（截止频率需远高于电流环带宽、低于开关噪声）。</li>
+<li>时序：PWM 顶点硬件触发 ADC（B06）；两相同时采样（两个 ADC 并行）。</li>
+<li>标定量：Cal_IaOffset_cnt、Cal_IbOffset_cnt、Cal_IaGainCorr_q15、Cal_IbGainCorr_q15。</li>
+<li>不满足：两相非同时采样 → 高速时两相时间差造成相位误差（ωe × Δt）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+采样链：I_phase × R_shunt × G_amp + V_bias → ADC
+   案例：±50 A ↔ 0~3.3 V；若 R = 0.5 mΩ，则需 G = 1.65 V / (50 A × 0.5 mΩ) = 66 <span class="tg tg-case">【案例假设】</span>
+偏移平均：N 次独立采样的噪声标准差下降为 σ/√N（1024 次 → 下降 32 倍）
+偏移误差的力矩影响：相电流直流偏置 b → dq 中幅值 b 的 1×fe 纹波 → 力矩纹波 ≈ Kt·b
+增益差 ε：dq 中出现幅值约 ε·|I|/2 的 2×fe 纹波
+<span class="tg tg-disc">【离散实现】</span>运行中偏移跟踪（仅在 PWM 关闭或电流确知为 0 时）：
+   off[k] = off[k−1] + λ·(adc[k] − off[k−1])，λ 很小（时间常数秒级）
+采样电阻温漂：锰铜合金温度系数低（约数十 ppm/°C 量级 <span class="tg tg-check">【待核对：以电阻规格书为准】</span>），主要温漂来自运放偏置</div>
+<div id="anim-C01"></div>
+<div class="anim-note"><b>动画在演示什么：</b>上电偏移校准过程：每个点是一次 ADC 采样（含噪声），橙线是累加平均的估计值逐步收敛到真实零点。右图为用该估计值运行时 iq 的 1×fe 纹波幅度。<br>
+<b>拖动滑块：</b>「平均次数 N」越大估计越准；「运放稳定前就开始校准」勾选后，前段采样有漂移，估计值被拉偏；「校准期间有电流」模拟 PWM 未关断。<br>
+<b>正常：</b>估计误差 &lt; 1 码，iq 纹波很小。<b>异常：</b>估计偏离、纹波增大。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>上电偏移校准</b>：PWM 关闭、运放供电稳定后等待 ≥ 数十 ms（以硬件设计为准）→ 1024 次平均 → 范围检查（A01 代码）。</li>
+<li><b>产线增益标定</b>：直流注入（A 进 B 出），精密分流器 / 功率分析仪测实际电流，两点法求增益修正，写 NVM，上电加载到 Cal_。</li>
+<li><b>中断换算</b>：int32 中间量、增益修正、饱和（A01 FOC_AdcToIq15）。</li>
+<li><b>诊断</b>：ADC 码值接近 0 / 4095（饱和）、偏移超范围、ia+ib+ic 合理性（三电阻时）、运行中 PWM 关闭期间电流应为 0。</li>
+<li><b>噪声抑制</b>：优先硬件（布局、差分走线、RC），软件不建议对电流环反馈再加大低通（引入相位滞后）；必要时用很短的滤波或过采样平均。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>静止：ia、ib 平均 ≈ 0，峰峰噪声若干码。</li>
+<li>恒速恒力矩：iq 频谱中 1×fe、2×fe 分量很低；若出现，按 A01/B03 定位。</li>
+<li>示波器：ADC 触发脉冲落在低边导通窗口中部、远离开关沿振铃。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 运行中慢速偏移跟踪：只在 PWM 关闭（READY 状态）时执行 */
+#define OFFS_TRACK_SHIFT  (12u)          /* λ = 1/4096，20 kHz 下时间常数约 0.2 s */
+static int32_t s_offA_q12, s_offB_q12;   /* 偏移 × 4096；上电校准完成后初始化为 Cal_IxOffset_cnt &lt;&lt; 12 */
+
+void FOC_OffsetTrack_Isr(void)
+{
+    if (gFoc.pwmEnabled == 0u) {
+        int32_t xA = (int32_t)gFoc.adcIa &lt;&lt; OFFS_TRACK_SHIFT;
+        int32_t xB = (int32_t)gFoc.adcIb &lt;&lt; OFFS_TRACK_SHIFT;
+        s_offA_q12 += (xA - s_offA_q12) &gt;&gt; OFFS_TRACK_SHIFT;     /* 一阶低通 */
+        s_offB_q12 += (xB - s_offB_q12) &gt;&gt; OFFS_TRACK_SHIFT;
+        Cal_IaOffset_cnt = (int16_t)(s_offA_q12 &gt;&gt; OFFS_TRACK_SHIFT);
+        Cal_IbOffset_cnt = (int16_t)(s_offB_q12 &gt;&gt; OFFS_TRACK_SHIFT);
+    }
+}
+
+/* ADC 饱和诊断：码值连续 N 次接近满量程 → 采样超量程 */
+void FOC_IsenseSatDiag_Isr(void)
+{
+    static uint8_t s_cnt;
+    uint8_t sat = (gFoc.adcIa &lt; 16u) || (gFoc.adcIa &gt; 4079u) ||
+                  (gFoc.adcIb &lt; 16u) || (gFoc.adcIb &gt; 4079u);
+    s_cnt = sat ? (uint8_t)(s_cnt + 1u) : 0u;
+    if (s_cnt &gt;= 3u) { Diag_SetFault(DIAG_ISENSE_SAT); }
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>热机后低速力矩脉动变大</h5><dl>
+<dt>现象</dt><dd>冷机正常，运行半小时后低速出现 1×fe 顿挫。</dd>
+<dt>可能根因</dt><dd>运放偏置温漂，上电校准值不再准确。</dd>
+<dt>排查</dt><dd>热机后关管读 ADC 原始均值，与 Cal_ 偏移比较。</dd>
+<dt>修复</dt><dd>停机 / 零力矩期间慢速偏移跟踪；硬件选低温漂运放。</dd>
+<dt>验证</dt><dd>热态 iq 1×fe 分量与冷态一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速时相电流相位误差</h5><dl>
+<dt>现象</dt><dd>高速 dq 出现 2×fe 纹波，低速没有。</dd>
+<dt>可能根因</dt><dd>两相分时采样（共用一个 ADC），Δt × ωe 在高速时不可忽略。</dd>
+<dt>排查</dt><dd>检查 ADC 通道配置；计算 8000 rpm 下 2 µs 间隔对应 0.38° 电角度。</dd>
+<dt>修复</dt><dd>双 ADC 同时采样；或对第二相做时间差补偿。</dd>
+<dt>验证</dt><dd>高速 2×fe 纹波下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>上电偶发「采样偏移超范围」故障</h5><dl>
+<dt>现象</dt><dd>冷启动时偶发 DIAG_ISENSE_OFFSET。</dd>
+<dt>可能根因</dt><dd>电机仍在惯性转动（反电动势经体二极管形成电流）；运放供电爬升慢。</dd>
+<dt>排查</dt><dd>记录故障时转速与供电时序。</dd>
+<dt>修复</dt><dd>校准前判断转速为零；延长等待；校准失败可重试。</dd>
+<dt>验证</dt><dd>冷启动 / 转动中上电试验通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>在电流反馈上加重低通「降噪」：相位滞后直接降低电流环相位裕度，参见 A05/A07。</li>
+<li>增益标定只在一个电流点做：运放与 ADC 存在非线性，建议多点检查。</li>
+<li>偏移跟踪在电机转动时执行：反电动势产生电流，偏移被「学坏」。</li>
+<li><span class="tg tg-red">【风险红线】</span>采样饱和时过流保护读数偏小；硬件比较器过流保护必须独立于 ADC 路径。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C01" id="quiz-C01"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：偏移 / 增益影响的纹波阶次、校准时序、σ/√N、同时采样、温漂跟踪条件。</li>
+<li>台架高频：静止有电流、热机顿挫、高速 2 倍频。</li></ul></div>
+</section>
+
+<!-- ================= C02 ================= -->
+<section class="chap" id="C02" data-title="C02 Clarke 变换">
+<h2 class="chap-h">C02 Clarke 变换：三相合成空间矢量</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 2 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>采样之后：ia、ib → iα、iβ</td></tr>
+<tr><th>输入 / 输出</th><td>输入：gFoc.ia、ib；输出：gFoc.iAlpha、iBeta</td></tr>
+<tr><th>工程价值</th><td>把三相（实际两个独立量）变成正交两轴，为 Park 做准备</td></tr>
+<tr><th>上下游依赖</th><td>上游 C01；下游 C03</td></tr>
+<tr><th>适用角色</th><td>算法、底层</td></tr>
+<tr><th>前置数学依赖</th><td>A02 合成与投影、A04 空间矢量 a = e^(j120°)</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>三相绕组空间上互差 120°，三个电流的磁势叠加就是一个空间矢量；Clarke 求出它在正交 αβ 轴上的坐标。</div>
+<div><b>② 量产怎么做</b>两相输入、一次乘法（1/√3）、int32 中间量、饱和；第三相不参与计算（隐含 ic = −ia − ib）。</div>
+<div><b>③ 如何证明</b>iα 与 ia 重合；XY 轨迹为圆，半径 = 相电流峰值（幅值不变约定）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>C01 校准完成；全书约定：α 轴与 A 相轴线重合，幅值不变系数 2/3。</li>
+<li>不满足：系数约定混用 → 电流、转矩、PI 参数整体差一个比例。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+空间矢量：i_s = K·(ia + a·ib + a²·ic)，a = e^(j120°)
+   幅值不变：K = 2/3 → |i_s| = 相电流峰值（本教程）
+   功率不变：K = √(2/3) → |i_s| = √(3/2)·峰值，转矩公式系数变为 p·(…)
+展开（K = 2/3）：
+   iα = (2/3)·[ia − (ib + ic)/2]
+   iβ = (2/3)·(√3/2)·(ib − ic) = (ib − ic)/√3
+代入 ia + ib + ic = 0：iα = ia，iβ = (ia + 2·ib)/√3
+<span class="tg tg-fix">【定点实现】</span>1/√3 → Q15 18919；ia + 2·ib 最大约 ±3 pu，先 int32 再乘，乘积 ±3×32768×18919 ≈ ±1.86×10⁹ &lt; 2³¹，不溢出</div>
+<div id="anim-C02"></div>
+<div class="anim-note"><b>动画在演示什么：</b>三个相轴（A 0°、B 120°、C 240°）上，各相电流产生的分矢量 ia·e^(j0)、ib·e^(j120°)、ic·e^(j240°)（细箭头），首尾相接合成后乘 2/3 得到 i_s（粗橙箭头），其 α、β 投影即 Clarke 输出。<br>
+<b>拖动滑块：</b>「电流角」旋转合成矢量；「C 相断线」模拟 C 相电流为 0（星接时 ia、ib 也会改变，这里演示「采样以为平衡但实际不平衡」时合成矢量的畸变）；「系数」切换 2/3 与 √(2/3)，观察 |i_s| 变化。<br>
+<b>正常：</b>2/3 系数下 |i_s| 恒等于相电流峰值。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>读取 ia、ib（Q15）。</li>
+<li>iAlpha = ia。</li>
+<li>iBeta = sat(((ia + 2·ib) × 18919) &gt;&gt; 15)，int32 运算。</li>
+<li>可选：三电阻采样时用三相 iα = (2ia − ib − ic)/3，降低单相误差影响。</li>
+<li>执行时间：几个指令周期，无需优化。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>iα 与 ia 波形完全重合；iβ 与 iα 正交、同幅值。</li>
+<li>XY：圆；椭圆 → 增益；偏心 → 偏移；尖角 / 平顶 → 采样饱和或死区。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>void FOC_Clarke_Isr(void)          /* 两相输入版本（双电阻采样）*/
+{
+    int32_t sum = (int32_t)gFoc.ia + ((int32_t)gFoc.ib &lt;&lt; 1);
+    gFoc.iAlpha = gFoc.ia;
+    gFoc.iBeta  = Q15_Sat((sum * Q15_INV_SQRT3) &gt;&gt; 15);
+}
+
+/* 单元测试（PIL / 主机端）：ia = 0.5 pu，ib = −0.25，ic = −0.25 → iα = 0.5，iβ = 0 */
+void UT_Clarke(void)
+{
+    gFoc.ia = 16384; gFoc.ib = -8192;
+    FOC_Clarke_Isr();
+    UT_ASSERT(gFoc.iAlpha == 16384);
+    UT_ASSERT((gFoc.iBeta &gt;= -1) &amp;&amp; (gFoc.iBeta &lt;= 1));
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电流幅值比钳形表大 22%</h5><dl>
+<dt>现象</dt><dd>|i_s| 与钳形表峰值之比约 1.22。</dd>
+<dt>可能根因</dt><dd>Clarke 使用了功率不变系数 √(2/3)，√(3/2) ≈ 1.225。</dd>
+<dt>排查</dt><dd>检查系数和单位测试。</dd>
+<dt>修复</dt><dd>统一幅值不变，并检查转矩公式系数。</dd>
+<dt>验证</dt><dd>|i_s| = 相电流峰值。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>某一扇区电流畸变</h5><dl>
+<dt>现象</dt><dd>XY 圆在一个方向上被「削掉」。</dd>
+<dt>可能根因</dt><dd>某相采样饱和或采样窗口不足（B06）。</dd>
+<dt>排查</dt><dd>看 ADC 原始码值是否触顶，对应时刻占空比。</dd>
+<dt>修复</dt><dd>量程 / 窗口修正。</dd>
+<dt>验证</dt><dd>XY 圆完整。</dd></dl></div>
+<div class="issue"><h5>易错点：β 用 (ib − ic)/√3 但 ic 来自重构</h5><dl>
+<dt>现象</dt><dd>结果与两相公式一致，但多一步误差。</dd>
+<dt>根因</dt><dd>ic 本身由 ia、ib 推出，三相公式不增加信息。</dd>
+<dt>排查</dt><dd>—</dd>
+<dt>修复</dt><dd>双电阻直接用两相公式。</dd>
+<dt>验证</dt><dd>单元测试。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>相序定义与硬件不符（B、C 相接线互换）：Clarke 本身没错，但旋转方向反了，Park 后 2×fe（B03）。</li>
+<li>Q15 输入 −32768 时 ia + 2·ib 的边界：保证输入已饱和到合法范围。</li>
+<li>电压 Clarke（观测器用 vα、vβ）与电流 Clarke 必须使用相同约定。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C02" id="quiz-C02"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：两相公式、2/3 与 √(2/3) 差异、定点溢出边界、XY 判据。</li>
+<li>面试高频：「幅值不变和功率不变 Clarke 有什么区别？」</li></ul></div>
+</section>
+
+<!-- ================= C03 ================= -->
+<section class="chap" id="C03" data-title="C03 Park / 反 Park">
+<h2 class="chap-h">C03 Park 变换与反 Park：同步旋转坐标与延迟补偿</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 3 节（数学证明见 A03、A04）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>Park：Clarke 之后、电流环之前；反 Park：电流环之后、SVPWM 之前</td></tr>
+<tr><th>输入 / 输出</th><td>Park：iα、iβ、θe → id、iq；反 Park：vd、vq、θe,comp → vα、vβ</td></tr>
+<tr><th>工程价值</th><td>决定 dq 解耦质量与高速力矩精度；角度误差在这里直接变成控制误差</td></tr>
+<tr><th>上下游依赖</th><td>上游 C02、C09（角度）；下游 C05、C04</td></tr>
+<tr><th>适用角色</th><td>算法</td></tr>
+<tr><th>前置数学依赖</th><td>A03 和差角、A04 e^(±jθ)</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>让 PI 面对直流量；同时反 Park 把电流环输出的 dq 电压送回静止坐标供 SVPWM 使用。</div>
+<div><b>② 量产怎么做</b>sin/cos 查表插值（A03）；Park 用采样时刻角度，反 Park 用 θ + Kc·Δθ（Kc 标称 1.5）补偿角。</div>
+<div><b>③ 如何证明</b>稳态 dq 为直流；扫转速力矩常数不变；正反转对称。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>准确的电角度、正确的旋转方向（C09）；电角速度估计（用于补偿）。</li>
+<li>不满足：未补偿 → 高速力矩下降、产生意外 d 轴电流；补偿符号反 → 误差翻倍。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+Park：  id =  iα·cosθ + iβ·sinθ           反 Park：vα = vd·cosθc − vq·sinθc
+        iq = −iα·sinθ + iβ·cosθ                     vβ = vd·sinθc + vq·cosθc
+<span class="tg tg-disc">【离散实现】</span>延迟补偿：θc = θ[k] + Kc·ωe·Ts，Kc ≈ 1.5（B06 单采样单更新）
+   未补偿的角度误差 Δθ = 1.5·ωe·Ts：3000 rpm 5.4°，6000 rpm 10.8°，8000 rpm 14.4°
+   另一种等价思路：在 dq 中对电压做 e^(j·1.5·ωe·Ts) 旋转（同样效果）
+旋变自身相位滞后（解码 / 激磁滤波）也可合并到 Kc 中标定 <span class="tg tg-check">【待核对：以解码芯片手册与实测为准】</span></div>
+<div id="anim-C03"></div>
+<div class="anim-note"><b>动画在演示什么：</b>电流环输出的电压矢量 v_dq（固定在 dq 中）经反 Park 回到 αβ；由于延迟，电压真正作用时转子已经转过 1.5·Δθ。左图：虚线为采样时刻 dq 轴，实线为电压生效时的真实 dq 轴；右图：转速扫描下，未补偿 / 补偿后的实际电压角误差。<br>
+<b>拖动滑块：</b>增大转速，未补偿误差线性增大；调节补偿系数 Kc，Kc = 1.5 时误差归零；Kc 符号反（负值）误差翻倍。<br>
+<b>正常：</b>补偿后误差 ≈ 0 且与转速无关。<b>异常：</b>误差随转速线性增长。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>角度更新（A03 FOC_AngleUpdate_Isr）：θe、sin、cos、Δθ。</li>
+<li>Park：Cplx_RotNeg(iαβ, sinθ, cosθ)（A04）。</li>
+<li>电流环（C05）得 vd、vq，并经电压圆限幅（A02）。</li>
+<li>反 Park：用 θc 重新查表 sin/cos → Cplx_RotPos。</li>
+<li>标定量：<code>Cal_AngCompK_q8</code>（标称 384 = 1.5）；Δθ 使用滤波后转速换算，避免噪声。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>Simulink 模型必须包含 1.5Ts 延迟（D05），否则补偿无效果可看。</li>
+<li>台架：固定 iq，扫转速测力矩；补偿后力矩常数平直；vd 稳态值接近 −ωe·Lq·iq（id = 0 时）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile int16_t Cal_AngCompK_q8 = 384;     /* 1.5 × 256 【案例假设，需台架标定】*/
+
+void FOC_InvPark_Isr(void)
+{
+    q15_t s = FOC_Sin(gFoc.thetaEInvPark);  /* A03 中计算的补偿角 */
+    q15_t c = FOC_Cos(gFoc.thetaEInvPark);
+    CPLX_tst vdq = { gFoc.vd, gFoc.vq };
+    CPLX_tst vab = Cplx_RotPos(vdq, s, c);
+    gFoc.vAlpha = vab.re;
+    gFoc.vBeta  = vab.im;
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速时电流环在 dq 中出现慢速振荡</h5><dl>
+<dt>现象</dt><dd>6000 rpm 以上 id、iq 低频摆动。</dd>
+<dt>可能根因</dt><dd>补偿使用原始差分速度（噪声大）或补偿方向错误。</dd>
+<dt>排查</dt><dd>观察 thetaEIncPerTs 噪声；Kc 设为 0 / 1.5 / −1.5 对比。</dd>
+<dt>修复</dt><dd>补偿用滤波速度；修正符号。</dd>
+<dt>验证</dt><dd>高速 dq 平稳。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>正转补偿正常，反转更差</h5><dl>
+<dt>现象</dt><dd>反转时力矩下降比未补偿还多。</dd>
+<dt>可能根因</dt><dd>补偿量用了转速绝对值。</dd>
+<dt>排查</dt><dd>检查 Δθ 是否为有符号量。</dd>
+<dt>修复</dt><dd>使用带符号 Δθ。</dd>
+<dt>验证</dt><dd>正反转对称。</dd></dl></div>
+<div class="issue"><h5>易错点：Park 也用了补偿角</h5><dl>
+<dt>现象</dt><dd>dq 电流测量出现与转速成正比的角度偏差。</dd>
+<dt>根因</dt><dd>采样时刻电流应该用采样时刻角度变换。</dd>
+<dt>排查</dt><dd>代码审查。</dd>
+<dt>修复</dt><dd>Park 用 θ[k]，反 Park 用 θc。</dd>
+<dt>验证</dt><dd>扫速测试。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>旋变解码存在跟踪环滞后（随转速变化），需与 PWM 延迟合并标定，不能只按 1.5Ts 理论值。</li>
+<li>弱磁区电压饱和时补偿更关键：电压方向偏差会直接变成力矩误差。</li>
+<li>sin/cos 查表两次（Park 与反 Park）的执行时间要计入中断预算。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C03" id="quiz-C03"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：Park / 反 Park 公式与符号、补偿角计算与使用位置、补偿速度来源。</li>
+<li>面试 / 标定高频：「高速力矩下降怎么查？」</li></ul></div>
+</section>
+
+<!-- ================= C04 ================= -->
+<section class="chap" id="C04" data-title="C04 SVPWM">
+<h2 class="chap-h">C04 SVPWM：扇区判断、时间计算、零矢量分配、过调制与死区效应</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 4 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>反 Park 之后、PWM 寄存器之前</td></tr>
+<tr><th>输入 / 输出</th><td>输入：vα、vβ、Vdc；输出：三相占空比 dutyA/B/C（Q15）→ 比较寄存器</td></tr>
+<tr><th>工程价值</th><td>母线电压利用率比 SPWM 高约 15.5%；12 V 系统中直接决定弱磁起点与最高转速</td></tr>
+<tr><th>上下游依赖</th><td>上游 C03；下游 PWM 硬件、C13 死区补偿、B06 采样窗口</td></tr>
+<tr><th>适用角色</th><td>算法、底层</td></tr>
+<tr><th>前置数学依赖</th><td>A02 矢量合成、A03 三角</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>逆变器只有 8 个开关状态（6 个有效矢量 + 2 个零矢量），任意方向、幅值的电压矢量要用相邻两个有效矢量 + 零矢量在一个周期内按时间加权合成。</div>
+<div><b>② 量产怎么做</b>两种等价实现：扇区法（教科书）或 min-max 零序注入法（代码短、无扇区判断，量产常用）；七段式对称、中心对齐。</div>
+<div><b>③ 如何证明</b>三相占空比呈「马鞍波」；线电压基波幅值与给定一致；线性区内 |v| ≤ Vdc/√3 时无削顶。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>实测 Vdc（每周期更新）；中心对齐 PWM；死区配置（C13 补偿）。</li>
+<li>不满足：Vdc 用常量 → 电源波动时电压幅值误差；电压超出六边形 → 过调制未定义行为。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（幅值不变约定）
+6 个有效基本矢量幅值 2Vdc/3，相邻 60°；构成六边形，内切圆半径 = Vdc/√3
+扇区判断：U1 = vβ，U2 = (√3·vα − vβ)/2，U3 = (−√3·vα − vβ)/2
+   N = (U1&gt;0) + 2·(U2&gt;0) + 4·(U3&gt;0)；N → 扇区：3→Ⅰ，1→Ⅱ，5→Ⅲ，4→Ⅳ，6→Ⅴ，2→Ⅵ
+扇区内作用时间（θ' 为扇区内角度，0~60°）：
+   T1 = √3·Ts·|v|/Vdc·sin(60° − θ')，T2 = √3·Ts·|v|/Vdc·sin θ'，T0 = Ts − T1 − T2
+<span class="tg tg-disc">【离散实现】</span>min-max 零序注入（与七段式对称 SVPWM 等价）：
+   va,vb,vc = 反 Clarke(vα, vβ)
+   v0 = −(max + min)/2
+   dutyX = 0.5 + (vX + v0)/Vdc
+线性区：|v| ≤ Vdc/√3 时所有 duty ∈ [0, 1]；SPWM 仅 Vdc/2，提升 2/√3 ≈ 1.155
+过调制（来源：Holtz、Bolognani 等经典文献中的两区间法；量产常简化）：
+   以六步方波基波 2Vdc/π 为基准定义调制度 M = |v|/(2Vdc/π)：
+   线性区：M ≤ π/(2√3) ≈ 0.907（即 |v| ≤ Vdc/√3）
+   区间Ⅰ：0.907 &lt; M ≤ 0.952，保持参考角度，超出六边形的部分截到边界（并补偿幅值损失）
+   区间Ⅱ：0.952 &lt; M ≤ 1，逐步在顶点保持，M = 1 即六步运行
+   简化做法：直接把矢量按比例缩到六边形边界（最小相位误差法），谐波增加但实现简单</div>
+<div id="anim-C04"></div>
+<div class="anim-note"><b>动画在演示什么：</b>左图为电压六边形与 6 个扇区，参考电压矢量逆时针旋转，当前扇区高亮，显示相邻两矢量的分量 T1、T2；右图为一个电周期内三相占空比（min-max 实现，马鞍形）以及当前点。<br>
+<b>拖动滑块：</b>调制幅值 |v|/(Vdc/√3) 超过 1 进入过调制：勾选「六边形截断」时矢量被截到边界（右图出现平顶），不勾选时占空比超出 [0,1]（红色，表示实际会被硬件削顶）。<br>
+<b>正常：</b>线性区内马鞍波、duty ∈ [0,1]。<b>异常：</b>超出范围、扇区跳变异常。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>反 Clarke 得 va、vb、vc（Q15）。</li>
+<li>求 max、min，v0 = −(max+min)/2。</li>
+<li>duty = 0.5 + (vx + v0) × (1/vdcPu)：除法用每周期一次的 1/Vdc 倒数（慢任务或每周期算一次），中断内只乘。</li>
+<li>过调制处理：若 max − min &gt; vdcPu（超出六边形），按比例缩放 (vx + v0)。</li>
+<li>duty 限幅到 [Dmin, Dmax]（保证 B06 低边采样窗口与驱动自举）。</li>
+<li>转换为比较值：CMP = duty × PWM 周期计数（中心对齐时注意极性约定）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>相电压（对 Vdc 负端）PWM 平均值为马鞍形；线电压平均值为正弦。</li>
+<li>过调制区：马鞍波平顶，相电流出现 5、7 次谐波。</li>
+<li>扇区编号随角度依次 Ⅰ→Ⅵ（正转），反转相反。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>#define Q15_SQRT3_2   (28378)                 /* √3/2 */
+#define DUTY_MAX_Q15  (30801)                 /* 94%：低边采样窗口 【案例假设】 */
+#define DUTY_MIN_Q15  (983)                   /* 3% */
+
+static inline int16_t max3(int16_t a, int16_t b, int16_t c) { int16_t m = (a &gt; b) ? a : b; return (m &gt; c) ? m : c; }
+static inline int16_t min3(int16_t a, int16_t b, int16_t c) { int16_t m = (a &lt; b) ? a : b; return (m &lt; c) ? m : c; }
+
+void FOC_Svpwm_Isr(void)
+{
+    int32_t va = gFoc.vAlpha;
+    int32_t vb = (-(int32_t)gFoc.vAlpha + 2 * (((int32_t)gFoc.vBeta * Q15_SQRT3_2) &gt;&gt; 15)) / 2;
+    int32_t vc = -va - vb;
+    int32_t v0 = -((max3((int16_t)va, (int16_t)vb, (int16_t)vc) + min3((int16_t)va, (int16_t)vb, (int16_t)vc)) / 2);
+    int32_t span = max3((int16_t)va, (int16_t)vb, (int16_t)vc) - min3((int16_t)va, (int16_t)vb, (int16_t)vc);
+    int32_t k_q15 = 32767;                                  /* 过调制缩放系数 */
+    if (span &gt; gFoc.vdcPu) {                                /* 超出六边形 → 最小相位误差截断 */
+        k_q15 = ((int32_t)gFoc.vdcPu &lt;&lt; 15) / span;
+    }
+    /* duty = 0.5 + k·(vx + v0)/Vdc；invVdc_q12 = 1/vdcPu（Q12，慢任务更新）*/
+    gFoc.dutyA = FOC_DutyCalc(va + v0, k_q15);
+    gFoc.dutyB = FOC_DutyCalc(vb + v0, k_q15);
+    gFoc.dutyC = FOC_DutyCalc(vc + v0, k_q15);
+    Pwm_WriteDuty(gFoc.dutyA, gFoc.dutyB, gFoc.dutyC);      /* 写影子寄存器 */
+}
+
+static q15_t FOC_DutyCalc(int32_t vx, int32_t k_q15)
+{
+    int32_t x = (vx * k_q15) &gt;&gt; 15;
+    int32_t d = 16384 + ((x * gFoc.invVdc_q12) &gt;&gt; 12);     /* 0.5 + x/Vdc */
+    if (d &gt; DUTY_MAX_Q15) { d = DUTY_MAX_Q15; }
+    if (d &lt; DUTY_MIN_Q15) { d = DUTY_MIN_Q15; }
+    return (q15_t)d;
+}</code></pre>
+<p class="note">代码中 vb 按 (−vα + 2·(√3/2)·vβ)/2 = −vα/2 + (√3/2)·vβ 计算；量产代码以单元测试覆盖 6 个扇区中心与边界点为准。FOC_DutyCalc 应在 FOC_Svpwm_Isr 之前声明（此处为阅读顺序）。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电机在某个角度位置「卡顿」</h5><dl>
+<dt>现象</dt><dd>开环拖动时每电周期一次卡顿，位置固定。</dd>
+<dt>可能根因</dt><dd>扇区表错一项（如 N=5 映射错）、某扇区 T1/T2 互换。</dd>
+<dt>排查</dt><dd>扫 θ 0~360° 记录扇区号与三相 duty，与理论对比。</dd>
+<dt>修复</dt><dd>改用 min-max 法或修正扇区表；单元测试 6 扇区。</dd>
+<dt>验证</dt><dd>duty 马鞍波连续，无跳变。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>接近最高转速时电流畸变、噪声大</h5><dl>
+<dt>现象</dt><dd>弱磁深处相电流平顶、啸叫。</dd>
+<dt>可能根因</dt><dd>无意中进入过调制（电压限幅大于六边形 / 使用方形限幅）。</dd>
+<dt>排查</dt><dd>记录 |v| 与 Vdc/√3、duty 是否触限。</dd>
+<dt>修复</dt><dd>明确过调制策略与上限；弱磁预留电压裕量（C07）。</dd>
+<dt>验证</dt><dd>谐波和噪声满足要求。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>母线电压跌落时电流冲击</h5><dl>
+<dt>现象</dt><dd>车辆启动瞬间 Vdc 跌到 9 V，电流出现尖峰。</dd>
+<dt>可能根因</dt><dd>1/Vdc 更新慢，占空比按旧电压算，实际电压偏小；或 Vdc 滤波过重。</dd>
+<dt>排查</dt><dd>同时记录 Vdc、invVdc、电流。</dd>
+<dt>修复</dt><dd>每周期更新 Vdc 补偿；滤波时间常数缩短。</dd>
+<dt>验证</dt><dd>电压跌落试验电流平稳。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>中心对齐 PWM 的比较值极性（高有效 / 低有效、上下计数）与 duty 定义必须核对：错了等于电压反向。</li>
+<li>duty 上限过高破坏低边采样窗口（B06），下限过低破坏自举电容充电（若使用自举驱动）。</li>
+<li>过调制区电流环增益实际下降（电压饱和），需配合抗饱和（A08）。</li>
+<li><span class="tg tg-red">【风险红线】</span>更新 PWM 寄存器时若未使用影子 / 同步加载，可能在周期中途改变占空比产生窄脉冲，甚至违反死区。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C04" id="quiz-C04"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：六边形与内切圆 Vdc/√3、扇区判断、T1/T2、min-max 等价、过调制两区间、占空比限幅原因。</li>
+<li>面试高频：「SVPWM 比 SPWM 电压利用率高多少？为什么？」——15.5%，零序注入使相电压峰值降低。</li></ul></div>
+</section>
+
+<!-- ================= C05 ================= -->
+<section class="chap" id="C05" data-title="C05 电流环 PID">
+<h2 class="chap-h">C05 电流环：解耦前馈、交叉耦合、积分饱和与定点实现</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 5 节（PI 基础见 A08）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>Park 之后、反 Park 之前；FOC 的「力矩环」</td></tr>
+<tr><th>输入 / 输出</th><td>输入：idRef、iqRef、id、iq、ωe、Vdc；输出：vd、vq（已限幅）</td></tr>
+<tr><th>工程价值</th><td>力矩带宽、力矩脉动、低压 / 高速稳定性的直接决定者</td></tr>
+<tr><th>上下游依赖</th><td>上游 C03、C06、C07；下游 C03 反 Park、C04</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A04 dq 方程、A07 传递函数、A08 PI 与抗饱和</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>dq 电压方程中存在 −ωLq·iq、+ωLd·id、+ωψf 三项与转速相关的耦合 / 扰动；不前馈时 PI 只能靠误差去「追」，高速时动态严重恶化。</div>
+<div><b>② 量产怎么做</b>PI（零极点对消参数）+ 解耦与反电动势前馈 + d 轴优先电压圆限幅 + 条件积分抗饱和 + 模式切换时积分器预置。</div>
+<div><b>③ 如何证明</b>不同转速下 iq 阶跃：响应一致、id 扰动小；低压阶跃无大超调；扫频得闭环带宽 ≈ 1 kHz。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>参数：Rs、Ld、Lq、ψf（C11）；Cal_IdKp_q12 等（A08）。</li>
+<li>信号：滤波后电角速度标幺 gFoc.wePu_q15（基值 ωe@8000 rpm = 3351 rad/s）；Vdc。</li>
+<li>不满足：参数偏差 &gt; 30% 时前馈反而引入误差；ωe 噪声大时前馈把噪声注入电压。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+vd = Rs·id + Ld·did/dt − ωe·Lq·iq
+vq = Rs·iq + Lq·diq/dt + ωe·Ld·id + ωe·ψf
+前馈解耦（用估计参数）：vd_ff = −ωe·L̂q·iq，vq_ff = ωe·(L̂d·id + ψ̂f)
+   vd = PI_d(idRef − id) + vd_ff，vq = PI_q(iqRef − iq) + vq_ff
+   参数准确时两轴变为独立的 1/(Ls + R)，PI 按 A08 零极点对消
+另一种流派：复矢量 PI（在 dq 复数域设计，对高速 / 低开关频率比更鲁棒），常见于主驱高速应用 <span class="tg tg-check">【待核对：具体实现依文献与项目】</span>
+<span class="tg tg-fix">【定点实现】</span>标幺前馈系数（基值：ωb = 3351 rad/s，I_BASE 50 A，V_BASE 16 V）<span class="tg tg-case">【案例假设】</span>
+   kLq = ωb·Lq·Ib/Vb = 0.785 → Q15 25734；kLd = 0.471 → 15441；kψ = ωb·ψf/Vb = 0.733 → 24020
+   vd_ff_pu = −ωe_pu·kLq·iq_pu；vq_ff_pu = ωe_pu·(kLd·id_pu + kψ)
+抗饱和：PI 的输出限幅 = 电压圆限幅值 − 前馈量（PI 知道自己还剩多少电压）</div>
+<div id="anim-C05"></div>
+<div class="anim-note"><b>动画在演示什么：</b>dq 两轴耦合的离散电流环（案例参数、Ts = 50 µs、1 拍延迟），给 iq 阶跃 0 → 20 A，观察 id 被交叉耦合「拖动」的程度。上图 iq / id，下图 vd、vq。<br>
+<b>拖动滑块：</b>提高转速，未解耦时 id 出现大扰动、iq 响应变慢；勾选「解耦前馈」后两轴近似独立。「参数误差」模拟 L̂ 与真实值偏差，前馈效果随之下降。<br>
+<b>正常：</b>解耦后 id 扰动 &lt; 1 A。<b>异常：</b>高速时 id 大幅偏离 0。转速升到约 4000 rpm 以上时稳态所需电压超过 6.6 V，动画会提示电压饱和——这正是 C07 弱磁要解决的问题。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>误差：ed = idRef − id，eq = iqRef − iq（int32 → 饱和 Q15）。</li>
+<li>前馈：由 wePu、id、iq 计算 vdFf、vqFf（Q15 乘法）。</li>
+<li>电压上限：vMax = Cal_VmaxK × vdcPu / √3（每周期）。</li>
+<li>d 轴：PI 限幅 [−vMax − vdFf, vMax − vdFf]，vd = PI + vdFf。</li>
+<li>q 轴：vqMax = √(vMax² − vd²)，PI 限幅 [−vqMax − vqFf, vqMax − vqFf]，vq = PI + vqFf。</li>
+<li>积分器预置：开环→闭环或无感切入时，integ = (v_当前 − ff) &lt;&lt; 15，保证输出连续。</li>
+<li>故障关管时积分器清零（A08 风险红线）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>低速：前馈影响小；高速：解耦显著改善 id 扰动与 iq 上升时间。</li>
+<li>电压饱和：vq 贴限幅，iq 跟不上 → 应触发弱磁（C07），而不是继续增大 PI。</li>
+<li>扫频：小信号注入 iqRef，闭环幅频 −3 dB 点约 1 kHz，相位裕度 ≥ 45°。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile q15_t Cal_KLq_q15  = 25734;   /* ωb·Lq·Ib/Vb 【案例假设】 */
+volatile q15_t Cal_KLd_q15  = 15441;
+volatile q15_t Cal_KPsi_q15 = 24020;
+volatile q15_t Cal_VmaxK_q15 = 31130;  /* 0.95 电压裕量 */
+volatile uint8_t Cal_DecoupleEn = 1u;
+
+static PI_tst s_piD, s_piQ;
+
+void FOC_CurrentLoop_Isr(void)
+{
+    q15_t ed = Q15_Sat((int32_t)gFoc.idRef - gFoc.id);
+    q15_t eq = Q15_Sat((int32_t)gFoc.iqRef - gFoc.iq);
+    q15_t vdFf = 0, vqFf = 0;
+    q15_t vMax = Q15_Mul(Q15_Mul(gFoc.vdcPu, Q15_INV_SQRT3), Cal_VmaxK_q15);
+    int32_t vqMax;
+
+    if (Cal_DecoupleEn != 0u) {
+        vdFf = Q15_Sat(-(int32_t)Q15_Mul(gFoc.wePu_q15, Q15_Mul(Cal_KLq_q15, gFoc.iq)));
+        vqFf = Q15_Mul(gFoc.wePu_q15, Q15_Sat((int32_t)Q15_Mul(Cal_KLd_q15, gFoc.id) + Cal_KPsi_q15));
+    }
+    /* d 轴优先 */
+    s_piD.kp_q12 = Cal_IdKp_q12;  s_piD.kiTs_q15 = Cal_IdKiTs_q15;
+    s_piD.outMax = Q15_Sat((int32_t)vMax - vdFf);
+    s_piD.outMin = Q15_Sat(-(int32_t)vMax - vdFf);
+    gFoc.vd = Q15_Sat((int32_t)PI_Run(&amp;s_piD, ed) + vdFf);
+    /* q 轴使用剩余电压 */
+    vqMax = Q15_SqrtQ30(((int32_t)vMax * vMax) - ((int32_t)gFoc.vd * gFoc.vd));
+    s_piQ.kp_q12 = Cal_IqKp_q12;  s_piQ.kiTs_q15 = Cal_IqKiTs_q15;
+    s_piQ.outMax = Q15_Sat(vqMax - vqFf);
+    s_piQ.outMin = Q15_Sat(-vqMax - vqFf);
+    gFoc.vq = Q15_Sat((int32_t)PI_Run(&amp;s_piQ, eq) + vqFf);
+    gFoc.vSat = (uint8_t)((gFoc.vq &gt;= vqMax) || (gFoc.vq &lt;= -vqMax));   /* 给弱磁使用 */
+}
+
+/* 开环 → 闭环切换：积分器预置，保证电压连续 */
+void FOC_CurrentLoop_Preset(q15_t vdNow, q15_t vqNow, q15_t vdFf, q15_t vqFf)
+{
+    s_piD.integ_q30 = ((int32_t)vdNow - vdFf) &lt;&lt; 15;
+    s_piQ.integ_q30 = ((int32_t)vqNow - vqFf) &lt;&lt; 15;
+}</code></pre>
+<p class="note">PI_Run 中积分器限幅使用 outMax/outMin（A08），因此这里传入的动态限幅同时完成了「抗饱和 + 电压圆」。预置时忽略了 P 项（切换瞬间误差应很小），如误差较大可同时扣除 Kp·e。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电流环高频振荡（啸叫），提高转速更明显</h5><dl>
+<dt>现象</dt><dd>iq 在数百 Hz~1 kHz 振荡，电机啸叫。</dd>
+<dt>可能根因</dt><dd>Kp 过大（按偏大的 L 算）、延迟未考虑、前馈 ωe 噪声大、Lq 饱和后实际变小导致带宽升高。</dd>
+<dt>排查</dt><dd>① 关闭前馈对比；② Kp 减半对比；③ 不同电流幅值对比（判断饱和）；④ 扫频测相位裕度。</dd>
+<dt>修复</dt><dd>按实测 L（分电流区间）调度 Kp；ωe 用滤波值；降低带宽。</dd>
+<dt>验证</dt><dd>各工况阶跃超调 &lt; 10%，噪声消失。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>开环切闭环瞬间电流冲击</h5><dl>
+<dt>现象</dt><dd>I/F 切入旋变闭环时 iq 尖峰、手感「咔哒」。</dd>
+<dt>可能根因</dt><dd>积分器未预置（输出从 0 开始）；开环角度与旋变角度不一致。</dd>
+<dt>排查</dt><dd>记录切换前后 vd、vq、θ 差。</dd>
+<dt>修复</dt><dd>预置积分器；角度差逐步收敛后再切换（D06）。</dd>
+<dt>验证</dt><dd>切换瞬间电流平滑。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速大力矩时力矩突然掉落、电流畸变</h5><dl>
+<dt>现象</dt><dd>接近基速时 iq 跟不上，电压饱和。</dd>
+<dt>可能根因</dt><dd>电压用尽，应进入弱磁；限幅后抗饱和缺失导致积分器失控。</dd>
+<dt>排查</dt><dd>观察 vSat 标志、积分器值、vd/vq 与 vMax。</dd>
+<dt>修复</dt><dd>启用弱磁（C07）；确认抗饱和使用动态限幅。</dd>
+<dt>验证</dt><dd>进出电压饱和平滑无超调。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>前馈项单位 / 基值错误（ωe 用 Hz、电感用 mH）→ 前馈变成扰动；上台架前用离线数值逐项核对。</li>
+<li>d、q 两个 PI 参数相同：Ld ≠ Lq，Kp 应不同（A08：0.283 vs 0.471 V/A）。</li>
+<li>电流给定阶跃过陡：配合给定斜率限制，降低电压饱和概率。</li>
+<li><span class="tg tg-red">【风险红线】</span>Kp 符号或误差方向写反 → 正反馈，电流瞬间到硬件过流点；首次闭环小电流、硬件保护先行。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C05" id="quiz-C05"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：三项耦合 / 扰动、前馈公式、标幺系数计算、动态限幅抗饱和、积分器预置。</li>
+<li>综合卷与面试高频：「什么是解耦？为什么高速需要？」「抗饱和怎么做？」</li></ul></div>
+</section>
+
+<!-- ================= C06 ================= -->
+<section class="chap" id="C06" data-title="C06 MTPA">
+<h2 class="chap-h">C06 MTPA：最大转矩电流比——公式法、查表法与在线寻优</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 6 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>给定生成：力矩需求 / iqRef → idRef（基速以下）</td></tr>
+<tr><th>输入 / 输出</th><td>输入：iqRef（或 Te 需求）、温度、Vdc；输出：idRef</td></tr>
+<tr><th>工程价值</th><td>同力矩电流最小 → 铜损、发热、MOS 电流应力最小；案例中 35 A 时力矩提升约 4%，60 A 时约 11%</td></tr>
+<tr><th>上下游依赖</th><td>上游 B02 转矩公式；下游 C05、C07（弱磁区与 MTPA 衔接）</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A05（求导找极值）、A02（电流圆）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>IPMSM 有磁阻转矩，id = 0 不是最优；同样转矩下 MTPA 电流更小，热和保护裕量更好。</div>
+<div><b>② 量产怎么做</b>台架实测「同电流扫电流角」找最大力矩点，生成 MTPA 表（考虑 Ld/Lq 饱和），按温度插值；公式法作为初值。</div>
+<div><b>③ 如何证明</b>扭矩传感器验证：同力矩下实测电流 ≤ id = 0 方案；表中每点为电流角扫描的峰值。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>准确零位（零位误差会让「最大力矩角」测量整体偏移）。</li>
+<li>扭矩传感器台架；Ld、Lq 随电流的实测数据（C11）。</li>
+<li>不满足：用常数电感的公式表 → 大电流时偏离真正 MTPA。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（来源：IPMSM MTPA 经典推导，对 Te 关于电流角求极值）
+Te = 1.5·p·[ψf·iq + (Ld − Lq)·id·iq]，|is|² = id² + iq²
+以 |is| 表示：id = [−ψf + √(ψf² + 8(Ld−Lq)²·|is|²)] / [4(Ld − Lq)]
+以 iq 表示（量产以 iq 为索引时）：id = ψf/(2ΔL) − √(ψf²/(4ΔL²) + iq²)，ΔL = Lq − Ld
+案例 <span class="tg tg-case">【案例假设，常数电感】</span>ψf/(2ΔL) = 58.33 A：
+   iq = 10 / 20 / 30 / 40 / 50 / 60 A → id = −0.85 / −3.33 / −7.26 / −12.4 / −18.5 / −25.4 A
+SPMSM：ΔL = 0 → id = 0（MTPA 退化为 id = 0 控制）
+三类实现：
+   ① 公式法：在线计算，依赖参数准确，饱和时偏差大
+   ② 查表法（量产主流）：台架标定 2D 表（Te 或 iq，Vdc / 温度）→ (id, iq)
+   ③ 在线寻优：信号注入 / 扰动观察找 dTe/dβ = 0，抗参数变化，但实现与验证复杂 <span class="tg tg-check">【待核对：各厂商在线 MTPA 多为私有方案】</span></div>
+<div id="anim-C06"></div>
+<div class="anim-note"><b>动画在演示什么：</b>dq 电流平面：灰色同心圆为等电流圆，彩色曲线为等转矩曲线（IPMSM 为双曲线族），绿色为 MTPA 轨迹（等转矩线与电流圆的切点连线）。黄色点为当前工作点。<br>
+<b>拖动滑块：</b>改变转矩需求，工作点沿 MTPA 轨迹移动；改变 Lq/Ld，凸极比为 1 时轨迹退化为 q 轴；「用 id = 0」对比同转矩所需电流。<br>
+<b>正常：</b>MTPA 点电流最小。<b>注意：</b>为常数电感模型（L0 证据），实测 MTPA 以台架电流角扫描为准。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>表结构：以 |iqRef|（0~60 A，步长 5 A）为索引的 idRef 一维表；高精度项目用 Te × 温度二维表。</li>
+<li>查表：线性插值（1 ms 任务）；iqRef 为负（反向力矩）时 id 同为负（对称）。</li>
+<li>温度修正：多张表按磁钢温度插值，或乘温度系数。</li>
+<li>与弱磁衔接：idRef = min(idMTPA, idFW)（取更负者，C07）。</li>
+<li>电流圆限幅：|is| ≤ Imax，id 优先保证（C07）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>台架电流角扫描：固定 |is|，β 从 90° 扫到 130°，力矩曲线在峰值附近平坦——这意味着 MTPA 角误差几度对力矩影响很小，但对电流有效值仍有收益。</li>
+<li>MTPA 下 id 随负载增加而变得更负，相电流相位领先反电动势。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* MTPA 表：索引 |iq| = 0,5,...,60 A；值为 idRef（Q15）。公式初值，需台架覆盖 【案例假设】*/
+#define MTPA_N   (13u)
+volatile q15_t Cal_MtpaId_q15[MTPA_N] = {
+   0, -140, -558, -1244, -2185, -3363, -4759,
+   -6353, -8124, -10053, -12122, -14313, -16613
+};
+
+q15_t FOC_MtpaIdRef(q15_t iqRef)
+{
+    const int32_t step = 3277;                      /* 5 A = 5/50 × 32768 */
+    int32_t a   = (iqRef &lt; 0) ? -(int32_t)iqRef : (int32_t)iqRef;
+    int32_t idx = a / step;
+    int32_t frac_q15;
+    if (idx &gt;= (int32_t)(MTPA_N - 1u)) { return Cal_MtpaId_q15[MTPA_N - 1u]; }
+    frac_q15 = ((a - idx * step) * 32768) / step;   /* 0..32767 */
+    return (q15_t)(Cal_MtpaId_q15[idx] +
+           (((int32_t)(Cal_MtpaId_q15[idx + 1] - Cal_MtpaId_q15[idx]) * frac_q15) &gt;&gt; 15));
+}</code></pre>
+<p class="note">节点值由第三部分公式按 iq = 0、5…60 A 计算得出（Q15，基值 50 A）。注意：用 iq 作索引时，加入 id 后实际力矩比 Kt·iq 略大，严格的力矩闭环应使用 Te → (id, iq) 表；EPS 上层通常有力矩闭环 / 标定补偿。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>启用 MTPA 后力矩反而下降</h5><dl>
+<dt>现象</dt><dd>同 |is| 下 MTPA 力矩小于 id = 0。</dd>
+<dt>可能根因</dt><dd>零位偏差（实际电流角 ≠ 给定）、id 符号反（给了正 id）、Ld/Lq 填反。</dd>
+<dt>排查</dt><dd>台架扫电流角找峰值；检查 id 正负与参数。</dd>
+<dt>修复</dt><dd>先修零位，再重做 MTPA 表。</dd>
+<dt>验证</dt><dd>同电流力矩 ≥ id = 0。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>大电流时 MTPA 表与实测峰值偏离</h5><dl>
+<dt>现象</dt><dd>60 A 时实测最大力矩角比表中大 / 小若干度。</dd>
+<dt>可能根因</dt><dd>Lq 饱和，常数电感公式不再适用。</dd>
+<dt>排查</dt><dd>多电流幅值扫角度。</dd>
+<dt>修复</dt><dd>改用实测表。</dd>
+<dt>验证</dt><dd>各电流点工作点位于实测峰值附近。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>力矩过零附近手感不连续</h5><dl>
+<dt>现象</dt><dd>回正 / 小力矩换向时有台阶感。</dd>
+<dt>可能根因</dt><dd>MTPA 表在 iq 正负切换时 id 不连续或插值越界。</dd>
+<dt>排查</dt><dd>扫 iqRef 从 −5 到 +5 A 记录 idRef。</dd>
+<dt>修复</dt><dd>表在 0 附近连续、对称；边界处理。</dd>
+<dt>验证</dt><dd>idRef 连续，手感平顺。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>MTPA 表标定时温度不受控：磁钢温度变化使 ψf 变化，表中混入温度误差。</li>
+<li>MTPA 与弱磁切换点若用硬切换，会产生 id 台阶；用「取更负者」自然过渡。</li>
+<li>只看力矩不看电流：MTPA 的价值是降电流，验收指标应包括电流有效值与温升。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C06" id="quiz-C06"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：MTPA 原理、公式（两种索引）、SPMSM 退化、三类实现取舍、零位对 MTPA 的影响。</li>
+<li>面试高频：「MTPA 是什么，量产怎么实现？」</li></ul></div>
+</section>
+
+<!-- ================= C07 ================= -->
+<section class="chap" id="C07" data-title="C07 弱磁控制">
+<h2 class="chap-h">C07 弱磁控制：电压极限椭圆、电流极限圆、负 d 轴去磁与切换逻辑</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 7 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>给定生成：MTPA 之后修正 idRef，并约束 iqRef</td></tr>
+<tr><th>输入 / 输出</th><td>输入：电压利用率（|v| / vMax 或 vSat 标志）、ωe、Vdc；输出：idRef 修正量、iqRef 上限</td></tr>
+<tr><th>工程价值</th><td>12 V 系统中，案例电机满电流 MTPA 时基速仅约 3200 rpm，8000 rpm 必须依赖弱磁</td></tr>
+<tr><th>上下游依赖</th><td>上游 C05（电压饱和信息）、C06；下游 C05 给定</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A02 圆 / 椭圆、A08 PI、B02 反电动势</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>反电动势 ∝ 转速；超过可用电压后电流无法再注入，力矩崩溃。负 id 产生与永磁体反向的磁链，降低定子磁链幅值，换取转速。</div>
+<div><b>② 量产怎么做</b>电压闭环弱磁（PI 调节 Δid，使电压利用率保持在 ~95%）为主，叠加前馈查表加快响应；iq 按电流圆与电压椭圆同时限幅。</div>
+<div><b>③ 如何证明</b>扫转速到最高转速：电压利用率稳定在目标值、无振荡；转矩–转速外特性曲线达标；急加速 / 电压跌落时不失控。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>电流环有动态电压限幅与 vSat 标志（C05）；Vdc 实时值。</li>
+<li>准确的 Ld、ψf（前馈表）；电流极限 Cal_IsMax（案例 60 A 峰值 <span class="tg tg-case">【案例假设】</span>）。</li>
+<li>不满足：没有弱磁 → 基速以上力矩迅速下降、电流畸变；弱磁过深 → 效率低、可能退磁风险。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（稳态，忽略 Rs 压降）
+电压极限：vd² + vq² ≤ Vmax²，vd ≈ −ωe·Lq·iq，vq ≈ ωe·(Ld·id + ψf)
+   ⇒ (Ld·id + ψf)² + (Lq·iq)² ≤ (Vmax/ωe)²   —— 椭圆，中心 (−ψf/Ld, 0)，随转速收缩
+电流极限：id² + iq² ≤ Imax²   —— 圆
+特征电流：Ich = ψf/Ld；若 Ich ≤ Imax，理论上可无限升速（椭圆中心在圆内）
+案例 <span class="tg tg-case">【案例假设】</span>Vmax = 0.95 × 12/√3 = 6.58 V，Ich = 77.8 A &gt; Imax = 60 A（最高转速有限，空载理论值约 1.96 万 rpm）
+   60 A MTPA 基速 ≈ 3230 rpm；35 A MTPA 基速 ≈ 3930 rpm（未计 Rs 压降）
+   各转速满电流最大力矩：3000 rpm 1.39 N·m，5000 rpm 1.10 N·m，8000 rpm 0.70 N·m（id ≈ −55.6 A，iq ≈ 22.6 A）
+<span class="tg tg-disc">【离散实现】</span>电压闭环弱磁（常见量产流派）：
+   e_v = Vtarget − |v|（或 e_v = Vtarget − |vq_unsat|）
+   Δid = PI_fw(e_v)，限幅 [Δid_min, 0]（只允许去磁方向）
+   idRef = min(idMTPA, idMTPA + Δid)；iqRef 限幅 √(Imax² − idRef²)
+另一流派：查表 / 公式前馈（idFW = (Vmax/ωe − ψf)/Ld 等），响应快但依赖参数；常与电压环结合</div>
+<div id="anim-C07"></div>
+<div class="anim-note"><b>动画在演示什么：</b>dq 电流平面上的电流极限圆（灰）与电压极限椭圆（蓝，随转速缩小），绿色为可行区域，橙点为在可行区内力矩最大的工作点，绿色虚线为 MTPA 轨迹。<br>
+<b>拖动滑块：</b>转速升高 → 椭圆收缩，工作点被迫离开 MTPA 线沿圆向左（负 id）移动，力矩下降；降低 Vdc（如 9 V 冷启动）椭圆更小；增大 Imax 改变可行区。<br>
+<b>正常：</b>基速以下工作点在 MTPA 上，基速以上沿圆 / 椭圆交点移动。<b>异常：</b>可行区为空（无法维持该转速）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>电压利用率：|v| = √(vd² + vq²)（来自 C05），目标 Vtarget = Cal_FwVoltK × vMax（如 0.95）。</li>
+<li>弱磁 PI（1 ms 或更快，建议 1~2 kHz）：输出 Δid ≤ 0，积分器上下限 [−Imax, 0]。</li>
+<li>idRef = min(idMTPA, idMTPA + Δid)；再限 idRef ≥ −Cal_IdMinFw（防止过深退磁，按电机允许值）。</li>
+<li>iqRef 限幅：√(Imax² − idRef²)（电流圆）；可再加电压椭圆限幅（前馈表）。</li>
+<li>弱磁 PI 带宽远低于电流环（如 50~100 Hz），避免两环相互作用。</li>
+<li>转速下降时 Δid 自然回到 0（误差变正，积分退回）；加上回退速率限制。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>扫转速：基速以下 Δid = 0；基速以上 Δid 逐渐变负，|v| 稳定在 Vtarget，iq 上限下降。</li>
+<li>急加速：|v| 短时超调，Δid 迅速响应；若振荡 → 弱磁 PI 带宽过高或与电流环耦合。</li>
+<li>电压跌落：Vtarget 随之下降，Δid 立即加深。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile q15_t Cal_FwVoltK_q15 = 31130;     /* 0.95 */
+volatile q15_t Cal_IsMax_q15   = 32767;     /* 50 A：Q15 基值 50 A 的上限，见下方说明 */
+volatile q15_t Cal_IdMinFw_q15 = -32768;    /* -50 A：去磁下限，按电机供应商允许值 【待核对】*/
+static PI_tst s_piFw = { .kp_q12 = 0, .kiTs_q15 = 0, .integ_q30 = 0, .outMax = 0, .outMin = -32768 };
+
+/* 2 kHz 任务（每 10 个 PWM 周期）*/
+q15_t FOC_FieldWeakenAdjust(q15_t idMtpa)
+{
+    q15_t vMax = Q15_Mul(Q15_Mul(gFoc.vdcPu, Q15_INV_SQRT3), Cal_VmaxK_q15);
+    q15_t vTgt = Q15_Mul(vMax, Cal_FwVoltK_q15);
+    q15_t vAbs = Q15_SqrtQ30((int32_t)gFoc.vd * gFoc.vd + (int32_t)gFoc.vq * gFoc.vq);
+    q15_t dId;
+    int32_t id;
+
+    s_piFw.kp_q12   = Cal_FwKp_q12;
+    s_piFw.kiTs_q15 = Cal_FwKiTs_q15;
+    dId = PI_Run(&amp;s_piFw, Q15_Sat((int32_t)vTgt - vAbs));   /* |v| &gt; vTgt → 误差为负 → Δid 变负 */
+    id  = (int32_t)idMtpa + dId;
+    if (id &gt; idMtpa)          { id = idMtpa; }
+    if (id &lt; Cal_IdMinFw_q15) { id = Cal_IdMinFw_q15; }
+    return (q15_t)id;
+}
+
+/* 电流圆限幅：id 优先 */
+void FOC_CurrentLimit(q15_t *idRef, q15_t *iqRef, q15_t isMax)
+{
+    int32_t iqMax;
+    if (*idRef &lt; -isMax) { *idRef = (q15_t)(-isMax); }
+    iqMax = Q15_SqrtQ30((int32_t)isMax * isMax - (int32_t)(*idRef) * (*idRef));
+    if (*iqRef &gt;  iqMax) { *iqRef = (q15_t)iqMax; }
+    if (*iqRef &lt; -iqMax) { *iqRef = (q15_t)(-iqMax); }
+}</code></pre>
+<p class="note"><b>基值陷阱：</b>第三部分按 Imax = 60 A 分析，但 Q15 电流基值 50 A 只能表示到 +50 A（32767）。直接写 <code>Cal_IsMax_q15 = 39322</code> 会在 int16 中溢出成负数，电流限幅彻底失效。因此代码中电流极限只能取 50 A；若项目确需 60 A，应把 I_BASE 提高到 ≥ 64 A（同时重算 A01 的每码 LSB 与全部 PI 标幺参数），或对电流限幅使用 Q14 等更宽格式——这在 X2「浮点 vs 定点」中作为典型案例讨论。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>弱磁区电流 / 转速振荡</h5><dl>
+<dt>现象</dt><dd>5000 rpm 以上 id 以 10~50 Hz 摆动，转速波动。</dd>
+<dt>可能根因</dt><dd>弱磁 PI 带宽过高，与电流环 / 速度环耦合；|v| 计算含 PWM 噪声。</dd>
+<dt>排查</dt><dd>降低弱磁 Ki 观察；对 |v| 加轻度滤波。</dd>
+<dt>修复</dt><dd>弱磁环带宽降到电流环 1/10 以下；Vtarget 预留裕量。</dd>
+<dt>验证</dt><dd>扫转速 |v| 平稳，无振荡。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速突加负载「失步」</h5><dl>
+<dt>现象</dt><dd>7000 rpm 突加负载后电流失控，转速骤降，报过流或失步。</dd>
+<dt>可能根因</dt><dd>iqRef 未受电压椭圆约束，电流环饱和后进入不可控区；弱磁响应慢。</dd>
+<dt>排查</dt><dd>记录 vSat、Δid、iqRef 时序。</dd>
+<dt>修复</dt><dd>iq 上限同时考虑电压椭圆；弱磁前馈；给定斜率限制。</dd>
+<dt>验证</dt><dd>高速负载阶跃不失控。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>冷启动低压时最高转速大幅下降并抖动</h5><dl>
+<dt>现象</dt><dd>9 V 母线下高速段抖动。</dd>
+<dt>可能根因</dt><dd>Vtarget 未随 Vdc 更新；Vdc 采样滤波过重。</dd>
+<dt>排查</dt><dd>记录 Vdc 与 vMax。</dd>
+<dt>修复</dt><dd>vMax 每周期由实测 Vdc 计算。</dd>
+<dt>验证</dt><dd>9~16 V 全范围扫转速平稳。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>弱磁深度与退磁：负 id 过大可能使磁钢局部退磁（尤其高温），去磁电流上限需与电机供应商确认。</li>
+<li><span class="tg tg-red">【风险红线】</span>深弱磁高速运行时若 PWM 突然关闭（故障关管），反电动势远超母线电压，经体二极管向电源回馈大电流并可能过压。故障处理应评估主动短路（ASC）与关管两种策略（主驱常用 ASC；12 V EPS 以项目安全分析为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>弱磁环在力矩为零时也可能被需要（空载高速）。</li>
+<li>弱磁 PI 积分器在低速未清零，再次加速时起始 Δid 不为零。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C07" id="quiz-C07"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：电压椭圆方程与中心、特征电流、电压闭环弱磁结构、iq 限幅、带宽分离、关管过压风险。</li>
+<li>面试高频：「弱磁原理？电压闭环弱磁怎么做？」</li></ul></div>
+</section>
+
+<!-- ================= C08 ================= -->
+<section class="chap" id="C08" data-title="C08 速度环 / 位置环">
+<h2 class="chap-h">C08 速度环与位置环：前馈、低通滤波与微分噪声抑制</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 8 节（串级原理见 B05）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>电流环外层：位置 → 速度 → iqRef</td></tr>
+<tr><th>输入 / 输出</th><td>输入：θRef / ωRef、反馈角度与速度、负载估计；输出：iqRef</td></tr>
+<tr><th>工程价值</th><td>EPS 中用于台架测试、回正控制、终端位置保护等；工业伺服的核心</td></tr>
+<tr><th>上下游依赖</th><td>上游 A05 测速、C09 角度；下游 C05</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A05、A07、A08</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>纯反馈 PI 对跟踪运动指令总有滞后；前馈把「已知需要的速度 / 力矩」直接送入，反馈只修正误差。</div>
+<div><b>② 量产怎么做</b>位置环 P + 速度前馈；速度环 PI + 加速度（力矩）前馈；D 项必须带低通或用「反馈微分」形式。</div>
+<div><b>③ 如何证明</b>正弦 / 梯形位置指令跟踪误差；加前馈前后对比；负载扰动恢复时间。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>电流环验证通过；速度反馈分辨率与延迟已知（A05）。</li>
+<li>转动惯量 J、摩擦估计（用于力矩前馈）。</li>
+<li>不满足：前馈参数错误会引入额外误差；速度信号噪声被 D 项放大。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+位置环：ωRef = Kp_θ·(θRef − θ) + K_vff·dθRef/dt
+速度环：iqRef = PI_ω(ωRef − ω) + K_aff·J·dωRef/dt / Kt
+   前馈完美时，跟踪误差理论上为 0，反馈环只处理扰动与模型误差
+D 项噪声抑制：D(s) = Kd·s/(τd·s + 1)（带低通的微分）
+   「微分先行」：对反馈求微分而不是对误差求微分，避免给定阶跃产生冲击
+<span class="tg tg-disc">【离散实现】</span>前馈中的 dθRef/dt 用给定的差分（给定无噪声），不用反馈的差分</div>
+<div id="anim-C08"></div>
+<div class="anim-note"><b>动画在演示什么：</b>位置环跟踪正弦位置指令（对象为理想速度环 + 积分）。上图位置给定与实际，下图跟踪误差。<br>
+<b>拖动滑块：</b>增大指令频率，纯 P 位置环误差增大（相位滞后）；勾选「速度前馈」误差显著减小；「前馈增益」偏离 1 时误差又出现；「速度环带宽」低时即使有前馈也有残余误差。<br>
+<b>正常：</b>前馈 = 1 时误差接近 0。<b>异常：</b>误差随频率增长。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>给定轨迹规划（梯形 / S 曲线）同时输出 θRef、ωRef_ff、αRef_ff。</li>
+<li>位置环（1 ms）：ωRef = Kp·eθ + K_vff·ωRef_ff，限幅最大速度。</li>
+<li>速度环（1 ms）：iqRef = PI(eω) + K_aff·αRef_ff·J/Kt，限幅电流；抗饱和。</li>
+<li>角度误差 eθ 使用多圈累计角度（int32），处理过零。</li>
+<li>D 项（若用）：反馈微分 + 一阶低通，截止频率 3~5 倍环路带宽以上。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>无前馈：误差与指令速度近似成正比（速度型误差 = ω/Kp）。</li>
+<li>有前馈：误差主要来自内环动态和前馈参数误差。</li>
+<li>负载阶跃：速度短暂跌落后由积分恢复。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile int16_t Cal_SpdKp_q12   = 2048;   /* 速度环 Kp（标幺）【案例假设】 */
+volatile int16_t Cal_SpdKiTs_q15 = 33;
+volatile q15_t   Cal_PosKp_q15   = 6554;   /* 位置环 Kp */
+volatile q15_t   Cal_VffK_q15    = 32767;  /* 速度前馈增益 ≈ 1 */
+
+/* 1 ms：位置环（多圈角度，单位：机械 uint16 码 × 圈数）*/
+int32_t FOC_PositionLoop_1ms(int32_t posRef, int32_t posFb, int32_t spdFf_rpm)
+{
+    int32_t e   = posRef - posFb;                                  /* 多圈 int32，无过零问题 */
+    int32_t spd = (int32_t)(((int64_t)e * Cal_PosKp_q15) &gt;&gt; 15)   /* 码 → rpm 的比例并入 Kp */
+                + (int32_t)(((int64_t)spdFf_rpm * Cal_VffK_q15) &gt;&gt; 15);
+    if (spd &gt;  2000) { spd =  2000; }                              /* 最大速度 【案例假设】 */
+    if (spd &lt; -2000) { spd = -2000; }
+    return spd;                                                    /* → FOC_SpeedLoop_1ms (B05) */
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>加 D 项后电机发出「沙沙」噪声</h5><dl>
+<dt>现象</dt><dd>速度环加 D 项后电流噪声明显增加。</dd>
+<dt>可能根因</dt><dd>D 项放大测速量化噪声（A05）。</dd>
+<dt>排查</dt><dd>关闭 D 对比 iqRef 频谱。</dd>
+<dt>修复</dt><dd>D 项加低通或取消 D；用加速度前馈替代。</dd>
+<dt>验证</dt><dd>噪声恢复，跟踪性能不下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>位置环在零点附近来回抖动</h5><dl>
+<dt>现象</dt><dd>定位后电机在 ±1 码间振荡。</dd>
+<dt>可能根因</dt><dd>位置分辨率与速度环积分 + 摩擦形成极限环；Kp 过高。</dd>
+<dt>排查</dt><dd>观察误差在 ±1 码间跳变。</dd>
+<dt>修复</dt><dd>小误差死区或降低增益；提升位置分辨率。</dd>
+<dt>验证</dt><dd>静止时 iqRef 平稳。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>位置跨圈时跳变</h5><dl>
+<dt>现象</dt><dd>运行一圈后位置误差突然变成 65535 码。</dd>
+<dt>可能根因</dt><dd>位置误差直接用单圈 uint16 计算。</dd>
+<dt>排查</dt><dd>跨圈时记录 posFb。</dd>
+<dt>修复</dt><dd>多圈累加：pos += (int16)(θ[k] − θ[k−1])。</dd>
+<dt>验证</dt><dd>连续多圈运动误差连续。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>前馈与反馈执行周期不同步导致相位不匹配。</li>
+<li>速度前馈用反馈速度（含噪声）而不是给定速度。</li>
+<li>EPS 位置类功能（如终端保护）直接作用于转向手感，必须与上层功能安全设计一致。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C08" id="quiz-C08"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：前馈原理与来源、微分先行与带低通 D、多圈位置、带宽分离。</li>
+<li>面试高频：「为什么要加速度前馈？」「D 项为什么要滤波？」</li></ul></div>
+</section>
+
+<!-- ================= C09 ================= -->
+<section class="chap" id="C09" data-title="C09 角度传感方案">
+<h2 class="chap-h">C09 角度传感：霍尔、编码器、旋变——解码、零位标定与角度误差</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 9 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>Park / 反 Park 的角度来源；测速来源</td></tr>
+<tr><th>输入 / 输出</th><td>输入：旋变 sin/cos 包络（经 AD2S1210 解码）；输出：gFoc.thetaM、thetaE、速度</td></tr>
+<tr><th>工程价值</th><td>角度误差 = 换向误差：力矩下降、正反转不对称、力矩脉动（误差谐波）</td></tr>
+<tr><th>上下游依赖</th><td>下游 C03、A05 测速、C12 角度诊断</td></tr>
+<tr><th>适用角色</th><td>底层、算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A02 atan2、A03 三角、A07 跟踪环</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>FOC 的「电子换向」完全依赖角度；EPS 零速也要满力矩，必须有绝对位置传感器。</div>
+<div><b>② 量产怎么做</b>旋变 + 解码芯片（跟踪型 R/D 转换）；零位产线标定写 NVM；解码芯片故障位（信号丢失 / 退化 / 跟踪丢失）进入诊断。</div>
+<div><b>③ 如何证明</b>对拖反电动势过零与 θe 对齐（误差 &lt; 1° 电角度量级）；正反转对称；恒速时角度误差频谱。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>硬件：旋变激磁驱动、sin/cos 差分接收、解码芯片与 MCU 接口（SPI / 并口）。</li>
+<li>配置：分辨率、激磁频率（AD2S1210 支持 10/12/14/16 位分辨率与可编程激磁频率，具体范围与跟踪速率以 ADI 数据手册为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>旋变极对数：本案例假设为 1 对极旋变，θe = 4·θres <span class="tg tg-case">【案例假设】</span>；若旋变极对数与电机相同，θe 直接等于旋变电角度。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>方案</th><th>分辨率</th><th>零速</th><th>环境鲁棒性</th><th>典型应用</th></tr>
+<tr><td>霍尔（3 路）</td><td>60° 电角度</td><td>只知扇区</td><td>好</td><td>低成本 BLDC、风机；需插值</td></tr>
+<tr><td>增量编码器</td><td>高</td><td>需找零（Z 信号 / 对齐）</td><td>一般（污染、振动）</td><td>工业伺服</td></tr>
+<tr><td>绝对编码器 / 磁编</td><td>高</td><td>是</td><td>较好</td><td>伺服、部分 EPS</td></tr>
+<tr><td>旋变</td><td>由解码决定（12~16 位）</td><td>是</td><td>很好（耐温、耐振）</td><td>车载电驱、EPS</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+旋变输出：Vsin = k·Vex·sin θ·sin(ωex·t)，Vcos = k·Vex·cos θ·sin(ωex·t)
+跟踪型解码：误差 ε = sin θ·cos θ̂ − cos θ·sin θ̂ = sin(θ − θ̂)，II 型环路驱动 θ̂ → θ
+典型误差源与角度误差谐波（小误差近似）：
+   sin/cos 直流偏置 → 1 次谐波误差
+   幅值不平衡 Δk/k → 约 (Δk/2k)·sin 2θ，2 次谐波
+   非正交（相位误差 δ）→ 约 δ/2 的常值 + 2 次谐波
+   激磁 / 信号相位延迟（随温度、线缆变化）→ 需解码芯片相位补偿
+   跟踪环动态滞后 → 随转速 / 加速度增大
+零位：θe = p·θm − θoff；θoff 由 d 轴对齐或反电动势法标定</div>
+<div id="anim-C09"></div>
+<div class="anim-note"><b>动画在演示什么：</b>旋变 sin、cos 包络（左图 XY 为李萨如图，理想为圆），以及 atan2 解码角度相对真实角度的误差曲线（右图，横轴为真实电角度）。<br>
+<b>拖动滑块：</b>「幅值不平衡」→ 李萨如图变椭圆，误差出现 2 次谐波；「直流偏置」→ 圆心偏移，1 次谐波误差；「非正交」→ 椭圆倾斜。误差最终以 p × 谐波阶次出现在电角度上，引起力矩脉动。<br>
+<b>正常：</b>圆、误差 ≈ 0。<b>异常：</b>按谐波阶次反推原因。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>读取角度</b>：每 PWM 周期在采样时刻锁存解码芯片位置（与电流采样同步），12 位左移 4 位转 uint16。</li>
+<li><b>电角度</b>：θe = (uint16)(θm × 4 − Cal_ThetaOffset)（A03）。</li>
+<li><b>零位标定（d 轴对齐法）</b>：注入 id = 恒定（如 20 A，iq = 0），开环角度固定为 0，转子被吸到 d 轴；稳定后读 θm，Cal_ThetaOffset = θm × 4（取低 16 位）。正反两个方向接近后取平均以减小摩擦影响。</li>
+<li><b>零位标定（反电动势法）</b>：对拖，PWM 关闭，测 A 相反电动势过零时刻对应的 θe，与理论值比较（更准，需要对拖台架）。</li>
+<li><b>诊断</b>：解码芯片故障位（信号丢失 LOS、信号退化 DOS、跟踪丢失 LOT 等，以手册为准）；角度跳变（相邻周期 Δθ 超出物理可能）；与无感观测角度比较。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>恒速：θe 均匀锯齿；Δθ 每周期恒定（±少量噪声）。</li>
+<li>零位正确：id = 0 控制、空载对拖时 vd ≈ 0（小电流下），正反转 vd 对称。</li>
+<li>角度误差谐波：力矩脉动频谱中出现对应阶次。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile uint16_t Cal_ThetaOffset = 0u;      /* 产线标定写 NVM */
+
+/* 【伪代码】d 轴对齐法零位标定（台架标定模式，D06 调用）*/
+typedef enum { ZC_IDLE, ZC_ALIGN, ZC_SETTLE, ZC_DONE } ZeroCal_ten;
+void FOC_ZeroCal_1ms(void)
+{
+    static ZeroCal_ten st = ZC_IDLE;  static uint16_t t; static uint32_t acc; static uint16_t n;
+    switch (st) {
+    case ZC_IDLE:   FOC_SetOpenLoopAngle(0u); FOC_SetIdqRef(AMP_TO_Q15(20.0f), 0);
+                    t = 0u; acc = 0u; n = 0u; st = ZC_ALIGN; break;
+    case ZC_ALIGN:  if (++t &gt; 800u) { st = ZC_SETTLE; t = 0u; } break;        /* 0.8 s 吸合 */
+    case ZC_SETTLE: acc += (uint16_t)(gFoc.thetaM * FOC_POLE_PAIRS); n++;      /* 注意过零：真实代码用矢量平均 */
+                    if (n &gt;= 200u) { Cal_ThetaOffset = (uint16_t)(acc / n); st = ZC_DONE; } break;
+    default:        FOC_SetIdqRef(0, 0); break;
+    }
+}
+
+/* 角度跳变诊断：相邻周期增量超过 8000 rpm 对应值的 2 倍 */
+void FOC_AngleJumpDiag_Isr(int16_t dTh)
+{
+    if ((dTh &gt; 3500) || (dTh &lt; -3500)) { Diag_Debounce(DIAG_ANGLE_JUMP); }
+}</code></pre>
+<p class="note">伪代码中对角度求算术平均在 0 / 65535 附近会出错，真实实现应对 sin、cos 分别求平均再 atan2（矢量平均）。对齐电流的大小要能克服齿槽与摩擦，同时不超过热与保护限制。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>力矩脉动在 2×p 阶（机械）突出</h5><dl>
+<dt>现象</dt><dd>转向时感到与机械转速相关的周期脉动，频谱在机械 8 阶（2×4）突出。</dd>
+<dt>可能根因</dt><dd>旋变 sin/cos 幅值不平衡 → 2 次角度误差，乘极对数 4。</dd>
+<dt>排查</dt><dd>采集 sin/cos 包络或解码误差；对比编码器参考角度。</dd>
+<dt>修复</dt><dd>硬件增益匹配；软件误差补偿表（按 θm 查表）。</dd>
+<dt>验证</dt><dd>对应阶次脉动下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>零位标定结果每次差几度</h5><dl>
+<dt>现象</dt><dd>重复标定 Cal_ThetaOffset 分散 ±3° 电角度。</dd>
+<dt>可能根因</dt><dd>齿槽 / 摩擦使转子停不到 d 轴；对齐电流太小；单方向接近。</dd>
+<dt>排查</dt><dd>不同对齐电流、正反方向接近比较。</dd>
+<dt>修复</dt><dd>增大对齐电流、双向平均；或用反电动势法。</dd>
+<dt>验证</dt><dd>重复性 &lt; 0.5°。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高温下高速力矩下降</h5><dl>
+<dt>现象</dt><dd>冷态正常，高温高速力矩不足。</dd>
+<dt>可能根因</dt><dd>旋变信号相位随温度变化，解码延迟改变；ψf 下降。</dd>
+<dt>排查</dt><dd>高温对拖测零位是否漂移。</dd>
+<dt>修复</dt><dd>解码芯片相位补偿；延迟补偿按温度修正。</dd>
+<dt>验证</dt><dd>高低温力矩一致性。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>角度锁存时刻与电流采样不同步：引入与转速成正比的角度误差。</li>
+<li><span class="tg tg-red">【风险红线】</span>角度传感器失效时继续闭环 → 力矩方向错误。EPS 必须有角度合理性诊断（跳变、与观测器比较、解码故障位）并进入安全状态或降级。</li>
+<li>对齐法标定时电机必须无负载、可自由转动；否则标定值错误。</li>
+<li>旋变与电机极对数配置不一致：θe 每圈锯齿数错误（B07 动画判据）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C09" id="quiz-C09"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：传感器对比、旋变解码原理、误差源与谐波阶次、零位标定两种方法、角度诊断。</li>
+<li>台架高频：正反转不对称、力矩脉动阶次分析、标定重复性。</li></ul></div>
+</section>
+
+<!-- ================= C10 ================= -->
+<section class="chap" id="C10" data-title="C10 无感观测">
+<h2 class="chap-h">C10 无感观测：MRAS、滑模观测器 SMO、龙伯格观测器、PLL 角度提取</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 10 节（本案例用作旋变失效后的降级备份）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>替代 / 校验位置传感器：电压、电流 → 估计角度与速度</td></tr>
+<tr><th>输入 / 输出</th><td>输入：vα、vβ（给定电压）、iα、iβ、参数；输出：θ̂e、ω̂e</td></tr>
+<tr><th>工程价值</th><td>EPS：旋变故障降级、角度合理性交叉校验；低成本应用：取消传感器</td></tr>
+<tr><th>上下游依赖</th><td>上游 C02、C04、C11（参数）；下游 C03、C12</td></tr>
+<tr><th>适用角色</th><td>算法</td></tr>
+<tr><th>前置数学依赖</th><td>A04 复数、A06 积分、A07 传递函数、A08 PI（PLL）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>反电动势 e = ωe·ψf·(−sinθ, cosθ) 中包含角度信息；从可测的电压电流中把它「估计」出来即可得到角度。</div>
+<div><b>② 量产怎么做</b>中高速用反电动势类观测器（SMO / 龙伯格 / 磁链观测）+ PLL；零低速用高频注入（IPMSM 凸极）或开环 I/F 启动；参数在线修正。</div>
+<div><b>③ 如何证明</b>与旋变角度对比的角度误差（稳态、动态、各转速）；切换过程电流平滑；参数偏差 ±30% 下的误差。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>准确的 Rs、Ls（SPMSM）或 Ld、Lq（IPMSM 用扩展反电动势模型）。</li>
+<li>输入电压：通常用给定电压，需要死区补偿（C13），否则低速误差大。</li>
+<li>不满足：低速反电动势太小，信噪比不足 → 观测失效（反电动势类方法的根本限制）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+静止坐标电压方程（SPMSM）：v_αβ = Rs·i_αβ + Ls·di_αβ/dt + e_αβ，e_αβ = ωe·ψf·[−sinθ, cosθ]
+IPMSM 扩展反电动势（EEMF）：把凸极项并入「扩展反电动势」，模型对称化（来源：Morimoto / Chen 等提出的 EEMF 模型）
+① 滑模观测器 SMO：
+   估计电流 d î/dt = (v − Rs·î − z)/Ls，z = k·sign(î − i)（或饱和函数）
+   滑模面上 z 的等效值 ≈ e，需低通得到 ê，再提取角度；低通相位滞后 Δφ = atan(ωe/ωc) 需补偿
+   优点：鲁棒、实现简单；缺点：抖振、需滤波与补偿
+② 龙伯格观测器：以反电动势为状态（慢变），用线性增益 L·(î − i) 修正
+   优点：无抖振、可按极点配置设计；缺点：对参数更敏感
+③ MRAS：参考模型（电压模型）与可调模型（电流模型）的输出误差驱动自适应律估计 ω
+   优点：理论成熟；缺点：低速对 Rs 敏感
+角度提取：
+   atan2(−êα, êβ)：简单但噪声直接进入角度
+   PLL：ε = −êα·cosθ̂ − êβ·sinθ̂ ≈ |ê|·sin(θ − θ̂)，PI 输出 ω̂，积分得 θ̂（同时得到平滑速度）
+零低速：高频注入（脉振 / 旋转注入），利用 Ld ≠ Lq 的凸极性 <span class="tg tg-check">【待核对：具体注入方案依项目】</span>
+<span class="tg tg-vendor">【厂商参考】</span>TI InstaSPIN-FOC 的 FAST 观测器为 TI 私有算法 <span class="tg tg-check">【厂商私有方案】</span>；ST MC SDK 提供基于 PLL / CORDIC 的状态观测器；NXP 提供开源的 MCAT / RTCESL 中的反电动势观测器组件——均为参考实现，不是唯一标准。</div>
+<div id="anim-C10"></div>
+<div class="anim-note"><b>动画在演示什么：</b>估计反电动势（含噪声）送入 PLL，PLL 从 30° 初始误差开始收敛。左图：αβ 中真实反电动势（灰）与 PLL 角度对应的单位矢量（紫）；右图：角度误差与速度估计随时间收敛。<br>
+<b>拖动滑块：</b>增大 PLL 带宽 → 收敛快但噪声大；降低转速 → 反电动势幅值变小，信噪比下降，误差抖动变大（低速限制）；「SMO 低通未补偿」引入与转速相关的常值角度误差。<br>
+<b>正常：</b>误差快速收敛到 0 附近。<b>异常：</b>低速发散、常值偏差。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>SMO 电流模型</b>（20 kHz）：î[k+1] = î[k] + Ts/Ls·(v − Rs·î − z)，使用上周期电压（与电流时刻对齐）。</li>
+<li><b>开关函数</b>：sign 用饱和函数（边界层）减小抖振；增益 k 大于反电动势最大值。</li>
+<li><b>低通</b>：ê = LPF(z)，截止频率随转速自适应（如 ωc = 1.5~2·ωe），相位补偿 atan(ωe/ωc)。</li>
+<li><b>PLL</b>：误差归一化（除以 |ê|）使环路增益与转速无关。</li>
+<li><b>启动</b>：I/F 开环升速到观测可用转速（如额定 10% 以上），角度误差稳定后切换（D06）。</li>
+<li><b>EPS 降级</b>：低速不可用时的策略（限制助力 / 安全状态）由系统安全设计决定。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>中高速：观测角与旋变角误差在若干度以内；速度估计平滑。</li>
+<li>低速：误差增大并抖动；死区补偿与 Rs 准确度显著影响低速表现。</li>
+<li>负载阶跃：短暂角度误差后恢复；PLL 带宽决定恢复速度。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 浮点示意（S32K146 带单精度 FPU，可在中断中使用 float；定点版本见 D02 思路）*/
+typedef struct { float iaHat, ibHat, eA, eB, thHat, wHat, integ; } SMO_tst;
+static SMO_tst s_smo;
+volatile float Cal_SmoK = 8.0f, Cal_SmoBnd = 2.0f;     /* 增益 V、边界层 A 【案例假设】 */
+volatile float Cal_PllKp = 400.0f, Cal_PllKi = 40000.0f;
+
+static float satf(float x, float b) { return (x &gt; b) ? 1.0f : ((x &lt; -b) ? -1.0f : x / b); }
+
+void FOC_Smo_Isr(float vA, float vB, float iA, float iB)
+{
+    const float Ts = 50e-6f, Rs = 0.012f, Ls = 60e-6f;   /* Ls 取 (Ld+Lq)/2 近似，IPMSM 应用 EEMF */
+    float zA = Cal_SmoK * satf(s_smo.iaHat - iA, Cal_SmoBnd);
+    float zB = Cal_SmoK * satf(s_smo.ibHat - iB, Cal_SmoBnd);
+    s_smo.iaHat += Ts / Ls * (vA - Rs * s_smo.iaHat - zA);
+    s_smo.ibHat += Ts / Ls * (vB - Rs * s_smo.ibHat - zB);
+    float wc = fmaxf(1.5f * fabsf(s_smo.wHat), 300.0f);  /* 自适应低通截止 rad/s */
+    float a  = wc * Ts;
+    s_smo.eA += a * (zA - s_smo.eA);
+    s_smo.eB += a * (zB - s_smo.eB);
+    /* PLL：误差 = |e|·sin(θ − θ̂)，归一化 */
+    float s = sinf(s_smo.thHat), c = cosf(s_smo.thHat);
+    float mag = sqrtf(s_smo.eA * s_smo.eA + s_smo.eB * s_smo.eB) + 1e-3f;
+    float err = (-s_smo.eA * c - s_smo.eB * s) / mag;
+    s_smo.integ += Cal_PllKi * Ts * err;
+    s_smo.wHat   = Cal_PllKp * err + s_smo.integ;
+    s_smo.thHat += s_smo.wHat * Ts;
+    if (s_smo.thHat &gt;  3.14159265f) { s_smo.thHat -= 6.2831853f; }   /* 取模，防止 A06 的精度问题 */
+    if (s_smo.thHat &lt; -3.14159265f) { s_smo.thHat += 6.2831853f; }
+    gFoc.thetaEObs = (uint16_t)(int32_t)(s_smo.thHat * 10430.378f) + (uint16_t)(atanf(s_smo.wHat / wc) * 10430.378f);
+}</code></pre>
+<p class="note">最后一行为低通相位补偿（rad → uint16：×65536/2π = 10430.4）。PLL 参数按带宽设计：ωn ≈ √Ki，ζ = Kp/(2√Ki)，示例约 200 rad/s、ζ = 1。该代码用于教学说明结构，量产需完成定点化 / 执行时间评估与充分台架验证。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>无感切入失败、切入后失步</h5><dl>
+<dt>现象</dt><dd>I/F 升速后切换到观测角，电流冲击、电机抖动停转。</dd>
+<dt>可能根因</dt><dd>切换时观测角与开环角相差大；观测器尚未收敛；切换转速过低。</dd>
+<dt>排查</dt><dd>切换前记录 θ_obs − θ_IF；不同切换转速试验。</dd>
+<dt>修复</dt><dd>误差小于阈值并保持一段时间再切；切换过程逐步过渡（角度 / 电流斜坡）；积分器预置（C05）。</dd>
+<dt>验证</dt><dd>多次重复切换成功率 100%，电流平滑。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>观测角存在随转速变化的常值偏差</h5><dl>
+<dt>现象</dt><dd>与旋变比较，误差随转速增大。</dd>
+<dt>可能根因</dt><dd>低通相位滞后未补偿 / 补偿不正确；计算延迟未补偿。</dd>
+<dt>排查</dt><dd>扫转速绘制误差曲线。</dd>
+<dt>修复</dt><dd>补偿 atan(ωe/ωc) 与 1.5Ts 延迟。</dd>
+<dt>验证</dt><dd>误差曲线平直接近 0。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>低速观测抖动、力矩脉动</h5><dl>
+<dt>现象</dt><dd>额定转速 10% 以下估计角度抖动明显。</dd>
+<dt>可能根因</dt><dd>反电动势小，逆变器非线性（死区）误差占比大；Rs 不准（温漂）。</dd>
+<dt>排查</dt><dd>开启 / 关闭死区补偿对比；Rs 改变 ±20% 对比。</dd>
+<dt>修复</dt><dd>死区补偿；Rs 在线估计；低速改用高频注入或限制工作区。</dd>
+<dt>验证</dt><dd>目标最低转速下误差满足要求。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>用给定电压而非实际电压：死区 / 管压降误差直接进入观测器（C13）。</li>
+<li>电流与电压时刻不对齐：使用本周期给定电压配本周期采样电流，差了一个周期。</li>
+<li>atan2 直接取角度：噪声与量化直接进入 Park，不如 PLL 平滑。</li>
+<li><span class="tg tg-red">【风险红线】</span>反电动势类观测器在零速不可观：EPS 若以无感作降级，必须定义低速下的安全行为，不能「假装可用」。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C10" id="quiz-C10"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：反电动势含角度信息、SMO / 龙伯格 / MRAS 原理与优缺点、低通相位补偿、PLL 原理与参数、低速限制与 HFI、切换逻辑。</li>
+<li>面试高频：「SMO 为什么要低通和相位补偿？」「无感低速为什么不行？」</li></ul></div>
+</section>
+
+<!-- ================= C11 ================= -->
+<section class="chap" id="C11" data-title="C11 参数辨识">
+<h2 class="chap-h">C11 参数辨识：Rs、Ld、Lq、磁链——离线辨识与在线辨识</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 11 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>参数来源：PI 设计、解耦前馈、MTPA、弱磁、观测器都依赖它</td></tr>
+<tr><th>输入 / 输出</th><td>输入：注入电压 / 电流与响应；输出：Rs、Ld(id)、Lq(iq)、ψf(T)</td></tr>
+<tr><th>工程价值</th><td>参数错误会同时影响 4~5 个模块，是很多「玄学」问题的共同根因</td></tr>
+<tr><th>上下游依赖</th><td>下游 A08/C05、C06、C07、C10</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A01 两点法、A07 阶跃响应与时间常数、A06 积分</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>供应商数据通常是常温、小电流或线间值；IPMSM 的 Lq 随电流饱和明显，ψf 随温度变化，必须在实际工况下测。</div>
+<div><b>② 量产怎么做</b>开发阶段台架完整离线辨识（含饱和曲线、温度）→ 生成标定表；量产上电可做简化 Rs 自检；运行中可在线修正 Rs / ψf（温度估计）。</div>
+<div><b>③ 如何证明</b>多种方法交叉验证（误差 &lt; 10%）；用辨识参数设计的电流环阶跃符合预期；前馈 vd、vq 与稳态实测一致。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>零位已标定（Ld/Lq 依赖 d、q 方向准确）；电流采样已校准；死区补偿（低电压注入时影响大）。</li>
+<li>台架：可锁止转子的工装（测 Lq）、对拖电机（测 ψf）、温度测量。</li>
+<li>不满足：结果把逆变器压降、线缆电阻混入电机参数。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+Rs（直流两点法，消除死区 / 管压降常值误差）：d 轴注入两个电流 I1、I2，记录给定电压 V1、V2
+   Rs ≈ (V2 − V1)/(I2 − I1)；其中含线缆与 MOS 导通电阻，需按需求扣除或保留
+Ld：转子对齐 d 轴，d 轴电压阶跃 / 方波，τ = Ld/R（A07），或 Ld = V·Δt/Δi（短脉冲，忽略 R）
+Lq：方法一 锁止转子后沿 q 轴注入；方法二 静止时 q 轴高频小幅注入（平均转矩为零，转子基本不动）
+   饱和曲线：在多个偏置电流下测量，得到 Ld(id)、Lq(iq) 表
+ψf：方法一 对拖测反电动势：ψf = E_phase_peak/ωe（最准确）
+    方法二 空载 id = 0 运行：ψf ≈ (vq − Rs·iq)/ωe（受电压误差影响）
+在线辨识：递推最小二乘 RLS（以 dq 方程为回归模型）、模型参考自适应；需持续激励，且参数之间存在耦合，不宜同时辨识全部参数 <span class="tg tg-check">【待核对：具体方案依项目与文献】</span>
+温度模型：Rs(T) = Rs25·[1 + 0.00393·(T − 25)]（铜）</div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>电压阶跃法的动态过程可直接使用 A07 的交互动画（拖动 R、L 观察 τ 与 63.2% 点）；本节重点是台架流程与误差来源。</p>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>参数</th><th>推荐方法</th><th>主要误差源</th><th>交叉验证</th></tr>
+<tr><td>Rs</td><td>直流两点法</td><td>死区、MOS、线缆、温度</td><td>微欧计测线间电阻 ÷ 2</td></tr>
+<tr><td>Ld</td><td>d 轴阶跃 / 方波注入</td><td>R 偏差、死区、转子未对齐</td><td>LCR 线间电感最小值 ÷ 2（量级参考）</td></tr>
+<tr><td>Lq</td><td>锁止转子 q 轴注入 / 高频注入</td><td>转子微动、饱和</td><td>LCR 线间电感最大值 ÷ 2</td></tr>
+<tr><td>ψf</td><td>对拖反电动势</td><td>转速测量、温度</td><td>空载 vq 估算</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>辨识状态机（标定模式，D04）：OFFSET → ALIGN_D → RS_TEST → LD_TEST → LQ_TEST（可选）→ DONE。</li>
+<li>Rs：id = 10 A、20 A 各稳态 0.5 s，记录 vd 平均值（PWM 中断累加、1 ms 任务处理）。</li>
+<li>Ld：d 轴方波电压（如 ±0.3 V、1 kHz），测 Δi/Δt；或阶跃法（A07 伪代码）。</li>
+<li>结果写入标定量并通过 XCP 读出；超出合理范围（如 ±50% 设计值）判失败。</li>
+<li>在线 Rs 修正（可选）：低速、稳态时 vd 积分器均值与模型比较，慢速修正；或由温度传感器 + 温度模型估计。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>Rs 两点：V–I 直线截距即逆变器压降常值，斜率为 Rs。</li>
+<li>Lq 饱和曲线：随 iq 增大单调下降，IPMSM 大电流时可能下降明显。</li>
+<li>ψf：与转速无关、随温度下降。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 【伪代码】Rs 两点法（1 ms 任务驱动，PWM 中断负责累加 vd、id）*/
+float Ident_Rs_TwoPoint(void)
+{
+    float v1, i1, v2, i2;
+    FOC_SetIdqRef(AMP_TO_Q15(10.0f), 0);  Wait_ms(500);  Avg_vd_id(200, &amp;v1, &amp;i1);
+    FOC_SetIdqRef(AMP_TO_Q15(20.0f), 0);  Wait_ms(500);  Avg_vd_id(200, &amp;v2, &amp;i2);
+    FOC_SetIdqRef(0, 0);
+    return (v2 - v1) / (i2 - i1);          /* Ω，含线缆 + MOS；截距 v1 − Rs·i1 ≈ 逆变器压降 */
+}
+
+/* 1 s 任务：铜电阻温度修正（温度来自绕组温度估计 / 传感器）*/
+void FOC_RsTempUpdate_1s(float tWinding_C)
+{
+    Cal_Rs_mOhm = Cal_Rs25_mOhm * (1.0f + 0.00393f * (tWinding_C - 25.0f));
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>辨识的 Rs 比微欧计大一倍</h5><dl>
+<dt>现象</dt><dd>单点 V/I 得 Rs = 30 mΩ，微欧计 12 mΩ。</dd>
+<dt>可能根因</dt><dd>单点法包含死区 / 管压降常值；线缆 + MOS 电阻。</dd>
+<dt>排查</dt><dd>两点法看截距；不同电流点画 V–I 曲线。</dd>
+<dt>修复</dt><dd>两点法；明确参数是否包含逆变器侧电阻（观测器通常需要包含）。</dd>
+<dt>验证</dt><dd>两点法斜率与微欧计 + 回路电阻一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>测 Lq 时转子转动</h5><dl>
+<dt>现象</dt><dd>q 轴注入时电机抖动转动，结果离散。</dd>
+<dt>可能根因</dt><dd>q 轴电流产生转矩；注入频率太低 / 幅值太大。</dd>
+<dt>排查</dt><dd>观察 θm 变化。</dd>
+<dt>修复</dt><dd>锁止转子工装；或提高注入频率（平均转矩为零、惯量滤除）。</dd>
+<dt>验证</dt><dd>注入期间 θm 变化 &lt; 0.5° 电角度，结果重复性好。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>ψf 两种方法结果差 10%</h5><dl>
+<dt>现象</dt><dd>对拖 3.5 mWb，空载 vq 法 3.15 mWb。</dd>
+<dt>可能根因</dt><dd>vq 为给定电压，含死区误差；转速信号误差；温度不同。</dd>
+<dt>排查</dt><dd>死区补偿开 / 关对比；同温度测试。</dd>
+<dt>修复</dt><dd>以对拖结果为准；vq 法仅作在线趋势。</dd>
+<dt>验证</dt><dd>温度一致时两者差 &lt; 3%。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>辨识结果直接覆盖运行参数：应先人工审核再写 NVM。</li>
+<li>只在一个电流点测电感：IPMSM 饱和后 PI 与 MTPA 都会偏离。</li>
+<li>在线同时辨识 Rs 与 ψf：两者在稳态方程中相关，缺乏激励时不可分辨。</li>
+<li><span class="tg tg-red">【风险红线】</span>辨识注入电压从大值开始：低阻电机 0.5 V 即可产生 40 A 以上（A07），必须由小到大并开保护。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C11" id="quiz-C11"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：两点法原理、Ld/Lq 测量条件、ψf 对拖法、饱和与温度、在线辨识的激励与耦合问题。</li>
+<li>台架高频：参数偏大偏小的误差来源判断。</li></ul></div>
+</section>
+
+<!-- ================= C12 ================= -->
+<section class="chap" id="C12" data-title="C12 保护与诊断">
+<h2 class="chap-h">C12 保护与诊断：过流、过压、欠压、过温、堵转、失步、角度异常、采样断线</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 12 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>贯穿全链路：硬件快速通路 + 中断级诊断 + 慢任务诊断 + 故障响应</td></tr>
+<tr><th>输入 / 输出</th><td>输入：电流、电压、温度、角度、观测器、执行时间；输出：故障码、安全动作（关管 / 降额 / 降级）</td></tr>
+<tr><th>工程价值</th><td>防止硬件损坏与危险行为；EPS 涉及功能安全，诊断覆盖率与响应时间是评审重点</td></tr>
+<tr><th>上下游依赖</th><td>依赖全部前序模块信号；与 D03 中断架构、D04 状态机紧密相关</td></tr>
+<tr><th>适用角色</th><td>全部，功能安全工程师</td></tr>
+<tr><th>前置数学依赖</th><td>A01 阈值换算、A05 滤波 / 去抖</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>MOS 过流能力以微秒计，软件中断周期 50 µs 太慢；温度、堵转则需要秒级热模型。不同故障需要不同时间尺度的检测通路。</div>
+<div><b>② 量产怎么做</b>硬件比较器 → PWM 故障输入（纳秒~微秒关管）；中断内软件过流 / 角度跳变；慢任务过温、堵转、欠压降额；故障分级与去抖。</div>
+<div><b>③ 如何证明</b>故障注入测试：每个诊断注入实际故障，测检测时间、响应动作与误报率（FMEA / 安全分析要求）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>硬件：电流比较器、PWM 故障输入引脚、温度传感器、母线电压采样。</li>
+<li>安全需求：故障容错时间、安全状态定义（EPS 的安全状态以项目安全目标为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>不满足：只有软件过流 → 短路时 MOS 在软件反应前损坏。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>故障</th><th>检测方法</th><th>阈值 / 时间 <span class="tg tg-case">【案例假设】</span></th><th>通路</th><th>响应</th></tr>
+<tr><td>硬件过流</td><td>独立于 ADC 通路的比较器（或驱动芯片过流 / 退饱和检测）→ PWM 故障输入</td><td>|i| &gt; 60 A，&lt; 2 µs</td><td>硬件</td><td>立即关管、锁存</td></tr>
+<tr><td>软件过流</td><td>|ia|、|ib|、|ic| 与 ADC 码值阈值比较</td><td>&gt; 48 A（接近 ±50 A 采样量程），连续 3 周期</td><td>中断</td><td>关管</td></tr>
+<tr><td>过压</td><td>Vdc ADC 码值</td><td>&gt; 18 V，1 ms</td><td>中断 / 1 ms</td><td>关管或限制回馈（弱磁 / 减速）</td></tr>
+<tr><td>欠压</td><td>Vdc</td><td>&lt; 9 V 降额，&lt; 7 V 停机</td><td>1 ms</td><td>力矩降额 / 停止</td></tr>
+<tr><td>过温</td><td>MOS / 绕组温度（传感器 + 热模型）</td><td>降额曲线，&gt; 150 °C 停机</td><td>10 ms~1 s</td><td>线性降额</td></tr>
+<tr><td>堵转</td><td>|iq| 大且 |ω| 小，持续时间 / I²t</td><td>&gt; 40 A 且 &lt; 30 rpm，1 s</td><td>10 ms</td><td>降额</td></tr>
+<tr><td>失步</td><td>观测角与旋变角差、反电动势与给定不一致</td><td>&gt; 30° 电角度，10 ms</td><td>1 ms</td><td>关管 / 降级</td></tr>
+<tr><td>角度异常</td><td>解码故障位、相邻增量跳变、sin²+cos² 幅值</td><td>按芯片与物理极限</td><td>中断</td><td>降级到无感或安全状态</td></tr>
+<tr><td>采样断线</td><td>偏移范围、ADC 饱和、PWM 关闭时电流 ≠ 0、三相和</td><td>见 C01</td><td>上电 / 中断</td><td>禁止运行</td></tr>
+<tr><td>中断超时</td><td>执行时间计数</td><td>&gt; 预算</td><td>中断</td><td>故障</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+I²t 热累积（简化一阶热模型）：ΔT[k] = ΔT[k−1] + Ts_slow/τth·(Rth·Ploss − ΔT[k−1])，Ploss ∝ i²
+去抖：连续 N 次超限才置故障；恢复需要更严格条件（迟滞）
+<span class="tg tg-red">【风险红线】</span>高速关管：反电动势经体二极管整流回馈，母线可能被推高（C07）；故障响应策略（关管 vs 主动短路 ASC）要结合转速与过压风险评估</div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>保护逻辑以阈值、时间与状态为主，用表格与状态机描述更准确。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>硬件通路</b>：电流比较器阈值 &gt; 软件阈值，接 PWM 模块故障输入，配置为自动关管且需软件清除。</li>
+<li><b>中断级</b>：软件过流、角度跳变、ADC 饱和、执行时间——只做比较与计数，复杂处理放慢任务。</li>
+<li><b>慢任务</b>：过温降额、欠压降额、堵转 I²t、失步判断。</li>
+<li><b>故障管理</b>：统一故障码、去抖、分级（警告 / 降额 / 关管 / 锁存）、记录冻结帧（故障时刻的电流、角度、Vdc、转速）。</li>
+<li><b>关管处理</b>：PWM 关闭同时 PI 积分器清零、弱磁积分清零、状态机进入 FAULT。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>故障注入：示波器测故障发生到 PWM 关闭的时间（硬件通路微秒级，软件通路若干个 PWM 周期）。</li>
+<li>降额：温度上升时 iqRef 上限按曲线平滑下降，无台阶。</li>
+<li>误报：全工况（低温、高速、电压波动、EMC）下无误报。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>typedef struct { uint16_t cnt; uint16_t setN; uint16_t clrN; uint8_t active; } DIAG_DEB_tst;
+
+static inline void Diag_Deb(DIAG_DEB_tst *d, uint8_t cond)
+{
+    if (cond) { if (d-&gt;cnt &lt; d-&gt;setN) { d-&gt;cnt++; } else { d-&gt;active = 1u; } }
+    else      { if (d-&gt;cnt &gt; 0u) { d-&gt;cnt--; } if ((d-&gt;cnt == 0u) &amp;&amp; (d-&gt;clrN != 0u)) { d-&gt;active = 0u; }   /* clrN = 0：锁存 */ }
+}
+
+/* 软件过流：直接比较 ADC 码值（相对零点），避免 Q15 基值饱和问题 */
+#define OC_SW_CNT   (1966)    /* 48 A ÷ 0.024414 A/码 【案例假设】 */
+
+void FOC_FastDiag_Isr(void)
+{
+    static DIAG_DEB_tst s_oc = { 0u, 3u, 0u, 0u };     /* 连续 3 周期，锁存（clrN = 0 表示不自动清除）*/
+    int32_t da = (int32_t)gFoc.adcIa - Cal_IaOffset_cnt;
+    int32_t db = (int32_t)gFoc.adcIb - Cal_IbOffset_cnt;
+    int32_t dc = -da - db;
+    uint8_t oc = (da &gt; OC_SW_CNT) || (da &lt; -OC_SW_CNT) ||
+                 (db &gt; OC_SW_CNT) || (db &lt; -OC_SW_CNT) ||
+                 (dc &gt; OC_SW_CNT) || (dc &lt; -OC_SW_CNT);
+    Diag_Deb(&amp;s_oc, oc);
+    if (s_oc.active) { FOC_EmergencyOff(DIAG_OC_SW); }
+}
+
+void FOC_EmergencyOff(uint16_t code)
+{
+    Pwm_DisableAll();                 /* 先关管，再做其余处理 */
+    FOC_PiResetAll();
+    Diag_SetFault(code);
+    Diag_FreezeFrame();               /* 冻结帧：ia ib thetaE vdc spd */
+    gFoc.state = FOC_ST_FAULT;
+}</code></pre>
+<p class="note"><b>量程设计提醒：</b>案例中采样量程 ±50 A，而 C07 讨论的电流极限达 50~60 A，软件过流只能设在量程边缘（48 A），与工作电流几乎没有裕量；60 A 的硬件保护也必须走独立于 ADC 运放的通路，否则运放饱和后无法检测。量产设计应让采样量程 ≥ 最大保护阈值 × 1.2（例如 ±80 A），同时相应修改 I_BASE、每码 LSB 与全部标幺参数（X2 讨论）。软件过流阈值不能超过采样量程，否则诊断永远不会触发（B07 过压例子同理）。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>偶发过流误报</h5><dl>
+<dt>现象</dt><dd>正常行驶中偶发 DIAG_OC_SW，无真实过流。</dd>
+<dt>可能根因</dt><dd>采样尖刺（B06）、去抖次数太少、EMC 干扰。</dd>
+<dt>排查</dt><dd>冻结帧数据；故障时刻占空比；EMC 试验复现。</dd>
+<dt>修复</dt><dd>改善采样时刻；合理去抖（不超过 MOS 安全时间）。</dd>
+<dt>验证</dt><dd>耐久与 EMC 试验零误报，故障注入仍能检出。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>堵转保护过早触发，影响原地转向</h5><dl>
+<dt>现象</dt><dd>停车原地打满方向时助力很快衰减。</dd>
+<dt>可能根因</dt><dd>EPS 原地转向本身就是低速大电流工况，堵转判据与热模型过于保守。</dd>
+<dt>排查</dt><dd>比较热模型估计温度与实测。</dd>
+<dt>修复</dt><dd>以热模型（I²t）为主而非简单计时；标定热参数。</dd>
+<dt>验证</dt><dd>原地转向耐久试验温度在限值内且助力满足需求。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>故障后重新使能瞬间过流</h5><dl>
+<dt>现象</dt><dd>故障恢复使能 PWM 时电流冲击。</dd>
+<dt>可能根因</dt><dd>积分器未清零；电机仍在旋转（反电动势）时直接闭环。</dd>
+<dt>排查</dt><dd>恢复时刻 vd、vq、转速。</dd>
+<dt>修复</dt><dd>清零 + 按当前转速预置前馈电压（飞车启动）。</dd>
+<dt>验证</dt><dd>旋转中恢复无冲击。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>阈值超出测量量程 / 定点基值：诊断永远不触发（本节代码与 B07 过压例子）。</li>
+<li>所有诊断放在中断：执行时间超标；按时间尺度分层。</li>
+<li>故障清除过于容易：间歇性故障反复触发，硬件累积损伤；关键故障锁存至下次上电。</li>
+<li><span class="tg tg-red">【风险红线】</span>调试时屏蔽保护后忘记恢复：发布前检查所有诊断使能标定量。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C12" id="quiz-C12"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：分层检测通路、去抖与锁存、阈值与量程关系、关管后处理、高速关管风险。</li>
+<li>面试高频：「过流保护为什么要硬件实现？」</li></ul></div>
+</section>
+
+<!-- ================= C13 ================= -->
+<section class="chap" id="C13" data-title="C13 扰动补偿">
+<h2 class="chap-h">C13 扰动补偿：死区补偿、逆变器非线性补偿、齿槽转矩补偿</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 13 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>SVPWM 之前修正电压（死区 / 非线性）；给定侧叠加力矩（齿槽）</td></tr>
+<tr><th>输入 / 输出</th><td>输入：相电流方向 / 幅值、角度、Vdc；输出：补偿电压或补偿电流</td></tr>
+<tr><th>工程价值</th><td>EPS 低速手感（颗粒感、6 阶脉动）、无感低速精度、参数辨识准确度都受其影响</td></tr>
+<tr><th>上下游依赖</th><td>上游 C01、C09；下游 C04、C10、C11</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A01 分段函数、A03 谐波、A04 dq 变换中的谐波阶次</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>死区让实际电压偏离给定，误差符号由电流方向决定——在 dq 中表现为 6×fe 电压扰动；12 V 低压系统中 1 µs 死区约 0.24 V，低速时与所需电压同量级。</div>
+<div><b>② 量产怎么做</b>按相电流方向前馈补偿 ΔV（过零附近线性过渡）；逆变器压降按电流查表；齿槽按机械角度查表前馈电流。</div>
+<div><b>③ 如何证明</b>低速 iq 频谱 6 阶下降；相电流过零「平台」消失；扭矩脉动阶次分析。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>已知死区时间、MOS 开关延迟、导通压降（规格书 + 实测）。</li>
+<li>电流过零判断的可靠信号（电流给定或滤波后的反馈）。</li>
+<li>齿槽表需要高精度角度与无负载 / 低速台架测量。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+死区平均电压误差（每相）：ΔV ≈ −sign(i)·(Td + ton − toff)/Ts·Vdc − sign(i)·Vf（导通压降，近似）
+   案例：Td = 1 µs，Ts = 50 µs，Vdc = 12 V → ΔV ≈ 0.24 V <span class="tg tg-case">【案例假设，未计开关延迟与压降】</span>
+   对比：300 rpm、iq = 20 A 时所需 vq ≈ Rs·iq + ωe·ψf ≈ 0.24 + 0.44 = 0.68 V，误差占比约 35%
+补偿：vX_comp = vX + Kdt·f(iX)，f 为符号函数的平滑版本（|i| &lt; I0 时线性）
+   方向判据：用电流给定方向（相位稳定）或反馈（含噪声，过零附近易误判）
+dq 视角：三相方波电压误差 → dq 中 6×fe 扰动，电流环带宽有限，高速时无法抑制
+齿槽转矩：Tcog(θm) 为机械角周期函数，基本周期由极槽数决定（Nc = LCM(槽数, 极数)）
+   补偿：iq_comp(θm) = −Tcog(θm)/Kt，查表前馈 <span class="tg tg-check">【待核对：本案例未给槽数，表需实测】</span></div>
+<div id="anim-C13"></div>
+<div class="anim-note"><b>动画在演示什么：</b>一个电周期内 A 相给定电压（灰）、死区后的实际平均电压（红）与相电流（蓝）。右图为 dq 中 q 轴电压误差（6 倍频）。<br>
+<b>拖动滑块：</b>增大死区时间或降低转速（降低基波电压幅值），误差占比变大，电流过零处出现「平台」；勾选「死区补偿」，按电流方向加回 ΔV；「过零线性区 I0」太小时补偿在过零附近来回切换（产生噪声），太大时补偿不足。<br>
+<b>正常：</b>补偿后红线贴近灰线、6 倍频减小。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>在反 Clarke 之后、零序注入之前，对每相电压加补偿：vX += Cal_DtCompV × fsat(iX/I0)。</li>
+<li>iX 使用给定电流经反 Park / 反 Clarke 得到的三相给定（相位干净）或滤波反馈。</li>
+<li>补偿量随 Vdc 缩放：ΔV ∝ Vdc（每周期更新）。</li>
+<li>齿槽补偿：1 ms 或中断内按 θm 查表叠加到 iqRef，表长按机械周期分辨率。</li>
+<li>标定：低速恒力矩运行，调 Cal_DtCompV 使 6 阶分量最小。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>未补偿：低速相电流过零处平台、波形「方化」；iq 6 阶纹波。</li>
+<li>过补偿：过零处反向尖峰。</li>
+<li>齿槽补偿：空载极低速转动时 iq 脉动 / 速度脉动在齿槽阶次下降。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile q15_t Cal_DtCompV_q15 = 492;     /* 0.24 V / 16 V × 32768 @12 V，随 Vdc 缩放 【案例假设】*/
+volatile q15_t Cal_DtI0_q15    = 655;     /* 线性区 1 A */
+
+static inline int32_t DtComp_OnePhase(q15_t iRef)
+{
+    int32_t x = ((int32_t)iRef &lt;&lt; 15) / Cal_DtI0_q15;            /* i/I0，Q15 */
+    if (x &gt;  32767) { x =  32767; }
+    if (x &lt; -32768) { x = -32768; }
+    /* ΔV = Kdt × fsat(i/I0) × (Vdc/12 V)；vdcPu@12 V = 24576 */
+    return (((x * Cal_DtCompV_q15) &gt;&gt; 15) * gFoc.vdcPu) / 24576;
+}
+
+/* 在 FOC_Svpwm_Isr 中、求 v0 之前调用：va += DtComp(iaRef) … */
+void FOC_DeadTimeComp(int32_t *va, int32_t *vb, int32_t *vc,
+                      q15_t iaRef, q15_t ibRef, q15_t icRef)
+{
+    *va += DtComp_OnePhase(iaRef);
+    *vb += DtComp_OnePhase(ibRef);
+    *vc += DtComp_OnePhase(icRef);
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>低速 6 阶力矩脉动（颗粒感）</h5><dl>
+<dt>现象</dt><dd>慢打方向盘时有周期颗粒，频率 = 6 × 电频率。</dd>
+<dt>可能根因</dt><dd>死区未补偿或补偿量不足；反电动势 5、7 次谐波。</dd>
+<dt>排查</dt><dd>改变 Cal_DtCompV 观察 6 阶变化；对拖测反电动势谐波。</dd>
+<dt>修复</dt><dd>标定死区补偿；反电动势谐波可用谐波电流注入抑制（进阶）。</dd>
+<dt>验证</dt><dd>力矩 / iq 频谱 6 阶下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>启用补偿后轻载噪声增大</h5><dl>
+<dt>现象</dt><dd>小电流时出现高频噪声。</dd>
+<dt>可能根因</dt><dd>过零判断用含噪反馈 + 线性区太窄，补偿来回翻转。</dd>
+<dt>排查</dt><dd>记录补偿量随时间变化。</dd>
+<dt>修复</dt><dd>用电流给定判方向；加宽 I0。</dd>
+<dt>验证</dt><dd>轻载噪声恢复。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>无感低速观测偏差大</h5><dl>
+<dt>现象</dt><dd>C10 观测器低速角度误差大。</dd>
+<dt>可能根因</dt><dd>观测器输入为给定电压，死区误差未补偿。</dd>
+<dt>排查</dt><dd>开 / 关补偿对比观测误差。</dd>
+<dt>修复</dt><dd>补偿后的电压送观测器；或测量实际相电压。</dd>
+<dt>验证</dt><dd>低速误差下降。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>补偿量不随 Vdc 缩放：电源电压变化时补偿失配。</li>
+<li>死区补偿与 MOS 温度、电流相关：开关延迟随温度变化，严格项目需表格化。</li>
+<li>齿槽表角度基准与旋变零位绑定：重新标定零位后表需同步平移。</li>
+<li><span class="tg tg-red">【风险红线】</span>修改硬件死区以「减少补偿」：死区过小会导致上下管直通，严禁为软件效果压缩低于驱动 / MOS 要求的死区。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C13" id="quiz-C13"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：死区误差公式、低压系统影响大小、6 倍频机理、补偿方向判据与线性区、齿槽补偿方法、死区直通红线。</li>
+<li>台架高频：颗粒感、过补偿、轻载噪声。</li></ul></div>
+</section>
+
+<!-- ================= 模块 C 综合自测 ================= -->
+<section class="chap" id="C-test" data-title="模块 C 章节综合自测卷">
+<h2 class="chap-h">模块 C 章节综合自测卷</h2>
+<p class="chap-sub">从 C01~C13 题库随机抽取 20 道客观题 + 3 道主观题，交卷统一判分。</p>
+<div class="exam" data-scope="C" data-nobj="20" data-nsub="3" data-key="examC"></div>
+</section>
 <!--SEGMENT_INSERT_POINT: 后续分段的 section 插入到此注释之前，结业试卷保持在全文最末 -->
 
 <!-- ================= 结业综合大试卷 ================= -->
@@ -1687,6 +4021,7 @@ function init(){
 const th=LS.get('foc_theme',null); if(th)document.documentElement.setAttribute('data-theme',th);
 window.FOC_INIT=init;
 })();
+
 </script>
 <script>
 /* ===================== 模块 A 题库（后续分段向 FOC_Q 追加，结业试卷自动覆盖） ===================== */
@@ -1781,6 +4116,7 @@ FOC_SIM.push(
   {t:'把速度低通截止频率降到 2 Hz',next:'m3',fb:'工程师：台阶会被抹平，但 2 Hz 低通的相位滞后会让速度环振荡。从源头提升测速分辨率。'}]},
  m4:{text:'<b>根因：</b>测速量化分辨率不足（14.6 rpm/码），量化噪声经速度环放大。<br><b>修复：</b>PLL 测速 / 变窗口；恢复原速度环参数。<br><b>验证：</b>30 rpm 速度纹波 &lt; 2 rpm，iq 给定平滑，速度阶跃响应满足要求。',links:['A05','C08','C09']}}}
 );
+
 </script>
 <script>
 /* ===================== 模块 A 交互动画（方向约定：逆时针为正，α 轴 = A 相，与全书代码一致） ===================== */
@@ -1815,6 +4151,7 @@ function hr(k){const x=Math.sin(k*12.9898+78.233)*43758.5453;return(x-Math.floor
 function plane(ctx,C,r,maxv,labels){const cx=r.x+r.w/2,cy=r.y+r.h/2+4,R=Math.min(r.w,r.h)*0.43,k=R/maxv;ctx.save();ctx.strokeStyle=C.grid;ctx.lineWidth=1;ctx.beginPath();ctx.arc(cx,cy,R,0,TAU);ctx.stroke();ctx.strokeStyle=C.axis;ctx.beginPath();ctx.moveTo(cx-R-8,cy);ctx.lineTo(cx+R+8,cy);ctx.moveTo(cx,cy+R+8);ctx.lineTo(cx,cy-R-8);ctx.stroke();ctx.fillStyle=C.muted;ctx.font='11px system-ui,sans-serif';ctx.fillText(labels[0],cx+R+2,cy-4);ctx.fillText(labels[1],cx+4,cy-R-2);ctx.restore();return{cx,cy,R,k,S:(x,y)=>[cx+x*k,cy-y*k]};}
 
 const SPECS=window.FOC_ANIM_SPECS;
+window.FOC_DRAW={D2R,TAU,clamp,HH,fmt,split,inset,plotBox,pline,pfn,hl,vl,arrow,dline,info,legend,hr,plane};
 
 /* ---------- A01 ---------- */
 SPECS.push({host:'anim-A01',title:'ADC 码值 → 相电流 → Q15：线性映射、偏移与削顶',h:HH,
@@ -1979,8 +4316,514 @@ SPECS.push({host:'anim-A08',title:'离散 PI 电流环：零极点对消、积�
   const os=Math.max(0,(mx-20)/20*100),bw=p.kp/L/TAU;
   info(ctx,C,['ωc = Kp/L → 带宽 ≈ '+bw.toFixed(0)+' Hz','推荐 Ki = ωc·R = '+(p.kp/L*R).toFixed(1),[ '超调 = '+os.toFixed(1)+' %',os>10?C.bad:C.ok],'上升时间 10→90% = '+(t10!==null&&t90!==null?(t90-t10).toFixed(2)+' ms':'未到达'),[ '电压饱和占比 = '+(sat/N*100).toFixed(1)+' %',sat>20?C.warn:C.fg],[ (st.tog.dly&&p.kp*b>=1)?'⚠ Kp·Ts/L ≥ 1：带延迟环路失稳':'',C.bad]].filter(s=>(Array.isArray(s)?s[0]:s)!==''),P1.b.x+P1.b.w*0.52,P1.b.y+16);}});
 })();
+
+</script>
+<script>
+/* ===================== 模块 B 题库 ===================== */
+FOC_Q.push(
+/* ---------- B01 ---------- */
+{id:'B01-s1',sec:'B01',type:'single',q:'EPS 助力电机选择「旋变 + FOC」而不是 V/F 的最主要原因是？',opts:['V/F 无法让电机转起来','EPS 要求零速满力矩、快速且低脉动的力矩响应，V/F 不直接控制力矩','FOC 不需要电流采样','V/F 的 MCU 成本更高'],ans:1,exp:'V/F 只控制电压幅值和频率，力矩是结果；EPS 的手感直接取决于力矩控制品质，零速也要满力矩，必须用带位置传感器的 FOC。',links:['B01','F02']},
+{id:'B01-s2',sec:'B01',type:'single',q:'与 FOC 相比，经典 DTC 最突出的工程特征是？',opts:['固定开关频率','滞环比较导致开关频率不固定，噪声频谱宽','不需要任何电机参数','零速性能最好'],ans:1,exp:'DTC 用磁链 / 转矩滞环 + 开关表直接选电压矢量，开关频率随工况变化；FOC 经 SVPWM 输出固定频率。',links:['B01','F01']},
+{id:'B01-t1',sec:'B01',type:'tf',q:'对于 SPMSM，FOC 下电磁转矩与 iq 成正比。',ans:true,exp:'Ld ≈ Lq，磁阻转矩为零，Te = 1.5·p·ψf·iq。',links:['B01','B02']},
+{id:'B01-t2',sec:'B01',type:'tf',q:'某方案仿真中力矩响应很好，即可认为量产可用。',ans:false,exp:'仿真是 L1 证据，不包含延迟、死区、噪声、参数偏差；量产以台架实测为准（X3）。',links:['B01','X3']},
+{id:'B01-sa',sec:'B01',type:'short',q:'简述 EPS 项目在方案选型阶段需要评估的 FOC 落地前提。',ans:'① MCU 算力：20 kHz 中断内完成采样换算、Clarke/Park、两个 PI、反 Park、SVPWM、快速诊断，并有余量；② 外设：中心对齐互补 PWM + 死区 + 硬件故障关断、PWM 同步硬件触发 ADC、双路同时采样；③ 位置传感：零速满力矩需要旋变 / 编码器，并设计无感降级；④ 参数辨识与标定能力（XCP）；⑤ 功能安全要求对诊断与冗余的影响。',exp:'算力、外设、传感器、标定、安全五方面答到三项以上。',links:['B01','B06','D03']},
+{id:'B01-an',sec:'B01',type:'analysis',q:'整车评审反馈：EPS 慢打方向盘时有明显「颗粒感」，快打时助力略有延迟。请给出系统性排查思路。',ans:'<b>颗粒感（低速周期性顿挫）：</b>先测顿挫频率并换算为电频率阶次：1 阶 → 电流偏移（A01/C01）；2 阶 → 两相增益不一致（B03/C01）；6 阶 → 死区 / 反电动势谐波 / 齿槽（C13）；机械阶次（与极槽配合相关）→ 齿槽转矩。同时检查角度误差（零位、旋变解码误差，C09）。<br><b>延迟：</b>测上层力矩需求 → iqRef → iq → 扭矩传感器各段延迟；检查电流环带宽、给定滤波、通信周期。<br><b>验证：</b>力矩脉动频谱对应阶次下降；扭矩阶跃响应时间达标；主观评价复测。',exp:'关键是按频率阶次分解根因，并分段测延迟。',links:['B01','C01','C13']},
+/* ---------- B02 ---------- */
+{id:'B02-s1',sec:'B02',type:'single',q:'IPMSM（Ld < Lq）的磁阻转矩为正的条件是？',opts:['id > 0，iq > 0','id < 0，iq > 0','id = 0','iq = 0'],ans:1,exp:'磁阻项 1.5·p·(Ld − Lq)·id·iq，Ld − Lq < 0，需 id·iq < 0，正转矩时 iq > 0 → id < 0。',links:['B02','C06']},
+{id:'B02-s2',sec:'B02',type:'single',q:'案例电机 ψf = 3.5 mWb，6000 rpm 时相反电动势峰值约为？',opts:['2.2 V','8.8 V','15.2 V','4.4 V'],ans:1,exp:'ωe = 2π × 4 × 6000/60 = 2513 rad/s，E = 2513 × 3.5e-3 = 8.8 V，已超过 12 V 母线线性区 6.93 V，需要弱磁。',links:['B02','C07']},
+{id:'B02-t1',sec:'B02',type:'tf',q:'磁钢温度升高时 ψf 通常下降，同 iq 输出力矩下降。',ans:true,exp:'钕铁硼剩磁有负温度系数，ψf 下降 → 永磁转矩与反电动势都下降。',links:['B02']},
+{id:'B02-t2',sec:'B02',type:'tf',q:'供应商给出的 ke（V/krpm）可以直接当作 ψf 使用。',ans:false,exp:'ke 可能是线电压有效值或峰值、单位不同，必须换算到 ψf = 相电压峰值 / ωe，最好对拖实测。',links:['B02','C11']},
+{id:'B02-sa',sec:'B02',type:'short',q:'写出 IPMSM 的电磁转矩公式，并说明两项的物理含义与工程用途。',ans:'Te = 1.5·p·[ψf·iq + (Ld − Lq)·id·iq]。第一项为永磁转矩：转子磁链与 q 轴电流相互作用；第二项为磁阻转矩：凸极（Ld ≠ Lq）使转子倾向对齐最小磁阻路径。IPMSM 用负 id 获得正磁阻转矩，按 MTPA 分配 id、iq 使同力矩电流最小（C06）；高速时负 id 同时用于弱磁（C07）。',exp:'公式 + 两项含义 + MTPA / 弱磁用途。',links:['B02','C06','C07']},
+{id:'B02-an',sec:'B02',type:'analysis',q:'台架：同一批 EPS 电机中，有一台在 25 °C 下同 iq = 30 A 力矩比其他电机低约 8%，最高转速反而略高。请分析并给出验证方案。',ans:'<b>分析：</b>力矩低 + 最高转速高 → 反电动势小 → ψf 偏小的典型特征（磁钢充磁不足 / 退磁 / 牌号偏差）；也可能是零位偏差使实际电流含去磁 id（同样表现为力矩低、转速高），需区分。<br><b>验证：</b>① PWM 关闭对拖，测线反电动势幅值与转速比，反推 ψf，与正常电机比较；② 正反转对比：零位偏差会造成正反转不对称，ψf 偏小则正反转一致偏低；③ 若 ψf 偏低属于电机质量问题，走供应商质量流程；若零位偏差，重新标定。<br><b>修复：</b>电机侧问题不应由软件长期补偿；零位问题写入 Cal_ThetaOffset。',exp:'用反电动势与正反转对称性区分 ψf 问题和零位问题。',links:['B02','C09','C11']},
+/* ---------- B03 ---------- */
+{id:'B03-s1',sec:'B03',type:'single',q:'幅值不变 Clarke 中，若只用两相电流（ia、ib），iβ 等于？',opts:['(ia − ib)/√3','(ia + 2·ib)/√3','(2·ia + ib)/√3','ib'],ans:1,exp:'iβ = (ib − ic)/√3，代入 ic = −ia − ib 得 (ia + 2·ib)/√3。',links:['B03','C02']},
+{id:'B03-s2',sec:'B03',type:'single',q:'iα–iβ XY 轨迹为椭圆，最可能的原因是？',opts:['电流偏移','两相采样增益不一致','角度零位误差','电流环带宽过高'],ans:1,exp:'增益不一致使两轴幅值不同（并耦合到相位），轨迹变椭圆，dq 出现 2 倍频纹波；偏移造成圆心偏移。',links:['B03','C01']},
+{id:'B03-t1',sec:'B03',type:'tf',q:'Park 变换之后稳态电流变为直流，所以 PI 控制器可以无稳态误差地跟踪。',ans:true,exp:'PI 对常值给定无稳态误差；对交流给定会有幅相误差。',links:['B03','A08']},
+{id:'B03-t2',sec:'B03',type:'tf',q:'Park 和反 Park 必须使用同一时刻的 sin/cos。',ans:false,exp:'Park 用采样时刻角度；反 Park 应使用补偿 1.5Ts 延迟后的角度（A03）。',links:['B03','A03']},
+{id:'B03-sa',sec:'B03',type:'short',q:'说明 dq 电流中 1 倍、2 倍、6 倍电频率纹波分别对应的典型根因。',ans:'1×fe：相电流直流偏移（Park 把直流变为一倍频）；2×fe：两相增益不一致 / 负序分量 / Park 方向写反；6×fe：逆变器死区与管压降非线性、反电动势 5/7 次谐波。另外与机械阶次相关的纹波来自齿槽转矩或负载。',exp:'三种频率与根因对应。',links:['B03','C13']},
+{id:'B03-an',sec:'B03',type:'analysis',q:'台架：从 ST 例程移植的 Park 代码与项目原有代码混用后，开环 I/F 拖动时 iq 呈 2 倍电频率大幅振荡，但 XY 图是一个完好的圆。请分析并给出排查路径。',ans:'<b>分析：</b>XY 圆完好 → 采样与 Clarke 正常；问题在 Park 层。2×fe 振荡典型对应「Park 旋转方向与电流旋转方向相反」：可能是例程中 Park 的符号约定（iq 定义、β 方向）与项目约定不同，或者角度方向与电流相序相反。<br><b>排查：</b>① 单元测试：输入 iα = 1、iβ = 0，θ = 90°，项目约定下应得 id = 0、iq = −1；② 开环时比较 θ 增加方向与 XY 旋转方向；③ 检查例程是否为功率不变系数。<br><b>修复：</b>统一到项目头文件定义的约定，删除重复实现。<br><b>验证：</b>开环下 dq 为直流；单元测试通过。',exp:'XY 正常 → 定位到 Park；2×fe → 方向约定冲突。',links:['B03','A04','C03']},
+/* ---------- B04 ---------- */
+{id:'B04-s1',sec:'B04',type:'single',q:'SPMSM 电流全在控制器 q 轴，但角度存在 30° 误差，实际转矩约为最大值的？',opts:['100%','87%','50%','0%'],ans:1,exp:'Te ∝ cos ε = cos30° ≈ 0.866，同时产生 |is|·sin30° 的实际 d 轴电流。',links:['B04','C09']},
+{id:'B04-s2',sec:'B04',type:'single',q:'FOC 中替代直流电机「换向器」作用的是？',opts:['SVPWM','电角度 + Park / 反 Park','电流采样电阻','速度环'],ans:1,exp:'用实时转子角度把电流矢量放在相对转子的固定位置，即电子换向。',links:['B04']},
+{id:'B04-t1',sec:'B04',type:'tf',q:'角度误差超过 90° 电角度时，给正 iq 会产生反向转矩。',ans:true,exp:'Te ∝ sin(β + ε)，β = 90° 时 ε > 90° 结果为负。',links:['B04']},
+{id:'B04-t2',sec:'B04',type:'tf',q:'只要正转力矩正常，就可以认为零位标定正确。',ans:false,exp:'零位误差在正反转中表现相反（一侧去磁一侧增磁），必须正反转都验证。',links:['B04','C09']},
+{id:'B04-sa',sec:'B04',type:'short',q:'用直流电机类比说明 FOC 中 id、iq 的作用，并指出类比的局限。',ans:'id 对应励磁电流（控制磁场，SPMSM 通常为 0，IPMSM 用于 MTPA / 弱磁），iq 对应电枢电流（产生转矩）。局限：① dq 存在交叉耦合 −ωLq·iq、+ωLd·id，动态时需要前馈解耦；② 有反电动势 ωψf 与转速相关；③ IPMSM 的转矩与 id 也有关；④ 类比依赖准确角度，角度误差会混合两个通道。',exp:'对应关系 + 至少两项局限。',links:['B04','C05']},
+{id:'B04-an',sec:'B04',type:'analysis',q:'台架首次闭环：给 iqRef = 5 A，电机缓慢反向转动，电流很快升到限幅。开环 I/F 拖动时方向正常。请给出分析与处理步骤。',ans:'<b>分析：</b>开环正常 → 采样和 PWM 基本正确；闭环给正 iq 反转 → 控制器角度与真实转子角度相差 > 90°，接近 180° 时为反向力矩。可能：零位偏移错 180°、旋变角度方向与电角度方向相反（θ 增减相反）、极对数配置错误。<br><b>处理：</b><span class="tg tg-red">【风险红线】</span>立即降低电流限幅；① 开环拖动时对比旋变 θe 与开环 θ 的增减方向、斜率是否为 1：1（检查方向与极对数）；② d 轴直流注入对齐，读旋变计算零位；③ 修正后小电流闭环验证正反转。<br><b>验证：</b>正 iq 正转、力矩常数正确；正反转对称。',exp:'开环正常 + 闭环反向 → 角度方向 / 零位 / 极对数。',links:['B04','C09','D06']},
+/* ---------- B05 ---------- */
+{id:'B05-s1',sec:'B05',type:'single',q:'电流环带宽 1 kHz，速度环带宽一般建议不超过？',opts:['1 kHz','500 Hz','100~200 Hz','5 kHz'],ans:2,exp:'带宽分离经验 5~10 倍，速度环取 100~200 Hz 以下；还要考虑测速延迟与机械谐振。',links:['B05']},
+{id:'B05-s2',sec:'B05',type:'single',q:'串级系统调试的正确顺序是？',opts:['位置环 → 速度环 → 电流环','速度环 → 电流环 → 位置环','电流环 → 速度环 → 位置环','三个环同时调'],ans:2,exp:'外环的设计假设内环已经足够快、准确，必须从内到外逐级验证。',links:['B05']},
+{id:'B05-t1',sec:'B05',type:'tf',q:'速度环输出 iqRef 饱和时，速度环积分器也应采取抗饱和措施。',ans:true,exp:'与电流环相同，外环同样需要抗饱和，否则负载 / 大阶跃后超调。',links:['B05','A08']},
+{id:'B05-t2',sec:'B05',type:'tf',q:'EPS 主模式为力矩模式，因此软件中不需要任何速度相关的保护。',ans:false,exp:'仍需要速度限制 / 超速保护，例如按转速衰减力矩，防止空载超速。',links:['B05','C12']},
+{id:'B05-sa',sec:'B05',type:'short',q:'1 ms 速度环任务写 iqRef，20 kHz 中断读 iqRef，需要注意哪些数据一致性问题？',ans:'① 单个 int16 / int32 对齐变量在 Cortex-M 上单次读写是原子的；② 多个相关变量（idRef 与 iqRef 成对）需要一致性：使用双缓冲 + 标志、或在慢任务中短暂关中断拷贝；③ 变量声明 volatile；④ 避免中断在慢任务写一半时读到混合值；⑤ 给定变化率限制，避免阶跃冲击。',exp:'原子性、成对一致、volatile、斜率限制。',links:['B05','D03']},
+{id:'B05-an',sec:'B05',type:'analysis',q:'台架速度模式：1000 rpm 稳态时速度以约 25 Hz 持续振荡 ±40 rpm。为降低测速噪声，之前把速度低通截止从 100 Hz 改到了 15 Hz。请分析并给出解决方案。',ans:'<b>分析：</b>15 Hz 低通在 25 Hz 附近引入约 59° 以上的相位滞后（arctan(25/15)），吃掉速度环相位裕度，形成以 25 Hz 左右振荡的极限环。也可能存在机械谐振，但时序上与修改滤波直接相关，优先怀疑滤波。<br><b>排查：</b>恢复 100 Hz 看振荡是否消失；降低 Kp 看振荡频率变化；扫频确认无机械谐振。<br><b>方案：</b>滤波截止保持在速度环带宽 3~5 倍以上；从源头提升测速质量（加长窗口 / PLL，A05）；如需降噪可降低速度环带宽并接受响应变慢。<br><b>验证：</b>阶跃超调 < 10%、稳态无持续振荡、速度纹波满足要求。',exp:'滤波相位滞后 vs 带宽。',links:['B05','A05','C08']},
+/* ---------- B06 ---------- */
+{id:'B06-s1',sec:'B06',type:'single',q:'中心对齐 PWM + 低边电阻采样，采样点应设置在？',opts:['计数器底点（上管导通中心）','计数器顶点附近（三相下管导通的零矢量 000 中段）','任意时刻','开关沿之后立即'],ans:1,exp:'低边电阻只在下管导通时流过相电流；在零矢量 000 中点采样，纹波对称，读数 ≈ 周期平均值。',links:['B06','C01']},
+{id:'B06-s2',sec:'B06',type:'single',q:'单采样单更新 FOC 的典型等效控制延迟约为？',opts:['0.5Ts','1.5Ts','3Ts','0'],ans:1,exp:'本周期采样计算、下一周期生效，PWM 输出对电流的平均作用再延后半个周期，合计约 1.5Ts。',links:['B06','A07']},
+{id:'B06-t1',sec:'B06',type:'tf',q:'ADC 采样用软件在中断中启动即可，与硬件触发效果一样。',ans:false,exp:'软件触发受中断延迟抖动影响，采样时刻不固定，读数偏离纹波中点，噪声变大。',links:['B06']},
+{id:'B06-t2',sec:'B06',type:'tf',q:'低边电阻采样时，占空比过大会导致该相电流无法正确采样。',ans:true,exp:'下管导通时间不足以覆盖采样保持与运放建立时间。',links:['B06','C01']},
+{id:'B06-sa',sec:'B06',type:'short',q:'如何在台架上测量并保证 FOC 主中断不超时？',ans:'① 中断入口置高、出口置低一个 GPIO，用示波器看高电平宽度及其最大值；② 软件读定时器计数记录最大执行时间（gDiag.isrMaxTicks），通过 XCP 观察；③ 设置超时诊断阈值；④ 在最坏工况（高速、弱磁、全部诊断启用、通信负载最大）下测试；⑤ 非实时任务移至慢任务，保留余量。',exp:'GPIO + 计数 + 最坏工况 + 余量。',links:['B06','D03']},
+{id:'B06-an',sec:'B06',type:'analysis',q:'台架：EPS 在 5000 rpm 以上、大负载时，A 相电流读数偶发跳变，电流环随之抖动；低速时一切正常。示波器显示此时 A 相占空比接近 96%。请分析并给出方案。',ans:'<b>分析：</b>高速大负载需要大电压，A 相占空比接近 96% 时，下管导通时间仅约 2 µs，小于 ADC 采样保持 + 运放建立 + 死区所需窗口，低边电阻采样失效，读数跳变。<br><b>排查：</b>记录三相占空比与跳变时刻；示波器观察运放输出在下管导通窗口内是否已稳定。<br><b>方案：</b>① 限制最大占空比保证窗口（代价：电压利用率降低，弱磁提前）；② 按扇区选择导通时间充足的两相采样，第三相由 ia+ib+ic=0 重构（需三电阻或调整方案）；③ 调整触发延时；④ 评估采样电路带宽。<br><b>验证：</b>全转速范围电流连续、无跳变；最高转速 / 力矩满足需求。',exp:'大占空比 → 低边窗口不足。',links:['B06','C01','C04']},
+/* ---------- B07 ---------- */
+{id:'B07-s1',sec:'B07',type:'single',q:'案例 4 对极电机 3000 rpm，20 kHz 周期内 uint16 电角度增量约为？',opts:['164','656','2621','16384'],ans:1,exp:'inc = 4 × 3000/60 × 50e-6 × 65536 = 655.4。',links:['B07']},
+{id:'B07-s2',sec:'B07',type:'single',q:'母线电压 Q15 基值 16 V，过压阈值 18 V 的诊断应如何实现？',opts:['直接用 vdcPu 与 18/16 比较','用 ADC 码值或使用更大基值单独比较','不需要过压诊断','把基值改成 12 V'],ans:1,exp:'Q15 在 16 V 处饱和，无法表示 18 V；诊断应直接比较 ADC 码值或使用足够大的基值。',links:['B07','C12']},
+{id:'B07-t1',sec:'B07',type:'tf',q:'电角速度 ωe = p·ωm，单位 rad/s；电频率 fe = p·n/60，单位 Hz。',ans:true,exp:'两者差 2π。',links:['B07']},
+{id:'B07-t2',sec:'B07',type:'tf',q:'旋变解码配置从 12 位改为 14 位，软件角度换算无需修改。',ans:false,exp:'数据位数变化，转换到 uint16 的左移位数必须同步修改，否则角度错误。',links:['B07','C09']},
+{id:'B07-sa',sec:'B07',type:'short',q:'为什么要在变量名中带单位后缀，并在 A2L 中配置换算？',ans:'避免机械 / 电气、rpm / rad/s、A / pu、码值 / 物理值混淆；跨模块接口自描述；CANape 直接显示物理量，标定工程师不需手算；代码评审与静态检查时容易发现单位不匹配。',exp:'防混淆 + 标定可读。',links:['B07','D08']},
+{id:'B07-an',sec:'B07',type:'analysis',q:'台架：速度模式给定 1000 rpm，转速计显示 250 rpm 稳定运行，CANape 显示 gFoc.spdRpmFilt = 1000。请分析。',ans:'<b>分析：</b>实际/显示 = 1/4 = 1/p。测速计算使用了电角度 thetaE 的差分（电转速），却按机械 rpm 解释，速度环以为已达 1000 rpm，实际机械 250 rpm。<br><b>排查：</b>检查 FOC_SpeedCalc_1ms 输入；匀速时比较 thetaM 与 thetaE 锯齿频率。<br><b>修复：</b>测速用 thetaM，或除以极对数；统一变量后缀。<br><b>验证：</b>与转速计一致；速度环各速度点误差 < 1%。',exp:'4 倍 = 极对数。',links:['B07','A05']}
+);
+
+</script>
+<script>
+/* ===================== 模块 B 交互动画（复用 FOC_DRAW 工具，方向约定与全书一致） ===================== */
+(function(){
+'use strict';
+const {D2R,TAU,clamp,HH,split,inset,plotBox,pline,pfn,hl,vl,arrow,dline,info,legend,plane}=window.FOC_DRAW;
+const SPECS=window.FOC_ANIM_SPECS;
+
+/* ---------- B02 转矩–电流角 ---------- */
+SPECS.push({host:'anim-B02',title:'转矩 vs 电流角：永磁转矩 + 磁阻转矩（IPMSM 的 MTPA 来源）',h:HH,
+ params:[{k:'is',label:'电流幅值 |is|',min:5,max:80,step:1,v:35,unit:'A',dp:0},{k:'ld',label:'Ld',min:20,max:100,step:1,v:45,unit:'µH',dp:0},{k:'lq',label:'Lq',min:20,max:150,step:1,v:75,unit:'µH',dp:0},{k:'beta',label:'电流角 β（d 轴起）',min:0,max:180,step:1,v:90,unit:'°',dp:0}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),pp=4,psi=3.5e-3,Ld=p.ld*1e-6,Lq=p.lq*1e-6;
+  const Tm=b=>1.5*pp*psi*p.is*Math.sin(b*D2R),Tr=b=>1.5*pp*(Ld-Lq)*(p.is*Math.cos(b*D2R))*(p.is*Math.sin(b*D2R)),T=b=>Tm(b)+Tr(b);
+  let bm=0,tm=-1e9;for(let b=0;b<=180;b+=0.25){const v=T(b);if(v>tm){tm=v;bm=b;}}
+  const G=plane(ctx,C,inset(S.L,8,10,8,8),p.is*1.2+5,['d','q']);
+  const b=p.beta*D2R,E=G.S(p.is*Math.cos(b),p.is*Math.sin(b)),Em=G.S(p.is*Math.cos(bm*D2R),p.is*Math.sin(bm*D2R));
+  const F=G.S(p.is*0.9,0);arrow(ctx,G.cx,G.cy,F[0],F[1],C.muted,2,'ψf');
+  dline(ctx,G.cx,G.cy,Em[0],Em[1],C.ok,1.5);arrow(ctx,G.cx,G.cy,E[0],E[1],C.warn,3,'is');
+  const Ed=G.S(p.is*Math.cos(b),0);dline(ctx,E[0],E[1],Ed[0],Ed[1],C.d);
+  ctx.fillStyle=C.ok;ctx.font='11px system-ui';ctx.fillText('MTPA',Em[0]+4,Em[1]-4);
+  const ymax=Math.max(0.2,Math.ceil(Math.abs(tm)*12)/10);
+  const P=plotBox(ctx,C,inset(S.R,46,22,10,30),[0,180],[-ymax*0.4,ymax],{nx:6,ny:5,title:'转矩 Te (N·m) vs 电流角 β',xl:'β (°)，90° = 纯 q 轴'});
+  pfn(ctx,P,Tm,0,180,180,C.a,1.6);pfn(ctx,P,Tr,0,180,180,C.c,1.6);pfn(ctx,P,T,0,180,180,C.fg,2.4);
+  vl(ctx,P,[-ymax*0.4,ymax],bm,C.ok);vl(ctx,P,[-ymax*0.4,ymax],p.beta,C.warn);
+  legend(ctx,C,[['永磁',C.a],['磁阻',C.c],['总',C.fg]],P.b.x+8,P.b.y+P.b.h-8);
+  const id=p.is*Math.cos(b),iq=p.is*Math.sin(b);
+  info(ctx,C,['id = '+id.toFixed(1)+' A  iq = '+iq.toFixed(1)+' A','Te(β) = '+T(p.beta).toFixed(3)+' N·m',['MTPA：β = '+bm.toFixed(1)+'°，Te = '+tm.toFixed(3),C.ok],'id=0 时 Te = '+T(90).toFixed(3)+'（'+((tm/T(90)-1)*100).toFixed(1)+'% 损失）',p.ld>=p.lq?['Ld ≥ Lq：无正向磁阻增益',C.warn]:['Ld < Lq：负 id 产生正磁阻转矩',C.ok]],P.b.x+8,P.b.y+16);}});
+
+/* ---------- B03 三坐标系 ---------- */
+SPECS.push({host:'anim-B03',title:'abc → αβ → dq：同一电流在三个坐标系中的样子',h:w=>w>=620?320:820,
+ params:[{k:'I',label:'电流幅值',min:5,max:40,step:1,v:30,unit:'A',dp:0},{k:'gam',label:'电流角 γ（相对 d）',min:0,max:180,step:1,v:100,unit:'°',dp:0},{k:'gb',label:'B 相增益误差',min:-15,max:15,step:0.5,v:0,unit:'%',dp:1},{k:'oa',label:'A 相偏移',min:-5,max:5,step:0.1,v:0,unit:'A',dp:1}],
+ draw(ctx,w,h,st,C){const p=st.p,f=0.4,th=x=>TAU*f*(st.t+x);
+  const ph=x=>th(x)+p.gam*D2R,ia=x=>p.I*Math.cos(ph(x))+p.oa,ib=x=>p.I*(1+p.gb/100)*Math.cos(ph(x)-TAU/3),ic=x=>-ia(x)-ib(x);
+  const al=x=>ia(x),be=x=>(ia(x)+2*ib(x))/Math.sqrt(3);
+  const id=x=>al(x)*Math.cos(th(x))+be(x)*Math.sin(th(x)),iq=x=>-al(x)*Math.sin(th(x))+be(x)*Math.cos(th(x));
+  let R1,R2,R3;if(w>=620){const a=Math.round(w*0.36),b=Math.round(w*0.28);R1={x:0,y:0,w:a,h};R2={x:a,y:0,w:b,h};R3={x:a+b,y:0,w:w-a-b,h};}else{const a=Math.round(h/3);R1={x:0,y:0,w,h:a};R2={x:0,y:a,w,h:a};R3={x:0,y:2*a,w,h:h-2*a};}
+  const P1=plotBox(ctx,C,inset(R1,38,22,8,30),[-2.5,0],[-45,45],{nx:5,ny:6,title:'① abc 三相电流',xl:'s'});
+  pfn(ctx,P1,ia,-2.5,0,250,C.a,1.6);pfn(ctx,P1,ib,-2.5,0,250,C.b,1.6);pfn(ctx,P1,ic,-2.5,0,250,C.c,1.6);
+  legend(ctx,C,[['ia',C.a],['ib',C.b],['ic',C.c]],P1.b.x+6,P1.b.y+P1.b.h-6);
+  const G=plane(ctx,C,inset(R2,6,22,6,6),45,['α','β']);ctx.fillStyle=C.fg;ctx.font='11.5px system-ui';ctx.fillText('② αβ 平面（轨迹）',R2.x+8,R2.y+14);
+  ctx.save();ctx.strokeStyle=C.acc;ctx.lineWidth=1.4;ctx.beginPath();for(let i=0;i<=200;i++){const x=-2.5+2.5*i/200,P=G.S(al(x),be(x));i?ctx.lineTo(P[0],P[1]):ctx.moveTo(P[0],P[1]);}ctx.stroke();ctx.restore();
+  const Pn=G.S(al(0),be(0));arrow(ctx,G.cx,G.cy,Pn[0],Pn[1],C.warn,2.6,'i');
+  const Dd=G.S(44*Math.cos(th(0)),44*Math.sin(th(0)));dline(ctx,G.cx,G.cy,Dd[0],Dd[1],C.d,1.2);
+  const P3=plotBox(ctx,C,inset(R3,38,22,8,30),[-2.5,0],[-45,45],{nx:5,ny:6,title:'③ dq（直流）',xl:'s'});
+  pfn(ctx,P3,id,-2.5,0,250,C.d,2);pfn(ctx,P3,iq,-2.5,0,250,C.q,2);legend(ctx,C,[['id',C.d],['iq',C.q]],P3.b.x+6,P3.b.y+P3.b.h-6);
+  let mn=1e9,mx=-1e9;for(let i=0;i<=100;i++){const v=iq(-2.5*i/100);mn=Math.min(mn,v);mx=Math.max(mx,v);}
+  const bad=Math.abs(p.gb)>0.2||Math.abs(p.oa)>0.05;
+  info(ctx,C,['id='+id(0).toFixed(1)+' iq='+iq(0).toFixed(1),['iq 纹波 '+(mx-mn).toFixed(2)+' A',bad?C.bad:C.ok],bad?[Math.abs(p.oa)>0.05?'偏移→1×fe 纹波':'增益差→2×fe 纹波',C.bad]:['圆 + 直线：正常',C.ok]],P3.b.x+6,P3.b.y+16);}});
+
+/* ---------- B04 电子换向 ---------- */
+SPECS.push({host:'anim-B04',title:'电子换向：电流矢量始终与转子磁链正交（SPMSM）',h:HH,
+ params:[{k:'eps',label:'角度误差 ε（零位错误）',min:-180,max:180,step:1,v:0,unit:'°',dp:0},{k:'beta',label:'给定电流角 β',min:0,max:180,step:1,v:90,unit:'°',dp:0},{k:'f',label:'转速（演示）',min:0.05,max:0.6,step:0.05,v:0.2,unit:'Hz',dp:2}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),G=plane(ctx,C,inset(S.L,8,10,8,8),1.25,['α','β']);
+  const th=TAU*p.f*st.t,thh=th+p.eps*D2R,ia=thh+p.beta*D2R;
+  ctx.save();ctx.translate(G.cx,G.cy);ctx.rotate(-th);ctx.fillStyle=C.panel;ctx.strokeStyle=C.axis;ctx.beginPath();ctx.ellipse(0,0,G.R*0.55,G.R*0.32,0,0,TAU);ctx.fill();ctx.stroke();
+  ctx.fillStyle=C.a;ctx.fillRect(G.R*0.18,-G.R*0.2,G.R*0.34,G.R*0.4);ctx.fillStyle=C.c;ctx.fillRect(-G.R*0.52,-G.R*0.2,G.R*0.34,G.R*0.4);
+  ctx.fillStyle='#fff';ctx.font='bold 12px system-ui';ctx.fillText('N',G.R*0.3,4);ctx.fillText('S',-G.R*0.4,4);ctx.restore();
+  const F=G.S(1.15*Math.cos(th),1.15*Math.sin(th));arrow(ctx,G.cx,G.cy,F[0],F[1],C.muted,2,'ψf（真实 d）');
+  const Dh=G.S(1.05*Math.cos(thh),1.05*Math.sin(thh));dline(ctx,G.cx,G.cy,Dh[0],Dh[1],C.d,1.3);
+  const I=G.S(0.95*Math.cos(ia),0.95*Math.sin(ia));arrow(ctx,G.cx,G.cy,I[0],I[1],C.warn,3.2,'is');
+  const eff=Math.sin(ia-th);
+  const P=plotBox(ctx,C,inset(S.R,46,22,10,30),[-180,180],[-1.1,1.1],{nx:6,ny:4,title:'转矩比例 Te/Tmax = sin(β + ε) vs ε',xl:'角度误差 ε (°)'});
+  pfn(ctx,P,e=>Math.sin(p.beta*D2R+e*D2R),-180,180,200,C.acc,2);vl(ctx,P,[-1.1,1.1],p.eps,C.warn);
+  ctx.fillStyle=eff>=0?C.ok:C.bad;const bx=P.b.x+P.b.w-30,by=P.b.y+P.b.h/2;ctx.fillRect(bx,by-eff*P.b.h/2*0.9,18,eff*P.b.h/2*0.9);
+  info(ctx,C,['控制器认为的 d 轴（紫虚线）','实际转矩 = '+(eff*100).toFixed(1)+' %',['实际 id = '+(Math.cos(ia-th)).toFixed(2)+'·|is|',Math.abs(Math.cos(ia-th))>0.1?C.warn:C.fg],[eff<0?'⚠ 转矩反向：电机反转 / 抱死':(eff<0.9?'转矩不足：检查零位':'正常：正交换向'),eff<0?C.bad:(eff<0.9?C.warn:C.ok)]],P.b.x+8,P.b.y+16);}});
+
+/* ---------- B05 串级 ---------- */
+SPECS.push({host:'anim-B05',title:'串级控制：速度环带宽 vs 电流环带宽（带宽分离）',h:HH,
+ params:[{k:'fi',label:'电流环带宽 f_i',min:20,max:1000,step:10,v:1000,unit:'Hz',dp:0},{k:'fs',label:'速度环带宽 f_s',min:5,max:200,step:1,v:40,unit:'Hz',dp:0},{k:'tf',label:'速度滤波 τf',min:0,max:10,step:0.1,v:1,unit:'ms',dp:1}],
+ draw(ctx,w,h,st,C){const p=st.p,J=2e-5,Kt=0.021,dt=1e-4,N=4000,Imax=35;
+  const ws=TAU*p.fs,Kp=ws*J/Kt,Ki=Kp*ws/10;
+  let wm=0,iq=0,I=0,wf=0,kk=0,iqRef=0;const tx=[],sx=[],rx=[],qx=[];
+  for(let k=0;k<N;k++){const t=k*dt,ref=t<0.05?0:1000*TAU/60,TL=t>0.25?0.2:0;
+    if(k%10===0){const e=ref-wf;let In=I+Ki*1e-3*e;const u=Kp*e+In;if(Math.abs(u)<Imax||Math.sign(e)!==Math.sign(u))I=In;iqRef=clamp(Kp*e+I,-Imax,Imax);}
+    iq+=(iqRef-iq)*(1-Math.exp(-TAU*p.fi*dt));wm+=(Kt*iq-TL)/J*dt;
+    wf+=p.tf>0?(wm-wf)*(1-Math.exp(-dt/(p.tf*1e-3))):(wm-wf);
+    if(k%8===0){tx.push(t);sx.push(wm*60/TAU);rx.push(ref*60/TAU);qx.push(iqRef);}}
+  const S=split(w,h);
+  const P1=plotBox(ctx,C,inset(S.L,46,22,10,30),[0,0.4],[-200,1600],{nx:4,ny:6,title:'速度 rpm：给定（灰）实际（蓝）',xl:'时间 s（0.25 s 加负载）'});
+  pline(ctx,P1,tx,rx,C.muted,1.4,[5,4]);pline(ctx,P1,tx,sx,C.acc,2);
+  const P2=plotBox(ctx,C,inset(S.R,40,22,10,30),[0,0.4],[-40,40],{nx:4,ny:4,title:'速度环输出 iqRef (A)，限幅 ±35 A',xl:'时间 s'});
+  hl(ctx,P2,[0,0.4],35,C.bad);hl(ctx,P2,[0,0.4],-35,C.bad);pline(ctx,P2,tx,qx,C.q,1.8);
+  let mx=0;for(let i=0;i<sx.length;i++)if(tx[i]<0.25)mx=Math.max(mx,sx[i]);const os=(mx-1000)/10;const ratio=p.fi/p.fs;
+  info(ctx,C,['带宽比 f_i/f_s = '+ratio.toFixed(1),[ratio<5?'⚠ 小于 5：内环不够快':'带宽分离充分',ratio<5?C.bad:C.ok],['超调 = '+Math.max(0,os).toFixed(1)+' %',os>15?C.bad:C.ok],'Kp_s = ωs·J/Kt = '+Kp.toFixed(3)+' A/(rad/s)'],P2.b.x+8,P2.b.y+16);}});
+
+/* ---------- B06 时序 ---------- */
+SPECS.push({host:'anim-B06',title:'中心对齐 PWM、中点采样与 1.5Ts 控制延迟',h:w=>w>=620?360:440,
+ params:[{k:'d',label:'A 相占空比',min:0.05,max:0.99,step:0.01,v:0.6,dp:2},{k:'off',label:'采样点偏移（相对顶点）',min:-20,max:20,step:0.5,v:0,unit:'µs',dp:1},{k:'tc',label:'中断执行时间',min:5,max:70,step:1,v:22,unit:'µs',dp:0}],
+ draw(ctx,w,h,st,C){const p=st.p,Ts=50,T2=100,L=48,R=w-14,X=t=>L+(t/T2)*(R-L);
+  const rows=[['载波 / 比较值',0.2],['A 上管 PWM',0.12],['A 相电流',0.22],['ADC / 中断',0.14],['占空比生效',0.12]];
+  let y=18;const box=[];rows.forEach(r=>{const hh=(h-40)*r[1]/0.8;box.push({y,h:hh,t:r[0]});y+=hh+6;});
+  ctx.font='11px system-ui';box.forEach(b=>{ctx.fillStyle=C.muted;ctx.textAlign='left';ctx.fillText(b.t,4,b.y+10);ctx.strokeStyle=C.grid;ctx.strokeRect(L,b.y,R-L,b.h);});
+  for(let k=0;k<=2;k++){ctx.strokeStyle=C.grid;ctx.beginPath();ctx.moveTo(X(k*Ts),14);ctx.lineTo(X(k*Ts),h-14);ctx.stroke();ctx.fillStyle=C.muted;ctx.textAlign='center';ctx.fillText(k+'·Ts',X(k*Ts),h-2);}
+  const car=t=>{const u=(t%Ts)/Ts;return u<0.5?u*2:2-u*2;};const b0=box[0];
+  ctx.strokeStyle=C.acc;ctx.lineWidth=1.5;ctx.beginPath();for(let i=0;i<=400;i++){const t=T2*i/400,yy=b0.y+b0.h-car(t)*b0.h;i?ctx.lineTo(X(t),yy):ctx.moveTo(X(t),yy);}ctx.stroke();
+  const cmp=1-p.d;ctx.strokeStyle=C.warn;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(L,b0.y+b0.h-cmp*b0.h);ctx.lineTo(R,b0.y+b0.h-cmp*b0.h);ctx.stroke();ctx.setLineDash([]);
+  const b1=box[1],on=t=>car(t)>=cmp;ctx.strokeStyle=C.a;ctx.lineWidth=1.8;ctx.beginPath();for(let i=0;i<=800;i++){const t=T2*i/800,yy=on(t)?b1.y+3:b1.y+b1.h-3;i?ctx.lineTo(X(t),yy):ctx.moveTo(X(t),yy);}ctx.stroke();
+  const b2=box[2],rip=0.42;let cur=0;const cs=[];for(let i=0;i<=800;i++){const t=T2*i/800;cur+=(on(t)?(1-p.d):-p.d)*(T2/800);cs.push(cur);}
+  const avg=cs.reduce((a,b)=>a+b,0)/cs.length,amp=Math.max(...cs.map(v=>Math.abs(v-avg)))||1;
+  const cy=v=>b2.y+b2.h/2-(v-avg)/amp*b2.h*rip;ctx.strokeStyle=C.d;ctx.lineWidth=1.8;ctx.beginPath();cs.forEach((v,i)=>{const t=T2*i/800;i?ctx.lineTo(X(t),cy(v)):ctx.moveTo(X(t),cy(v));});ctx.stroke();
+  ctx.strokeStyle=C.muted;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(L,cy(avg));ctx.lineTo(R,cy(avg));ctx.stroke();ctx.setLineDash([]);
+  const b3=box[3],tS=Ts/2+p.off,iS=Math.round(tS/T2*800),vs=cs[clamp(iS,0,800)];ctx.fillStyle=C.bad;ctx.beginPath();ctx.arc(X(tS),cy(vs),5,0,TAU);ctx.fill();
+  ctx.fillStyle=C.bad;ctx.fillRect(X(tS)-1,b3.y,2,b3.h);ctx.fillStyle=C.q;ctx.globalAlpha=0.7;ctx.fillRect(X(tS+2),b3.y+4,X(tS+2+p.tc)-X(tS+2),b3.h-8);ctx.globalAlpha=1;ctx.fillStyle=C.fg;ctx.textAlign='left';ctx.fillText('ISR',X(tS+3),b3.y+b3.h/2+4);
+  const b4=box[4],tEnd=tS+2+p.tc,tLoad=tEnd<=1.5*Ts?1.5*Ts:2.5*Ts;if(tLoad<T2){ctx.fillStyle=C.ok;ctx.fillRect(X(tLoad),b4.y+3,X(T2)-X(tLoad),b4.h-6);ctx.fillStyle=C.fg;ctx.fillText('新占空比（顶点加载）',X(tLoad)+4,b4.y+b4.h/2+4);}else{ctx.fillStyle=C.bad;ctx.fillText('新占空比在视窗外（错过加载点）',X(Ts)+4,b4.y+b4.h/2+4);}
+  const lowOn=(1-p.d)*Ts,err=Math.abs(vs-avg)/amp*100;const dly=(tLoad+Ts/2-Ts/2)/Ts;
+  info(ctx,C,['下管导通 '+lowOn.toFixed(1)+' µs'+(lowOn<3?' ⚠ 窗口不足':''),[ '采样误差 ≈ '+err.toFixed(0)+'% 纹波幅值',err>10?C.bad:C.ok],[tEnd>1.5*Ts?'⚠ 中断超出一个周期：延迟变为 '+dly.toFixed(1)+'·Ts':'等效延迟 ≈ '+dly.toFixed(1)+'·Ts（采样→新周期中心）',tEnd>1.5*Ts?C.bad:C.fg]],X(Ts)+8,box[0].y+14);}});
+
+/* ---------- B07 机械角 vs 电角 ---------- */
+SPECS.push({host:'anim-B07',title:'机械角度 θm 与电角度 θe = p·θm（p = 4）',h:HH,
+ params:[{k:'n',label:'转速（演示）',min:0.05,max:0.5,step:0.01,v:0.12,unit:'转/s',dp:2},{k:'off',label:'零位偏移',min:0,max:360,step:1,v:0,unit:'°e',dp:0}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),r=inset(S.L,8,10,8,8),cx=r.x+r.w/2,cy=r.y+r.h/2,R=Math.min(r.w,r.h)*0.42;
+  const thm=(TAU*p.n*st.t)%TAU;
+  for(let i=0;i<8;i++){const a0=thm+i*TAU/8,a1=a0+TAU/8;ctx.fillStyle=i%2?C.c:C.a;ctx.globalAlpha=0.75;ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,R,-a1,-a0);ctx.closePath();ctx.fill();ctx.globalAlpha=1;
+    ctx.fillStyle='#fff';ctx.font='bold 11px system-ui';const am=(a0+a1)/2;ctx.fillText(i%2?'S':'N',cx+R*0.7*Math.cos(am)-4,cy-R*0.7*Math.sin(am)+4);}
+  ctx.strokeStyle=C.axis;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+R+10,cy);ctx.stroke();
+  arrow(ctx,cx,cy,cx+(R+6)*Math.cos(thm+TAU/16),cy-(R+6)*Math.sin(thm+TAU/16),C.fg,2,'θm');
+  const P=plotBox(ctx,C,inset(S.R,52,22,10,30),[-1.5,0],[0,65535],{nx:3,ny:4,title:'uint16 角度：θm（灰）与 θe（紫）',xl:'时间 s',yf:v=>Math.round(v)});
+  const fm=x=>{const a=((TAU*p.n*(st.t+x))%TAU+TAU)%TAU;return a/TAU*65536;},fe=x=>{const a=(((4*TAU*p.n*(st.t+x)-p.off*D2R)%TAU)+TAU)%TAU;return a/TAU*65536;};
+  const seg=(f,col)=>{const xs=[],ys=[];let prev=null;for(let i=0;i<=600;i++){const x=-1.5+1.5*i/600,v=f(x);if(prev!==null&&Math.abs(v-prev)>30000){pline(ctx,P,xs.slice(),ys.slice(),col,1.8);xs.length=0;ys.length=0;}xs.push(x);ys.push(v);prev=v;}pline(ctx,P,xs,ys,col,1.8);};
+  seg(fm,C.muted);seg(fe,C.d);
+  const um=Math.round(fm(0))%65536,ue=Math.round(fe(0))%65536;
+  info(ctx,C,['θm = '+(um/65536*360).toFixed(1)+'°  ('+um+')','θe = '+(ue/65536*360).toFixed(1)+'°  ('+ue+')','机械 1 圈 = 电角度 4 圈'],P.b.x+8,P.b.y+16);}});
+})();
+
+</script>
+<script>
+/* ===================== 模块 C 题库（一）C01–C07 ===================== */
+FOC_Q.push(
+/* ---------- C01 ---------- */
+{id:'C01-s1',sec:'C01',type:'single',q:'上电偏移校准对 1024 次采样取平均，若单次噪声 σ = 4 码，平均后残余噪声约为？',opts:['4 码','0.125 码','1 码','0.004 码'],ans:1,exp:'独立噪声平均后标准差 σ/√N = 4/32 = 0.125 码；但运放漂移等非随机误差不会被平均掉。',links:['C01','A06']},
+{id:'C01-s2',sec:'C01',type:'single',q:'运行中「慢速偏移跟踪」应在什么条件下执行？',opts:['任何时候','电机转动时','PWM 关闭且确认无电流（静止）时','电流最大时'],ans:2,exp:'只有确知真实电流为零时，ADC 均值才等于偏移；转动时反电动势可能经体二极管产生电流。',links:['C01']},
+{id:'C01-t1',sec:'C01',type:'tf',q:'为了降低电流噪声，可以在电流环反馈上加截止频率 300 Hz 的低通滤波器。',ans:false,exp:'电流环带宽约 1 kHz，300 Hz 低通在 1 kHz 处相位滞后约 73°，会严重降低相位裕度甚至失稳。噪声应从硬件与采样时序解决。',links:['C01','A07']},
+{id:'C01-t2',sec:'C01',type:'tf',q:'两相电流若由同一个 ADC 先后转换，在高速时会引入与转速成正比的相位误差。',ans:true,exp:'两次转换间隔 Δt 对应电角度 ωe·Δt；高速时不可忽略，应使用双 ADC 同时采样或补偿。',links:['C01']},
+{id:'C01-sa',sec:'C01',type:'short',q:'列出电流采样链路需要的至少四类诊断，并说明各自检测什么。',ans:'① 上电偏移范围：偏移超出 2048 ± 100 → 运放 / 偏置 / 采样电阻故障；② ADC 饱和：码值接近 0 或 4095 → 超量程或断线；③ PWM 关闭时电流非零 → 偏移漂移或电路故障；④ 三相和（三电阻时）≠ 0 → 某相故障；⑤ 电流与给定长期偏差 / 与模型不符 → 增益异常；⑥ 硬件比较器独立过流。',exp:'至少四类且说明检测对象。',links:['C01','C12']},
+{id:'C01-an',sec:'C01',type:'analysis',q:'台架：EPS 冷机测试一切正常；连续高负载运行 40 分钟后，低速转向出现明显 1 阶电频率顿挫，停机冷却后恢复。请给出排查与修复方案。',ans:'<b>分析：</b>与温度强相关、1×fe → 电流偏移随温度漂移（运放失调温漂、偏置电阻温漂），上电校准值在热态不再准确。<br><b>排查：</b>① 热态停机（PWM 关闭）读取 ADC 原始均值，与 Cal_IaOffset_cnt / Cal_IbOffset_cnt 比较；② 记录 PCB 温度与偏移关系；③ 排除角度零位温漂（C09）与 ψf 变化：后者不会产生 1 阶。<br><b>修复：</b>停机或零力矩期间执行慢速偏移跟踪；硬件选用低温漂运放 / 精密电阻；必要时按温度查表补偿。<br><b>验证：</b>热态 iq 1×fe 分量与冷态一致，顿挫消失；跟踪逻辑在电机转动时不执行。',exp:'温度相关 + 1 阶 → 偏移温漂。',links:['C01','A01']},
+/* ---------- C02 ---------- */
+{id:'C02-s1',sec:'C02',type:'single',q:'幅值不变 Clarke 下，空间矢量 |i_s| 与相电流峰值的关系是？',opts:['相等','√3 倍','√(3/2) 倍','2/3 倍'],ans:0,exp:'系数 2/3 保证 |i_s| = 相电流峰值；功率不变系数时为 √(3/2) 倍。',links:['C02']},
+{id:'C02-s2',sec:'C02',type:'single',q:'定点实现 iβ = (ia + 2·ib)/√3 时，下列哪种写法正确？',opts:['int16 直接计算 (ia + 2*ib) 再乘','先在 int32 中计算 ia + 2*ib，再乘 18919 后右移 15 位并饱和','用浮点除以 1.732 再转回 int16，不需饱和','把 ib 左移 1 位后存回 int16'],ans:1,exp:'ia + 2·ib 最大约 ±3 pu，int16 会溢出；int32 中乘积约 ±1.86×10⁹，不溢出。',links:['C02','D02']},
+{id:'C02-t1',sec:'C02',type:'tf',q:'双电阻采样时，使用三相 Clarke 公式（含 ic）比两相公式更精确。',ans:false,exp:'ic 由 ia、ib 推出，没有新信息；三相公式只在三电阻独立采样时有意义。',links:['C02']},
+{id:'C02-t2',sec:'C02',type:'tf',q:'更换 Clarke 系数（2/3 → √(2/3)）后，转矩公式与 PI 参数都需要相应调整。',ans:true,exp:'电流幅值的定义变了，转矩公式系数 1.5·p 变为 p，标幺参数也随之变化。',links:['C02','B02']},
+{id:'C02-sa',sec:'C02',type:'short',q:'为什么 Clarke 变换可以把三相「三个量」变成两个量而不丢失信息？',ans:'星接无中线时 ia + ib + ic = 0，三相电流只有两个自由度；零序分量为零，因此两个正交分量 iα、iβ 足以完整描述。若存在零序（带中线 / 三角形接法环流），需要额外的 i0 分量。',exp:'自由度与零序。',links:['C02','A03']},
+{id:'C02-an',sec:'C02',type:'analysis',q:'台架：功率分析仪测得相电流峰值 20 A，CANape 中 √(iα²+iβ²) 显示 24.5 A；电流环跟踪给定正常，但同一 iqRef 下力矩比预期低约 18%。请分析。',ans:'<b>分析：</b>24.5/20 ≈ 1.225 = √(3/2)：Clarke 使用了功率不变系数。电流环跟踪的是被放大了 1.225 倍的「电流」，实际相电流只有给定的 1/1.225 ≈ 0.82，因此按幅值不变公式标定的力矩约低 18%。<br><b>排查：</b>单元测试 ia = 1 pu 平衡输入，检查 |i_s|；检查转矩、MTPA、PI 标幺的推导系数。<br><b>修复：</b>统一为幅值不变，并重算相关标定。<br><b>验证：</b>|i_s| 与功率分析仪一致，力矩常数与设计一致。',exp:'1.225 倍 → 系数约定。',links:['C02','B02']},
+/* ---------- C03 ---------- */
+{id:'C03-s1',sec:'C03',type:'single',q:'8000 rpm、20 kHz、单采样单更新，未做延迟补偿时反 Park 的电压角误差约为？',opts:['1.5°','9.6°','14.4°','28.8°'],ans:2,exp:'每周期 9.6°，1.5 个周期约 14.4° 电角度。',links:['C03','A03']},
+{id:'C03-s2',sec:'C03',type:'single',q:'延迟补偿中的电角速度应使用？',opts:['原始单周期差分','滤波后的速度换算值，带符号','速度绝对值','固定额定转速'],ans:1,exp:'原始差分噪声大；绝对值会导致反转时补偿方向错误。',links:['C03','A05']},
+{id:'C03-t1',sec:'C03',type:'tf',q:'Park 变换应使用与电流采样同一时刻的角度。',ans:true,exp:'采样电流反映的是采样时刻转子位置下的 dq 分量。',links:['C03']},
+{id:'C03-t2',sec:'C03',type:'tf',q:'补偿系数 Kc 只与 PWM 时序有关，与位置传感器无关。',ans:false,exp:'旋变解码跟踪环、激磁信号相位等也引入随转速变化的角度滞后，通常合并到 Kc 中台架标定。',links:['C03','C09']},
+{id:'C03-sa',sec:'C03',type:'short',q:'描述台架标定延迟补偿系数 Kc 的方法。',ans:'① 固定 iq（如 20 A）、id = 0，从低速扫到高速（弱磁前）；② 记录扭矩传感器力矩或 vd 稳态；③ 调整 Kc 使各转速力矩常数一致（或使 id = 0 时 vd ≈ −ωe·Lq·iq 理论值）；④ 正反转都验证；⑤ 记录温度，必要时多温度点。',exp:'扫速 + 判据 + 正反转。',links:['C03','D07']},
+{id:'C03-an',sec:'C03',type:'analysis',q:'台架：加入延迟补偿后，正转 6000 rpm 力矩恢复正常，但反转 6000 rpm 力矩比补偿前更低。请分析。',ans:'<b>分析：</b>补偿量应为带符号的 Kc·ωe·Ts：正转加、反转减。反转更差 → 代码中使用了 |ωe|（或 uint 类型截断），反转时补偿方向与实际转动方向相反，误差由 1.5Δθ 变为 3Δθ。<br><b>排查：</b>检查 thetaEIncPerTs 的数据类型与是否取绝对值；反转时 Kc 设 0 对比。<br><b>修复：</b>使用带符号增量。<br><b>验证：</b>正反转扫速力矩常数对称。',exp:'反转更差 → 符号。',links:['C03']},
+/* ---------- C04 ---------- */
+{id:'C04-s1',sec:'C04',type:'single',q:'SVPWM 线性区最大相电压矢量幅值与 SPWM 相比提高约？',opts:['5%','15.5%','41%','100%'],ans:1,exp:'Vdc/√3 ÷ Vdc/2 = 2/√3 ≈ 1.155。',links:['C04']},
+{id:'C04-s2',sec:'C04',type:'single',q:'min-max 零序注入实现中，零序电压 v0 等于？',opts:['−(max + min)/2','(max − min)/2','0','−max'],ans:0,exp:'把三相电压的最大最小值中心平移到 0，等价于对称七段式 SVPWM。',links:['C04']},
+{id:'C04-t1',sec:'C04',type:'tf',q:'当 max(va,vb,vc) − min(va,vb,vc) > Vdc 时，参考电压已超出六边形，需要过调制处理。',ans:true,exp:'三相跨度超过 Vdc 时，任何零序注入都无法使所有占空比落在 [0,1]。',links:['C04']},
+{id:'C04-t2',sec:'C04',type:'tf',q:'占空比可以设到 100%，以获得最大电压利用率。',ans:false,exp:'低边电阻采样需要下管导通窗口（B06），自举驱动需要充电时间，因此需设上限。',links:['C04','B06']},
+{id:'C04-sa',sec:'C04',type:'short',q:'比较扇区法与 min-max 法实现 SVPWM 的优缺点。',ans:'扇区法：物理意义直观（基本矢量与作用时间），可灵活安排零矢量（如五段式降开关损耗），但需要扇区判断与查表，代码长、易出扇区映射错误。min-max 法：无扇区判断，代码短、执行快，与七段式对称 SVPWM 等价，便于加入死区补偿与过调制缩放；但不直观，非对称零矢量分配需另外处理。',exp:'两者等价性 + 各自优缺点。',links:['C04']},
+{id:'C04-an',sec:'C04',type:'analysis',q:'台架：开环 V/f 拖动 EPS 电机，每个电周期在同一角度位置出现一次明显顿挫，电流波形在该处有尖峰；更换为 min-max 实现后现象消失。请分析原扇区法实现的可能错误与验证方法。',ans:'<b>分析：</b>每电周期一次、固定位置 → 六个扇区中某一个扇区实现错误：扇区号 N 到扇区的映射表错一项、该扇区 T1/T2 对应的相选择错误，或扇区边界判断（等号）处理不当导致跳到错误扇区。<br><b>验证：</b>离线 / PIL 扫描 θ = 0~360°，记录扇区号与三相 duty，与 min-max 结果逐点比较；重点测试 0°、60°…300° 边界与各扇区中心。<br><b>修复：</b>修正映射表 / 边界；建立 6 扇区单元测试。<br><b>结论：</b>两种方法等价，min-max 可作为扇区法的参考答案。',exp:'固定角度 → 单扇区错误；用等价实现做对照测试。',links:['C04']},
+/* ---------- C05 ---------- */
+{id:'C05-s1',sec:'C05',type:'single',q:'q 轴电压方程中的反电动势项是？',opts:['ωe·Lq·iq','ωe·ψf','Rs·iq','Ld·did/dt'],ans:1,exp:'vq = Rs·iq + Lq·diq/dt + ωe·Ld·id + ωe·ψf，ωe·ψf 为永磁反电动势。',links:['C05','B02']},
+{id:'C05-s2',sec:'C05',type:'single',q:'d 轴优先电压限幅下，q 轴 PI 的输出上限应为？',opts:['vMax','√(vMax² − vd²) − vqFf','vMax − vd','vd'],ans:1,exp:'q 轴可用电压是圆限幅剩余量，再扣除前馈部分，PI 才知道自己的真实可用范围（抗饱和）。',links:['C05','A02']},
+{id:'C05-t1',sec:'C05',type:'tf',q:'解耦前馈的参数越准确越好，即使参数有 50% 误差，加前馈也一定比不加好。',ans:false,exp:'参数误差很大时前馈本身成为扰动，可能比不加更差；需按实测参数并验证。',links:['C05']},
+{id:'C05-t2',sec:'C05',type:'tf',q:'开环切闭环时，把 PI 积分器预置为当前电压减去前馈，可以避免电压跳变。',ans:true,exp:'保证切换瞬间 PI 输出 + 前馈 = 切换前的电压。',links:['C05','D06']},
+{id:'C05-sa',sec:'C05',type:'short',q:'推导案例 q 轴解耦前馈系数 kLq 的标幺值，并说明定点实现要点。',ans:'vd_ff = −ωe·Lq·iq。取 ωe 基值 ωb = 2π×533.3 = 3351 rad/s（8000 rpm），I_BASE = 50 A，V_BASE = 16 V：vd_ff_pu = −ωe_pu·(ωb·Lq·Ib/Vb)·iq_pu，kLq = 3351 × 75e-6 × 50/16 = 0.785 → Q15 25734。实现：两次 Q15 乘法 + 饱和；ωe_pu 用滤波速度；所有系数作为标定量，参数变化（饱和、温度）时可调度。',exp:'基值选择 + 系数数值 + 实现要点。',links:['C05','D02']},
+{id:'C05-an',sec:'C05',type:'analysis',q:'台架：EPS 低速电流环表现良好；转速升到 4000 rpm 后，iq 阶跃时 id 出现约 −8 A 的瞬态偏离，iq 上升明显变慢，并伴随高频啸叫。请给出排查顺序与修复。',ans:'<b>分析：</b>转速相关的 dq 交叉耦合：iq 变化通过 −ωLq·iq 直接扰动 d 轴；q 轴受 ωLd·id 与反电动势影响。高频啸叫可能是 ωe 噪声经前馈注入，或 Kp 偏大 + Lq 饱和。<br><b>排查顺序：</b>① 确认前馈是否启用、系数单位是否正确（离线算 4000 rpm 时 ωLq·30 A ≈ 3.8 V）；② 前馈 ωe 来源：原始差分还是滤波值；③ 关闭前馈 / Kp 减半对比啸叫；④ 检查电压是否接近饱和（4000 rpm 接近基速）。<br><b>修复：</b>正确启用前馈（滤波 ωe）；按实测 Lq 调度 Kp；如电压饱和，启用弱磁。<br><b>验证：</b>4000 rpm 阶跃 id 扰动 < 1~2 A，iq 上升时间接近低速值，啸叫消失。',exp:'转速相关 → 耦合 + 前馈 + 电压裕量。',links:['C05','C07']},
+/* ---------- C06 ---------- */
+{id:'C06-s1',sec:'C06',type:'single',q:'对 SPMSM（Ld ≈ Lq），MTPA 控制等价于？',opts:['id = 0 控制','id = iq','弱磁控制','最大效率控制'],ans:0,exp:'无磁阻转矩，电流全部放在 q 轴即最大转矩电流比。',links:['C06']},
+{id:'C06-s2',sec:'C06',type:'single',q:'量产 MTPA 最常用的实现方式是？',opts:['在线公式计算，常数电感','台架实测电流角扫描生成查表（考虑饱和与温度）','完全不用 MTPA','人工随意设置 id'],ans:1,exp:'Ld/Lq 饱和使公式偏差大；实测表最可靠，公式可作初值。',links:['C06']},
+{id:'C06-t1',sec:'C06',type:'tf',q:'零位偏差会使 MTPA 表标定结果整体偏移。',ans:true,exp:'实际电流角 = 给定角 + 零位误差，扫描得到的峰值角包含误差。必须先标零位。',links:['C06','C09']},
+{id:'C06-t2',sec:'C06',type:'tf',q:'MTPA 的主要收益是提高最高转速。',ans:false,exp:'MTPA 的收益是同力矩电流最小（铜损、发热）；提高转速是弱磁的作用。',links:['C06','C07']},
+{id:'C06-sa',sec:'C06',type:'short',q:'描述台架标定 MTPA 表的流程。',ans:'① 零位、电流环、死区补偿先完成；② 低速恒转速（避免电压饱和）、磁钢温度受控；③ 对每个电流幅值 |is|（如 5~60 A），扫描电流角 β（如 90°~140°），记录扭矩传感器力矩；④ 找每个 |is| 的峰值角，得到 (id, iq)；⑤ 转换为以 iq 或 Te 为索引的表；⑥ 多温度重复或建立温度修正；⑦ 验证：同力矩电流 ≤ id = 0 方案。',exp:'前置条件 + 扫描 + 转表 + 验证。',links:['C06','D07']},
+{id:'C06-an',sec:'C06',type:'analysis',q:'台架：启用公式法 MTPA 后，小电流时力矩略有提升，但 50 A 以上力矩反而低于 id = 0 方案。请分析并给出解决方案。',ans:'<b>分析：</b>公式使用常数 Ld、Lq。大电流时 Lq 饱和下降，实际凸极差 (Lq − Ld) 变小，最优电流角应更靠近 q 轴；公式仍给出较大的负 id，电流偏离真正的 MTPA，且负 id 过大削弱了永磁转矩。也需排除零位误差（零位错误时小电流也会异常）。<br><b>排查：</b>在 30、50、60 A 下扫电流角找实测峰值，对比公式值；测量 Lq(iq) 曲线（C11）。<br><b>方案：</b>改用实测查表；或公式使用 Lq(iq) 查表参数。<br><b>验证：</b>全电流范围同电流力矩 ≥ id = 0。',exp:'大电流反常 → 饱和。',links:['C06','C11']},
+/* ---------- C07 ---------- */
+{id:'C07-s1',sec:'C07',type:'single',q:'电压极限椭圆的中心位于 dq 平面的？',opts:['原点','(−ψf/Ld, 0)','(0, ψf/Lq)','(ψf/Ld, 0)'],ans:1,exp:'(Ld·id + ψf)² + (Lq·iq)² ≤ (Vmax/ωe)²，中心 id = −ψf/Ld。',links:['C07']},
+{id:'C07-s2',sec:'C07',type:'single',q:'电压闭环弱磁中，弱磁 PI 的带宽应？',opts:['等于电流环带宽','远低于电流环带宽（如 1/10 以下）','越高越好','与 PWM 频率相同'],ans:1,exp:'避免与电流环相互作用产生振荡；弱磁调节的是给定，应慢于电流环。',links:['C07','B05']},
+{id:'C07-t1',sec:'C07',type:'tf',q:'若特征电流 ψf/Ld 小于电流极限 Imax，理论上电机可以在恒功率区持续升速。',ans:true,exp:'椭圆中心落在电流圆内，任意转速都存在可行工作点（忽略损耗与机械限制）。',links:['C07']},
+{id:'C07-t2',sec:'C07',type:'tf',q:'深弱磁高速运行时突然关管是绝对安全的。',ans:false,exp:'反电动势可能远高于母线电压，经体二极管向电源回馈，造成过压与制动冲击；需评估关管 / 主动短路策略。',links:['C07','C12']},
+{id:'C07-sa',sec:'C07',type:'short',q:'说明电压闭环弱磁的结构与各限幅的作用。',ans:'误差 e = Vtarget − |v|（Vtarget ≈ 0.95·Vmax，Vmax 由实测 Vdc 计算）；弱磁 PI 输出 Δid，限幅 [Δid_min, 0] 只允许去磁；idRef = min(idMTPA, idMTPA + Δid)，再限 ≥ −IdMin（防退磁）；iqRef 按电流圆 √(Imax² − idRef²) 限幅，必要时再按电压椭圆限幅；PI 积分抗饱和；低速时 Δid 回零。',exp:'误差定义 + 输出限幅 + iq 限幅。',links:['C07']},
+{id:'C07-an',sec:'C07',type:'analysis',q:'台架：EPS 空载从 0 加速到 7500 rpm，5500 rpm 以上 id 以约 30 Hz 摆动，转速随之波动，电压利用率在 0.90~1.0 之间来回跳。请给出排查与修复方案。',ans:'<b>分析：</b>弱磁区振荡，常见原因：① 弱磁 PI 带宽过高，与电流环 / 速度环耦合；② |v| 计算含 PWM 纹波 / 噪声，弱磁环对噪声响应；③ Vtarget 太接近 Vmax，电流环在饱和边缘反复进出，抗饱和与弱磁环相互作用；④ Vdc 测量滤波滞后。<br><b>排查：</b>降低弱磁 Ki/Kp 看振荡频率与幅度变化；对 |v| 加轻度滤波；把 Vtarget 从 0.95 降到 0.9；同时记录 vSat 标志。<br><b>修复：</b>弱磁环带宽 ≤ 电流环 1/10；预留电压裕量；必要时加前馈 Δid 表减轻反馈环负担。<br><b>验证：</b>扫速全程 id、转速平稳，电压利用率稳定。',exp:'带宽、噪声、裕量三方向。',links:['C07','C05']}
+);
+
+</script>
+<script>
+/* ===================== 模块 C 题库（二）C08–C13 ===================== */
+FOC_Q.push(
+/* ---------- C08 ---------- */
+{id:'C08-s1',sec:'C08',type:'single',q:'纯 P 位置环跟踪匀速运动指令 ω 时，稳态跟踪误差约为？',opts:['0','ω/Kp','Kp·ω','与 ω 无关的常数'],ans:1,exp:'位置环为 I 型系统，对斜坡输入有稳态误差 ω/Kp；加速度前馈 / 速度前馈可消除。',links:['C08']},
+{id:'C08-s2',sec:'C08',type:'single',q:'速度前馈中的 dθRef/dt 应取自？',opts:['反馈角度的差分','给定轨迹（规划器输出）','电流','PWM 计数器'],ans:1,exp:'给定无噪声；用反馈差分会把测速噪声引入。',links:['C08']},
+{id:'C08-t1',sec:'C08',type:'tf',q:'「微分先行」是对反馈量求微分，可以避免给定阶跃时 D 项产生冲击。',ans:true,exp:'给定阶跃的导数为冲激，对误差微分会产生巨大输出。',links:['C08']},
+{id:'C08-t2',sec:'C08',type:'tf',q:'位置误差可以直接用单圈 uint16 角度相减得到，无需多圈处理。',ans:false,exp:'跨圈时会跳变；位置环应使用多圈累计位置（int32），由每周期 (int16) 增量累加。',links:['C08','A05']},
+{id:'C08-sa',sec:'C08',type:'short',q:'为什么速度环 D 项通常不用或必须带低通？列出两种替代手段。',ans:'测速信号含量化噪声（A05），D 项按频率放大噪声，导致 iqRef 抖动、电机噪声；且速度环对象（惯量）用 PI 已足够。替代：① 加速度 / 力矩前馈；② 负载转矩观测器补偿扰动；③ 提高测速质量（PLL）。若必须用 D：反馈微分 + 一阶低通，截止频率 3~5 倍环路带宽。',exp:'噪声原因 + 两种替代。',links:['C08','A05']},
+{id:'C08-an',sec:'C08',type:'analysis',q:'台架位置模式：跟踪 2 Hz、±90° 的正弦位置指令，实际位置滞后明显，误差峰值约 25°。加大位置环 Kp 后误差减小但电机开始抖动。请给出改进方案。',ans:'<b>分析：</b>纯 P 位置环误差 ≈ ω_peak/Kp：ω_peak = 90°×2π×2 ≈ 1131°/s，Kp ≈ 45 时约 25°。提高 Kp 受速度环带宽与测速噪声限制，出现抖动。<br><b>方案：</b>加入速度前馈（K_vff ≈ 1，dθRef/dt 来自给定），必要时加速度前馈到 iqRef；位置环 Kp 回到稳定值；检查速度环带宽是否足够（位置环带宽 ≤ 速度环 1/5）。<br><b>验证：</b>误差峰值降至内环动态决定的水平（数度以内），无抖动；前馈增益偏离 1 时误差变化符合预期。',exp:'前馈消除速度型误差。',links:['C08','B05']},
+/* ---------- C09 ---------- */
+{id:'C09-s1',sec:'C09',type:'single',q:'旋变 sin、cos 信号幅值不平衡主要引起哪一阶角度误差？',opts:['1 次','2 次','6 次','常值'],ans:1,exp:'幅值不平衡 / 非正交 → 2 次谐波误差；直流偏置 → 1 次谐波。',links:['C09']},
+{id:'C09-s2',sec:'C09',type:'single',q:'d 轴直流对齐法标定零位时，下列做法正确的是？',opts:['带负载进行，模拟真实工况','开环角度固定为 0，注入足够大的 id 使转子吸到 d 轴，稳定后读角度','注入 iq 使电机转动后读角度','只需读一次角度，无需等待'],ans:1,exp:'转子需空载可自由转动；电流要能克服齿槽与摩擦；稳定后读取，最好双向接近取平均。',links:['C09','D06']},
+{id:'C09-t1',sec:'C09',type:'tf',q:'旋变解码芯片的故障位（如信号丢失、信号退化、跟踪丢失）应纳入角度诊断。',ans:true,exp:'这些是硬件层面最直接的角度可信度指标，配合软件跳变 / 交叉校验。',links:['C09','C12']},
+{id:'C09-t2',sec:'C09',type:'tf',q:'对零位标定中多次读取的角度直接求算术平均总是正确的。',ans:false,exp:'在 0 / 65535 附近会出错，应对 sin、cos 分别平均再 atan2（矢量平均）。',links:['C09']},
+{id:'C09-sa',sec:'C09',type:'short',q:'比较零位标定的 d 轴对齐法与反电动势法。',ans:'对齐法：只需电机控制器本身，产线易实施；受齿槽、摩擦、对齐电流大小影响，需双向平均；精度一般。反电动势法：需对拖台架，PWM 关闭测相反电动势过零与 θe 比较，精度高、不受摩擦影响，可同时测 ψf；设备要求高。常见做法：开发阶段反电动势法确认，产线对齐法 + 统计监控。',exp:'设备、精度、影响因素。',links:['C09']},
+{id:'C09-an',sec:'C09',type:'analysis',q:'台架：EPS 力矩脉动频谱中，机械 8 阶（4 对极电机）分量突出，与电流大小近似成正比；1 阶电频率分量很小。旋变为 1 对极。同事认为是旋变幅值不平衡，请判断并给出验证方案。',ans:'<b>阶次换算：</b>机械 8 阶 = 电 2 阶（8 ÷ p）。<br><b>候选根因：</b>① 两相电流采样增益不一致 → dq 中 2×fe 纹波 → 机械 8 阶，且幅值与电流成正比，与现象吻合；② 1 对极旋变的幅值不平衡产生机械 2 次角度误差，力矩脉动应出现在<b>机械 2 阶</b>，不是 8 阶，因此同事的判断与阶次不符；③ 反电动势 / 电感的空间谐波也可能产生特定阶次，但通常为 6 阶电频率附近。<br><b>验证：</b>直流注入法分别标定 A、B 相增益（C01），修正后复测 8 阶；同时采集旋变 sin/cos 包络或与编码器比较，确认机械 2 阶误差大小。<br><b>修复：</b>写入 Cal_IaGainCorr / Cal_IbGainCorr。<br><b>验证：</b>机械 8 阶分量下降，XY 图为圆。',exp:'关键：机械阶 = 电阶 × 极对数；用阶次区分电流增益误差与旋变误差。',links:['C09','C01','B03']},
+/* ---------- C10 ---------- */
+{id:'C10-s1',sec:'C10',type:'single',q:'反电动势类无感观测器在零速附近失效的根本原因是？',opts:['MCU 算力不足','反电动势 ∝ 转速，零低速时幅值太小，被噪声与逆变器误差淹没','PWM 频率太低','电流环带宽太高'],ans:1,exp:'可观测性随转速下降；零低速需高频注入（利用凸极）或开环启动。',links:['C10']},
+{id:'C10-s2',sec:'C10',type:'single',q:'SMO 输出经低通滤波得到反电动势估计，低通截止频率 ωc = 1.5·ωe 时，需补偿的相位约为？',opts:['0°','33.7°','56.3°','90°'],ans:1,exp:'atan(ωe/ωc) = atan(1/1.5) ≈ 33.7°。',links:['C10']},
+{id:'C10-t1',sec:'C10',type:'tf',q:'PLL 提取角度相比直接 atan2，可以同时得到平滑的速度估计并抑制噪声。',ans:true,exp:'PLL 为二阶跟踪环，带宽可调，输出 ω̂ 为积分前的内部量。',links:['C10']},
+{id:'C10-t2',sec:'C10',type:'tf',q:'TI 的 FAST 观测器是公开标准算法，可以在任意 MCU 上照搬实现。',ans:false,exp:'FAST 为 TI 私有方案，随 TI 器件提供；不应假设其内部实现细节。',links:['C10','F05']},
+{id:'C10-sa',sec:'C10',type:'short',q:'比较 SMO、龙伯格观测器、MRAS 的特点。',ans:'SMO：开关函数驱动估计电流跟踪实测，鲁棒性好、对参数不敏感；存在抖振，需低通 + 相位补偿。龙伯格：线性增益反馈，无抖振，可极点配置设计带宽；对模型参数更敏感。MRAS：参考模型与可调模型误差驱动自适应律估计速度；结构清晰，低速对 Rs 敏感。三者均基于反电动势，零低速均受限。',exp:'原理 + 优缺点各一。',links:['C10']},
+{id:'C10-an',sec:'C10',type:'analysis',q:'台架：无感模式下 I/F 开环升速到 300 rpm 后切换到 SMO 观测角，约 30% 的概率切换瞬间电流冲击并失步；升到 800 rpm 再切换则成功率明显提升。请分析并给出改进的切换策略。',ans:'<b>分析：</b>300 rpm 时反电动势仅约 0.44 V，与死区误差（~0.24 V）同量级，观测器信噪比低、角度误差大且波动；开环角度与观测角存在差值，直接切换造成电流矢量突变。800 rpm 时反电动势更大，观测可靠。<br><b>改进：</b>① 提高切换转速或启用死区补偿后再评估最低切换转速；② 切换条件：|θobs − θIF| < 阈值且持续一段时间，观测速度与开环频率一致；③ 平滑过渡：用角度差逐步收敛（θ = θIF + k(t)·Δθ）或 I/F 阶段降低电流让转子自然对齐负载角；④ 电流环积分器预置；⑤ 失败检测与重试。<br><b>验证：</b>多次切换成功率 100%，切换瞬间电流平滑。',exp:'低速信噪比 + 切换条件 + 平滑过渡。',links:['C10','D06','C13']},
+/* ---------- C11 ---------- */
+{id:'C11-s1',sec:'C11',type:'single',q:'用直流两点法测 Rs 的主要目的是消除？',opts:['电感影响','逆变器死区与管压降等常值电压误差','温度影响','反电动势'],ans:1,exp:'两点相减消除常值偏移，斜率为回路电阻。',links:['C11']},
+{id:'C11-s2',sec:'C11',type:'single',q:'测量 ψf 最准确的方法通常是？',opts:['空载 vq 估算','对拖电机、PWM 关闭，测相反电动势幅值与转速','直流注入','查供应商数据'],ans:1,exp:'对拖不受逆变器电压误差影响。',links:['C11']},
+{id:'C11-t1',sec:'C11',type:'tf',q:'IPMSM 的 Lq 通常随 iq 增大而下降（饱和）。',ans:true,exp:'q 轴磁路铁芯饱和，大电流时电感下降，影响 PI、MTPA、观测器。',links:['C11']},
+{id:'C11-t2',sec:'C11',type:'tf',q:'在线辨识可以在稳态无激励条件下同时准确估计 Rs 与 ψf。',ans:false,exp:'稳态方程中 Rs 与 ψf 的作用相关，缺乏激励时不可分辨；需要激励或固定其中一个。',links:['C11']},
+{id:'C11-sa',sec:'C11',type:'short',q:'描述 Lq 测量时转子不动的两种方法。',ans:'① 机械锁止转子（工装），在 q 轴方向注入阶跃或方波，测 τ 或 Δi/Δt；② 静止时 q 轴高频小幅注入：高频交变转矩平均为零，转子惯量使其基本不动；需保证注入幅值小、频率足够高，并监测 θm 变化。',exp:'锁止 + 高频注入。',links:['C11']},
+{id:'C11-an',sec:'C11',type:'analysis',q:'台架：用电压阶跃法测得 Ld = 30 µH（设计 45 µH）、Rs = 22 mΩ（微欧计 12 mΩ）。按此参数设计的电流环在台架上超调 25%。请分析并给出正确的辨识流程。',ans:'<b>分析：</b>Rs 偏大：单点 V/I 包含逆变器压降、MOS 与线缆电阻；L = τ·R 中 τ 测量受延迟、死区非线性与对齐影响；Ld 偏小使 Kp = ωc·L 偏小，但若 τ 偏小时 Ki/Kp = R/L 偏大，零点位置错误引起超调。<br><b>正确流程：</b>① 死区补偿并确认零位；② 两点法测 Rs（区分电机电阻与回路电阻）；③ Ld 用多幅值阶跃或高频方波注入，并检查与电流幅值关系；④ LCR 线间电感最小值 ÷ 2 量级校核；⑤ 设计后做阶跃与扫频验证。<br><b>验证：</b>两种方法差 < 10%；电流环超调 < 10%、带宽接近设计。',exp:'误差来源 + 交叉验证流程。',links:['C11','A07','A08']},
+/* ---------- C12 ---------- */
+{id:'C12-s1',sec:'C12',type:'single',q:'硬件过流保护必须存在的主要原因是？',opts:['软件代码太复杂','短路时电流在微秒级上升，50 µs 的软件周期来不及保护 MOS','硬件更便宜','为了通过 EMC'],ans:1,exp:'MOS 短路耐受时间很短，需硬件比较器直接触发 PWM 故障关断。',links:['C12']},
+{id:'C12-s2',sec:'C12',type:'single',q:'软件诊断阈值设置时最基本的约束是？',opts:['越低越好','阈值必须在测量量程与定点可表示范围内','阈值与采样无关','阈值等于额定值'],ans:1,exp:'超出量程（ADC 饱和）或定点基值的阈值永远不会触发（B07、C12 例）。',links:['C12','B07']},
+{id:'C12-t1',sec:'C12',type:'tf',q:'故障关管后应同时清零电流环与弱磁环积分器。',ans:true,exp:'否则重新使能瞬间输出旧电压，造成电流冲击。',links:['C12','A08']},
+{id:'C12-t2',sec:'C12',type:'tf',q:'所有诊断都应放在 20 kHz 主中断里执行以保证最快响应。',ans:false,exp:'过温、堵转等是秒级现象；全部放中断会超时。应按时间尺度分层。',links:['C12','D03']},
+{id:'C12-sa',sec:'C12',type:'short',q:'说明 EPS 堵转保护为何不宜用简单「电流大 + 转速低 + 计时」实现，以及更好的做法。',ans:'EPS 原地转向、打满方向盘保持本来就是低速大电流的正常工况，简单计时会过早降额影响驾驶。更好：基于热模型（I²t 或一阶 / 多阶热网络估计 MOS 与绕组温度），按估计温度线性降额；结合温度传感器校正；区分机械卡滞（异常）与正常保持。',exp:'正常工况冲突 + 热模型。',links:['C12']},
+{id:'C12-an',sec:'C12',type:'analysis',q:'整车耐久试验中偶发软件过流故障（每数十小时一次），冻结帧显示故障时 ia 单点达到 49 A，前后周期约 15 A，转速 5000 rpm 左右。请分析并给出处理方案。',ans:'<b>分析：</b>单点尖峰、前后正常 → 采样异常而非真实过流。5000 rpm 高速、电压利用率高，某相占空比大，低边采样窗口可能不足，或采样点接近另一相开关沿（B06）；也可能是 EMC 干扰。去抖若为 1 次即会误报。<br><b>排查：</b>冻结帧中加入三相占空比；台架复现高速大负载工况，示波器看采样点与开关沿；EMC 试验复现。<br><b>处理：</b>修正采样窗口 / 占空比上限 / 触发延时；软件过流去抖改为连续 2~3 次（需确认在 MOS 安全时间内，硬件保护兜底）；增加采样合理性检查（与给定差异、三相和）。<br><b>验证：</b>耐久试验无误报；故障注入仍可检出真实过流。',exp:'单点尖峰 → 采样问题；去抖与硬件兜底的平衡。',links:['C12','B06','C01']},
+/* ---------- C13 ---------- */
+{id:'C13-s1',sec:'C13',type:'single',q:'案例 12 V、20 kHz、死区 1 µs，死区造成的平均电压误差约为？',opts:['0.024 V','0.24 V','2.4 V','0.6 V'],ans:1,exp:'ΔV ≈ Td/Ts·Vdc = 1/50 × 12 = 0.24 V，低速时相对基波电压占比很大。',links:['C13']},
+{id:'C13-s2',sec:'C13',type:'single',q:'死区误差在 dq 坐标中主要表现为？',opts:['直流','1 倍电频率','6 倍电频率','PWM 频率'],ans:2,exp:'三相方波误差的 5、7 次谐波在 dq 中都变为 6 次。',links:['C13']},
+{id:'C13-t1',sec:'C13',type:'tf',q:'死区补偿的电流方向判断用电流给定比用含噪反馈更稳定。',ans:true,exp:'给定相位干净；反馈在过零附近噪声会造成补偿来回翻转。',links:['C13']},
+{id:'C13-t2',sec:'C13',type:'tf',q:'为了减少死区影响，可以把硬件死区压缩到低于驱动 / MOS 要求的值。',ans:false,exp:'可能导致上下管直通，属于风险红线。',links:['C13']},
+{id:'C13-sa',sec:'C13',type:'short',q:'死区补偿需要随哪些量调整？为什么？',ans:'① Vdc：ΔV ∝ Vdc；② 电流幅值（过零线性区、开关延迟随电流变化）；③ 温度（MOS 开关特性与导通压降随温度变化）；④ PWM 频率：ΔV ∝ Td/Ts。这些量变化时固定补偿会失配，产生欠补偿 / 过补偿。',exp:'至少三项及原因。',links:['C13']},
+{id:'C13-an',sec:'C13',type:'analysis',q:'整车反馈：EPS 慢打方向盘时有细微颗粒感，频谱显示为 6 倍电频率；快打时不明显。启用死区补偿后低速改善，但小转向角保持（电流很小）时出现轻微「嗡嗡」声。请分析并给出标定方案。',ans:'<b>分析：</b>6 倍电频率 + 低速明显 → 死区 / 逆变器非线性（低速基波电压小，误差占比大）。补偿后小电流噪声 → 过零判断在小电流时频繁翻转：线性区 I0 太窄、使用含噪反馈判方向，或小电流下补偿量偏大（过补偿）。<br><b>标定方案：</b>① 方向判据改用电流给定；② 增大 I0，使补偿在小电流区线性过渡；③ 在多个电流幅值下分别标定补偿量（查表）；④ 补偿随 Vdc 缩放；⑤ 低速恒力矩下以 iq 6 阶分量最小为目标调 Cal_DtCompV。<br><b>验证：</b>低速 6 阶分量下降，小电流无噪声，整车主观评价通过。',exp:'6 阶 → 死区；小电流噪声 → 过零翻转。',links:['C13']}
+);
+
+</script>
+<script>
+/* ===================== 模块 C 交互动画（一）C01–C06 ===================== */
+(function(){
+'use strict';
+const {D2R,TAU,clamp,HH,split,inset,plotBox,pline,pfn,hl,vl,arrow,dline,info,legend,hr,plane}=window.FOC_DRAW;
+const SPECS=window.FOC_ANIM_SPECS;
+
+/* ---------- C01 偏移校准 ---------- */
+SPECS.push({host:'anim-C01',title:'上电偏移校准：累加平均收敛与失败模式',h:HH,
+ params:[{k:'N',label:'平均次数 N',min:16,max:2048,step:16,v:1024,dp:0},{k:'sig',label:'ADC 噪声 σ',min:0,max:12,step:0.5,v:4,unit:'cnt',dp:1}],
+ toggles:[{k:'early',label:'运放稳定前就开始校准',v:false},{k:'cur',label:'校准期间有电流（PWM 未关）',v:false}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),z=2061,G=100/4096;
+  const shown=st.t===0?p.N:Math.min(p.N,Math.floor(st.t*600));
+  const sx=[],sy=[],ex=[],ey=[];let acc=0;
+  for(let k=0;k<shown;k++){let v=z+p.sig*hr(k*1.7)*1.73;if(st.tog.early)v-=40*Math.exp(-k/(p.N*0.15));if(st.tog.cur)v+=6*Math.sin(k*0.07)+3;v=Math.round(v);acc+=v;if(k%Math.max(1,Math.floor(p.N/300))===0){sx.push(k);sy.push(v);ex.push(k);ey.push(acc/(k+1));}}
+  const est=shown?acc/shown:z,err=est-z;
+  const P1=plotBox(ctx,C,inset(S.L,48,22,10,30),[0,p.N],[z-50,z+30],{nx:4,ny:4,title:'ADC 采样点（灰）与累加平均（橙）',xl:'采样序号'});
+  ctx.fillStyle=C.muted;sx.forEach((x,i)=>{ctx.fillRect(P1.X(x)-1,P1.Y(sy[i])-1,2,2);});pline(ctx,P1,ex,ey,C.q,2.2);hl(ctx,P1,[0,p.N],z,C.ok);
+  const P2=plotBox(ctx,C,inset(S.R,40,22,10,30),[0,0.05],[-3,3],{nx:5,ny:6,title:'用该偏移运行时 iq 纹波（1×fe，1000 rpm）',xl:'时间 s'});
+  const rip=Math.abs(err)*G;pfn(ctx,P2,t=>rip*Math.sin(TAU*66.7*t),0,0.05,300,C.q,2);
+  info(ctx,C,['真实零点 = '+z+' cnt','估计值 = '+est.toFixed(2)+' cnt',['误差 = '+err.toFixed(2)+' cnt = '+(err*G).toFixed(3)+' A',Math.abs(err)>1?C.bad:C.ok],'理论噪声残差 σ/√N = '+(p.sig/Math.sqrt(p.N)).toFixed(2)+' cnt',['iq 1×fe 纹波 ≈ '+rip.toFixed(3)+' A',rip>0.05?C.bad:C.ok]],P2.b.x+8,P2.b.y+16);}});
+
+/* ---------- C02 Clarke 合成 ---------- */
+SPECS.push({host:'anim-C02',title:'Clarke：三个相轴分矢量合成空间矢量 i_s',h:HH,
+ params:[{k:'I',label:'相电流峰值',min:5,max:40,step:1,v:30,unit:'A',dp:0},{k:'ang',label:'电流电角度',min:0,max:360,step:1,v:30,unit:'°',dp:0}],
+ toggles:[{k:'pow',label:'使用功率不变系数 √(2/3)',v:false},{k:'brk',label:'C 相断线（ic = 0，但软件仍按平衡计算）',v:false}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),G=plane(ctx,C,inset(S.L,8,10,8,8),50,['α (A)','β']);
+  const th=(p.ang+st.t*40)*D2R;let ia=p.I*Math.cos(th),ib=p.I*Math.cos(th-TAU/3),ic=p.I*Math.cos(th+TAU/3);
+  if(st.tog.brk){ic=0;const m=(ia+ib)/2;ia-=m;ib-=m;}
+  [[0,'A',C.a],[120,'B',C.b],[240,'C',C.c]].forEach(([a,n,col])=>{const E=G.S(48*Math.cos(a*D2R),48*Math.sin(a*D2R));dline(ctx,G.cx,G.cy,E[0],E[1],col);ctx.fillStyle=col;ctx.font='11px system-ui';ctx.fillText(n+' 轴',E[0]+2,E[1]);});
+  const K=st.tog.pow?Math.sqrt(2/3):2/3;const comps=[[ia,0,C.a,'ia'],[ib,120,C.b,'ib'],[ic,240,C.c,'ic']];
+  let x=0,y=0;comps.forEach(([v,a,col,lab])=>{const dx=K*v*Math.cos(a*D2R),dy=K*v*Math.sin(a*D2R);const P0=G.S(x,y),P1=G.S(x+dx,y+dy);arrow(ctx,P0[0],P0[1],P1[0],P1[1],col,1.8,lab);x+=dx;y+=dy;});
+  const Ps=G.S(x,y);arrow(ctx,G.cx,G.cy,Ps[0],Ps[1],C.warn,3.4,'i_s');
+  const Px=G.S(x,0),Py=G.S(0,y);dline(ctx,Ps[0],Ps[1],Px[0],Px[1],C.muted);dline(ctx,Ps[0],Ps[1],Py[0],Py[1],C.muted);
+  const P=plotBox(ctx,C,inset(S.R,40,22,10,30),[-3,0],[-50,50],{nx:3,ny:4,title:'iα（=ia）与 iβ 时域',xl:'s'});
+  const fA=t=>{const a=(p.ang+(st.t+t)*40)*D2R;return K*1.5*p.I*Math.cos(a);},fB=t=>{const a=(p.ang+(st.t+t)*40)*D2R;return K*1.5*p.I*Math.sin(a);};
+  if(!st.tog.brk){pfn(ctx,P,fA,-3,0,200,C.a,2);pfn(ctx,P,fB,-3,0,200,C.q,2);legend(ctx,C,[['iα',C.a],['iβ',C.q]],P.b.x+8,P.b.y+P.b.h-8);}
+  const mag=Math.hypot(x,y);
+  info(ctx,C,['iα = '+x.toFixed(1)+'  iβ = '+y.toFixed(1),['|i_s| = '+mag.toFixed(1)+' A（相峰值 '+p.I+' A）',Math.abs(mag-p.I)<0.5?C.ok:C.bad],st.tog.pow?['功率不变：|i_s| = √(3/2)·峰值',C.warn]:'幅值不变：|i_s| = 峰值',st.tog.brk?['C 相断线：矢量不再是圆轨迹',C.bad]:''].filter(s=>s!==''),P.b.x+8,P.b.y+16);}});
+
+/* ---------- C03 延迟补偿 ---------- */
+SPECS.push({host:'anim-C03',title:'反 Park 延迟补偿：θc = θ + Kc·ωe·Ts',h:HH,
+ params:[{k:'n',label:'转速',min:0,max:8000,step:100,v:6000,unit:'rpm',dp:0},{k:'kc',label:'补偿系数 Kc',min:-2,max:3,step:0.1,v:0,dp:1},{k:'kt',label:'实际延迟（×Ts）',min:0.5,max:3,step:0.1,v:1.5,dp:1}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),Ts=50e-6,G=plane(ctx,C,inset(S.L,8,10,8,8),1.3,['α','β']);
+  const dth=n=>4*n/60*TAU*Ts/D2R, errDeg=n=>(p.kc-p.kt)*dth(n);
+  const th0=(st.t*60)%360*D2R,thAct=th0+p.kt*dth(p.n)*D2R;
+  const d0=G.S(1.2*Math.cos(th0),1.2*Math.sin(th0)),d1=G.S(1.2*Math.cos(thAct),1.2*Math.sin(thAct));
+  dline(ctx,G.cx,G.cy,d0[0],d0[1],C.muted,1.4);arrow(ctx,G.cx,G.cy,d1[0],d1[1],C.d,2,'d（生效时）');
+  const q1=G.S(1.2*Math.cos(thAct+Math.PI/2),1.2*Math.sin(thAct+Math.PI/2));dline(ctx,G.cx,G.cy,q1[0],q1[1],C.q,1.2);
+  const va=th0+p.kc*dth(p.n)*D2R+Math.PI/2;const V=G.S(Math.cos(va),Math.sin(va));arrow(ctx,G.cx,G.cy,V[0],V[1],C.warn,3,'v（期望在 q）');
+  const P=plotBox(ctx,C,inset(S.R,46,22,10,30),[0,8000],[-45,45],{nx:4,ny:6,title:'电压角误差 vs 转速（°电角度）',xl:'转速 rpm'});
+  pfn(ctx,P,n=>-p.kt*dth(n),0,8000,50,C.muted,1.6,[5,4]);pfn(ctx,P,errDeg,0,8000,50,C.bad,2.2);vl(ctx,P,[-45,45],p.n,C.warn);
+  legend(ctx,C,[['未补偿',C.muted],['当前 Kc',C.bad]],P.b.x+8,P.b.y+P.b.h-8);
+  const e=errDeg(p.n);
+  info(ctx,C,['Δθ/周期 = '+dth(p.n).toFixed(2)+'°','未补偿误差 = '+(-p.kt*dth(p.n)).toFixed(1)+'°',['当前误差 = '+e.toFixed(1)+'°',Math.abs(e)>2?C.bad:C.ok],'力矩系数 cos(误差) = '+(Math.cos(e*D2R)*100).toFixed(1)+'%'],P.b.x+8,P.b.y+16);}});
+
+/* ---------- C04 SVPWM ---------- */
+SPECS.push({host:'anim-C04',title:'SVPWM：六边形、扇区、T1/T2 与马鞍形占空比',h:w=>w>=620?360:680,
+ params:[{k:'m',label:'调制幅值 |v|/(Vdc/√3)',min:0.1,max:1.25,step:0.01,v:0.9,dp:2},{k:'f',label:'旋转速度（演示）',min:0.05,max:0.5,step:0.05,v:0.15,unit:'Hz',dp:2}],
+ toggles:[{k:'clip',label:'六边形截断（过调制处理）',v:true}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),Vdc=1,r=inset(S.L,8,10,8,8),cx=r.x+r.w/2,cy=r.y+r.h/2,R=Math.min(r.w,r.h)*0.42,k=R/(2/3);
+  const th=(TAU*p.f*st.t)%TAU,sec=Math.floor(th/(Math.PI/3));
+  const V=i=>[2/3*Math.cos(i*Math.PI/3),2/3*Math.sin(i*Math.PI/3)],P=(x,y)=>[cx+x*k,cy-y*k];
+  ctx.fillStyle=C.panel;ctx.beginPath();for(let i=0;i<6;i++){const q=P(...V(i));i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]);}ctx.closePath();ctx.fill();
+  const a=P(...V(sec)),b=P(...V(sec+1));ctx.fillStyle=C.acc;ctx.globalAlpha=0.15;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.closePath();ctx.fill();ctx.globalAlpha=1;
+  ctx.strokeStyle=C.axis;ctx.beginPath();for(let i=0;i<=6;i++){const q=P(...V(i));i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]);}ctx.stroke();
+  ctx.strokeStyle=C.ok;ctx.setLineDash([4,4]);ctx.beginPath();ctx.arc(cx,cy,(1/Math.sqrt(3))*k,0,TAU);ctx.stroke();ctx.setLineDash([]);
+  const names=['100','110','010','011','001','101'];ctx.font='10.5px ui-monospace';for(let i=0;i<6;i++){const q=P(...V(i));ctx.fillStyle=C.muted;ctx.fillText('V'+(i+1)+'('+names[i]+')',q[0]+(Math.cos(i*Math.PI/3)>0.1?2:(Math.cos(i*Math.PI/3)<-0.1?-40:-24)),q[1]+(Math.sin(i*Math.PI/3)>0.1?-6:14));
+    const mid=P(0.42*Math.cos((i+0.5)*Math.PI/3),0.42*Math.sin((i+0.5)*Math.PI/3));ctx.fillStyle=i===sec?C.acc:C.muted;ctx.fillText(['Ⅰ','Ⅱ','Ⅲ','Ⅳ','Ⅴ','Ⅵ'][i],mid[0]-4,mid[1]+4);}
+  const duty=(ang,mag)=>{let va=mag*Math.cos(ang),vb=mag*Math.cos(ang-TAU/3),vc=mag*Math.cos(ang+TAU/3);const mx=Math.max(va,vb,vc),mn=Math.min(va,vb,vc),v0=-(mx+mn)/2;let kk=1;const span=mx-mn;if(st.tog.clip&&span>Vdc)kk=Vdc/span;return[0.5+kk*(va+v0)/Vdc,0.5+kk*(vb+v0)/Vdc,0.5+kk*(vc+v0)/Vdc,kk];};
+  const mag=p.m/Math.sqrt(3),dd=duty(th,mag);const vr=mag*dd[3],Vt=P(vr*Math.cos(th),vr*Math.sin(th));
+  const tp=th-sec*Math.PI/3,T1=Math.sqrt(3)*vr*Math.sin(Math.PI/3-tp),T2=Math.sqrt(3)*vr*Math.sin(tp);
+  const v1=V(sec),v2=V(sec+1);
+  const s1=[v1[0]*T1,v1[1]*T1];const A1=P(s1[0],s1[1]),A2=P(s1[0]+v2[0]*T2,s1[1]+v2[1]*T2);
+  arrow(ctx,cx,cy,A1[0],A1[1],C.a,1.8,'T1');arrow(ctx,A1[0],A1[1],A2[0],A2[1],C.b,1.8,'T2');arrow(ctx,cx,cy,Vt[0],Vt[1],C.warn,3,'v*');
+  const Pp=plotBox(ctx,C,inset(S.R,40,22,10,30),[0,360],[-0.2,1.2],{nx:6,ny:7,title:'三相占空比（min-max 实现）',xl:'电角度 (°)'});
+  hl(ctx,Pp,[0,360],1,C.bad);hl(ctx,Pp,[0,360],0,C.bad);
+  [0,1,2].forEach((j,ji)=>pfn(ctx,Pp,x=>duty(x*D2R,mag)[j],0,360,240,[C.a,C.b,C.c][ji],1.8));vl(ctx,Pp,[-0.2,1.2],th/D2R,C.warn);
+  legend(ctx,C,[['dA',C.a],['dB',C.b],['dC',C.c]],Pp.b.x+8,Pp.b.y+Pp.b.h-8);
+  const over=dd.slice(0,3).some(v=>v>1.0001||v<-0.0001);
+  info(ctx,C,['扇区 '+['Ⅰ','Ⅱ','Ⅲ','Ⅳ','Ⅴ','Ⅵ'][sec]+'，θ\' = '+(tp/D2R).toFixed(0)+'°','T1/Ts = '+T1.toFixed(3)+'  T2/Ts = '+T2.toFixed(3),'T0/Ts = '+(1-T1-T2).toFixed(3),p.m>1?[st.tog.clip?'过调制：已截到六边形（平顶）':'⚠ 未处理：占空比超出 [0,1]',st.tog.clip?C.warn:C.bad]:['线性区',C.ok],over?['⚠ duty 越界 → 硬件削顶',C.bad]:''].filter(s=>s!==''),Pp.b.x+8,Pp.b.y+16);}});
+
+/* ---------- C05 解耦 ---------- */
+SPECS.push({host:'anim-C05',title:'dq 交叉耦合与解耦前馈：iq 阶跃时 id 的扰动',h:w=>w>=620?380:520,
+ params:[{k:'n',label:'转速',min:0,max:6000,step:100,v:2500,unit:'rpm',dp:0},{k:'perr',label:'前馈参数误差',min:-50,max:50,step:5,v:0,unit:'%',dp:0}],
+ toggles:[{k:'ff',label:'启用解耦前馈（−ωLq·iq，ω(Ld·id+ψf)）',v:false}],
+ draw(ctx,w,h,st,C){const p=st.p,R=0.012,Ld=45e-6,Lq=75e-6,psi=3.5e-3,Ts=50e-6,N=300,we=4*p.n/60*TAU,ke=1+p.perr/100;
+  const ad=Math.exp(-R*Ts/Ld),bd=(1-ad)/R,aq=Math.exp(-R*Ts/Lq),bq=(1-aq)/R,wc=TAU*1000;
+  const Kpd=wc*Ld,Kid=wc*R,Kpq=wc*Lq,Kiq=wc*R;let id=0,iq=0,Id=0,Iq=0,ud0=0,uq0=0;const tx=[],dx=[],qx=[],vdx=[],vqx=[];
+  /* 初始化：稳态反电动势 */Iq=st.tog.ff?0:we*psi;
+  for(let k=0;k<N;k++){const t=k*Ts,iqr=t<1e-3?0:20,idr=0;
+    const fd=st.tog.ff?-we*Lq*ke*iq:0,fq=st.tog.ff?we*(Ld*ke*id+psi*ke):0;
+    Id+=Kid*Ts*(idr-id);Iq+=Kiq*Ts*(iqr-iq);const ud=clamp(Kpd*(idr-id)+Id+fd,-6.6,6.6),uq=clamp(Kpq*(iqr-iq)+Iq+fq,-6.6,6.6);
+    tx.push(t*1000);dx.push(id);qx.push(iq);vdx.push(ud);vqx.push(uq);
+    const ed=-we*Lq*iq,eq=we*(Ld*id+psi);
+    const nid=ad*id+bd*(ud0-ed),niq=aq*iq+bq*(uq0-eq);id=nid;iq=niq;ud0=ud;uq0=uq;}
+  const top={x:46,y:22,w:w-58,h:Math.round(h*0.55)-40},bot={x:46,y:Math.round(h*0.55)+16,w:w-58,h:h-Math.round(h*0.55)-46};
+  const P1=plotBox(ctx,C,top,[0,15],[-25,40],{nx:5,ny:5,title:'iq（橙）阶跃 0→20 A 时 id（紫）的扰动'});
+  pline(ctx,P1,[0,1,1,15],[0,0,20,20],C.muted,1.2,[5,4]);pline(ctx,P1,tx,qx,C.q,2);pline(ctx,P1,tx,dx,C.d,2);
+  const P2=plotBox(ctx,C,bot,[0,15],[-7,7],{nx:5,ny:4,title:'vd（紫）vq（橙），限幅 ±6.6 V',xl:'时间 ms'});
+  pline(ctx,P2,tx,vdx,C.d,1.6);pline(ctx,P2,tx,vqx,C.q,1.6);
+  let mx=0;for(const v of dx)mx=Math.max(mx,Math.abs(v));let t90=null;for(let i=0;i<N;i++)if(t90===null&&tx[i]>1&&qx[i]>=18)t90=tx[i]-1;
+  const vNeed=Math.hypot(we*Lq*20,R*20+we*psi);
+  info(ctx,C,['ωe = '+we.toFixed(0)+' rad/s，ωLq·20A = '+(we*Lq*20).toFixed(2)+' V',vNeed>6.6?['⚠ 稳态需 '+vNeed.toFixed(1)+' V > 6.6 V：电压饱和，需弱磁（C07）',C.bad]:'稳态所需电压 '+vNeed.toFixed(1)+' V',['id 最大偏离 = '+mx.toFixed(1)+' A',mx>3?C.bad:C.ok],'iq 达 90% 用时 = '+(t90!==null?t90.toFixed(2)+' ms':'未达到'),st.tog.ff?(p.perr!==0?['参数误差 '+p.perr+'% → 解耦残差',C.warn]:['前馈参数准确',C.ok]):['未解耦',C.warn]],P1.b.x+P1.b.w*0.45,P1.b.y+16);}});
+
+/* ---------- C06 MTPA ---------- */
+SPECS.push({host:'anim-C06',title:'MTPA：等转矩曲线与电流圆的切点',h:HH,
+ params:[{k:'te',label:'转矩需求',min:0.1,max:1.5,step:0.01,v:0.8,unit:'N·m',dp:2},{k:'lq',label:'Lq（Ld = 45 µH）',min:45,max:150,step:1,v:75,unit:'µH',dp:0}],
+ toggles:[{k:'z',label:'对比 id = 0 方案',v:true}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),pp=4,psi=3.5e-3,Ld=45e-6,Lq=p.lq*1e-6,dL=Lq-Ld;
+  const r=inset(S.L,36,14,10,26),sc=Math.min(r.w/78,r.h/84),X=v=>r.x+(v+72)*sc,Y=v=>r.y+r.h-v*sc;
+  const Te=(id,iq)=>1.5*pp*(psi*iq+(Ld-Lq)*id*iq),iqFor=(id,T)=>T/(1.5*pp*(psi-dL*id));
+  ctx.strokeStyle=C.axis;ctx.beginPath();ctx.moveTo(X(-70),Y(0));ctx.lineTo(X(10),Y(0));ctx.moveTo(X(0),Y(0));ctx.lineTo(X(0),Y(80));ctx.stroke();
+  ctx.fillStyle=C.muted;ctx.font='11px system-ui';ctx.fillText('id (A)',X(-70),Y(0)+14);ctx.fillText('iq (A)',X(0)+4,Y(78));
+  for(let rr=20;rr<=80;rr+=20){ctx.strokeStyle=C.grid;ctx.beginPath();ctx.arc(X(0),Y(0),rr*sc,Math.PI,1.5*Math.PI);ctx.stroke();ctx.fillStyle=C.muted;ctx.fillText(rr+'A',X(-rr*0.71)-14,Y(rr*0.71)-2);}
+  [0.4,0.8,1.2,1.6].forEach(T=>{ctx.strokeStyle=C.c;ctx.globalAlpha=0.5;ctx.beginPath();for(let i=0;i<=100;i++){const id=-70*i/100,iq=iqFor(id,T);const yy=Y(Math.min(iq,85));i?ctx.lineTo(X(id),yy):ctx.moveTo(X(id),yy);}ctx.stroke();ctx.globalAlpha=1;});
+  const a=psi/(2*dL);const mt=iq=>dL>1e-9?a-Math.sqrt(a*a+iq*iq):0;
+  ctx.strokeStyle=C.ok;ctx.lineWidth=2;ctx.setLineDash([5,4]);ctx.beginPath();for(let i=0;i<=80;i++){const iq=i,id=mt(iq);i?ctx.lineTo(X(id),Y(iq)):ctx.moveTo(X(id),Y(iq));}ctx.stroke();ctx.setLineDash([]);ctx.lineWidth=1;
+  let lo=0,hi=200;for(let k=0;k<60;k++){const m=(lo+hi)/2;Te(mt(m),m)<p.te?lo=m:hi=m;}const iqM=lo,idM=mt(iqM),isM=Math.hypot(idM,iqM);
+  const iq0=p.te/(1.5*pp*psi);
+  ctx.strokeStyle=C.c;ctx.lineWidth=2;ctx.beginPath();for(let i=0;i<=100;i++){const id=-70*i/100,iq=iqFor(id,p.te);i?ctx.lineTo(X(id),Y(Math.min(iq,85))):ctx.moveTo(X(id),Y(Math.min(iq,85)));}ctx.stroke();ctx.lineWidth=1;
+  ctx.strokeStyle=C.warn;ctx.setLineDash([3,3]);ctx.beginPath();ctx.arc(X(0),Y(0),isM*sc,Math.PI,1.5*Math.PI);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=C.warn;ctx.beginPath();ctx.arc(X(idM),Y(iqM),5,0,TAU);ctx.fill();
+  if(st.tog.z){ctx.fillStyle=C.bad;ctx.beginPath();ctx.arc(X(0),Y(iq0),4.5,0,TAU);ctx.fill();}
+  const P=plotBox(ctx,C,inset(S.R,46,22,10,30),[0,1.6],[0,70],{nx:4,ny:7,title:'所需电流 |is| vs 转矩',xl:'Te (N·m)'});
+  const isFor=T=>{let l=0,hh=300;for(let k=0;k<50;k++){const m=(l+hh)/2;Te(mt(m),m)<T?l=m:hh=m;}return Math.hypot(mt(l),l);};
+  pfn(ctx,P,isFor,0,1.6,80,C.ok,2);pfn(ctx,P,T=>T/(1.5*pp*psi),0,1.6,10,C.bad,1.6,[5,4]);vl(ctx,P,[0,70],p.te,C.warn);
+  legend(ctx,C,[['MTPA',C.ok],['id = 0',C.bad]],P.b.x+8,P.b.y+P.b.h-8);
+  info(ctx,C,['MTPA：id = '+idM.toFixed(1)+' A，iq = '+iqM.toFixed(1)+' A',['|is| = '+isM.toFixed(1)+' A',C.ok],'id = 0：|is| = '+iq0.toFixed(1)+' A',['电流节省 '+((1-isM/iq0)*100).toFixed(1)+' %',C.ok]],P.b.x+8,P.b.y+16);}});
+})();
+
+</script>
+<script>
+/* ===================== 模块 C 交互动画（二）C07–C13 ===================== */
+(function(){
+'use strict';
+const {D2R,TAU,clamp,HH,split,inset,plotBox,pline,pfn,hl,vl,arrow,dline,info,legend,hr,plane}=window.FOC_DRAW;
+const SPECS=window.FOC_ANIM_SPECS;
+const PP=4,PSI=3.5e-3,LD=45e-6,LQ=75e-6;
+const Tq=(id,iq)=>1.5*PP*(PSI*iq+(LD-LQ)*id*iq);
+
+/* ---------- C07 弱磁 ---------- */
+function bestPoint(we,Vmax,Imax){let best=[0,0,0];for(let k=0;k<=400;k++){const id=-Imax*k/400;const iqc=Math.sqrt(Math.max(0,Imax*Imax-id*id));const d=(Vmax/we)**2-(PSI+LD*id)**2;if(d<0)continue;const iq=Math.min(iqc,Math.sqrt(d)/LQ);const T=Tq(id,iq);if(T>best[0])best=[T,id,iq];}return best;}
+SPECS.push({host:'anim-C07',title:'弱磁：电压极限椭圆随转速收缩，工作点沿电流圆移动',h:HH,
+ params:[{k:'n',label:'转速',min:500,max:12000,step:100,v:3000,unit:'rpm',dp:0},{k:'vdc',label:'母线电压',min:8,max:16,step:0.5,v:12,unit:'V',dp:1},{k:'imax',label:'电流极限 Imax',min:20,max:90,step:1,v:60,unit:'A',dp:0}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),Vmax=0.95*p.vdc/Math.sqrt(3),we=PP*p.n/60*TAU,rad=Vmax/we;
+  const r=inset(S.L,34,14,10,26),sc=Math.min(r.w/170,r.h/(2*90)),X=v=>r.x+(v+150)*sc,Y=v=>r.y+r.h/2-v*sc;
+  ctx.save();ctx.beginPath();ctx.rect(S.L.x,S.L.y,S.L.w,S.L.h);ctx.clip();
+  ctx.strokeStyle=C.axis;ctx.beginPath();ctx.moveTo(X(-150),Y(0));ctx.lineTo(X(20),Y(0));ctx.moveTo(X(0),Y(-90));ctx.lineTo(X(0),Y(90));ctx.stroke();
+  ctx.fillStyle=C.muted;ctx.font='11px system-ui';ctx.fillText('id',X(16),Y(0)-4);ctx.fillText('iq',X(0)+4,Y(86));
+  ctx.strokeStyle=C.muted;ctx.lineWidth=1.6;ctx.beginPath();ctx.arc(X(0),Y(0),p.imax*sc,0,TAU);ctx.stroke();
+  const cx0=-PSI/LD,ax=rad/LD,ay=rad/LQ;ctx.strokeStyle=C.acc;ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(X(cx0),Y(0),ax*sc,ay*sc,0,0,TAU);ctx.stroke();ctx.lineWidth=1;
+  ctx.fillStyle=C.acc;ctx.beginPath();ctx.arc(X(cx0),Y(0),3,0,TAU);ctx.fill();ctx.fillText('−ψf/Ld',X(cx0)-20,Y(0)+14);
+  const a=PSI/(2*(LQ-LD));ctx.strokeStyle=C.ok;ctx.setLineDash([5,4]);ctx.beginPath();for(let i=0;i<=90;i++){const iq=i,id=a-Math.sqrt(a*a+iq*iq);i?ctx.lineTo(X(id),Y(iq)):ctx.moveTo(X(id),Y(iq));}ctx.stroke();ctx.setLineDash([]);
+  const b=bestPoint(we,Vmax,p.imax);ctx.fillStyle=C.warn;ctx.beginPath();ctx.arc(X(b[1]),Y(b[2]),5.5,0,TAU);ctx.fill();ctx.restore();
+  const P=plotBox(ctx,C,inset(S.R,46,22,10,30),[0,12000],[0,1.8],{nx:4,ny:6,title:'外特性：最大转矩 vs 转速',xl:'转速 rpm'});
+  pfn(ctx,P,n=>bestPoint(PP*n/60*TAU,Vmax,p.imax)[0],200,12000,90,C.acc,2);vl(ctx,P,[0,1.8],p.n,C.warn);
+  let nb=0;for(let n=200;n<12000;n+=50){const bb=bestPoint(PP*n/60*TAU,Vmax,p.imax);const idm=a-Math.sqrt(a*a+bb[2]*bb[2]);if(bb[1]<idm-0.5){nb=n;break;}}
+  info(ctx,C,['Vmax = '+Vmax.toFixed(2)+' V，Vmax/ωe = '+(rad*1e3).toFixed(2)+' mWb','工作点 id = '+b[1].toFixed(1)+' A，iq = '+b[2].toFixed(1)+' A',['Te,max = '+b[0].toFixed(2)+' N·m',b[0]>0.05?C.ok:C.bad],'弱磁起点（基速）≈ '+(nb||'—')+' rpm',p.imax<PSI/LD?'Ich = 77.8 A > Imax：最高转速有限':['Ich ≤ Imax：理论可持续升速',C.ok]],P.b.x+8,P.b.y+16);}});
+
+/* ---------- C08 位置环前馈 ---------- */
+SPECS.push({host:'anim-C08',title:'位置环：纯 P 反馈 vs 速度前馈',h:HH,
+ params:[{k:'f',label:'位置指令频率',min:0.2,max:5,step:0.1,v:1,unit:'Hz',dp:1},{k:'kp',label:'位置环 Kp',min:2,max:60,step:1,v:15,unit:'1/s',dp:0},{k:'fs',label:'速度环带宽',min:5,max:100,step:1,v:40,unit:'Hz',dp:0},{k:'kff',label:'前馈增益',min:0,max:1.5,step:0.05,v:1,dp:2}],
+ toggles:[{k:'ff',label:'启用速度前馈',v:true}],
+ draw(ctx,w,h,st,C){const p=st.p,dt=1e-3,T=3,N=T/dt,A=90,ws=TAU*p.fs;let th=0,w_=0;const tx=[],rx=[],yx=[],ex=[];let emax=0;
+  for(let k=0;k<N;k++){const t=k*dt,ref=A*Math.sin(TAU*p.f*t),dref=A*TAU*p.f*Math.cos(TAU*p.f*t);
+    const wr=p.kp*(ref-th)+(st.tog.ff?p.kff*dref:0);w_+=(wr-w_)*(1-Math.exp(-ws*dt));th+=w_*dt;
+    if(k%5===0){tx.push(t);rx.push(ref);yx.push(th);ex.push(ref-th);}if(t>1)emax=Math.max(emax,Math.abs(ref-th));}
+  const S=split(w,h),fr=st.t===0?1:clamp((st.t%5)/4,0.02,1),n=Math.max(2,Math.floor(tx.length*fr));
+  const P1=plotBox(ctx,C,inset(S.L,46,22,10,30),[0,T],[-120,120],{nx:3,ny:4,title:'位置（°机械）：给定（灰）实际（蓝）',xl:'时间 s'});
+  pline(ctx,P1,tx,rx,C.muted,1.4,[5,4]);pline(ctx,P1,tx.slice(0,n),yx.slice(0,n),C.acc,2);
+  const em=Math.max(5,Math.ceil(emax*1.3/5)*5);
+  const P2=plotBox(ctx,C,inset(S.R,46,22,10,30),[0,T],[-em,em],{nx:3,ny:4,title:'跟踪误差（°）',xl:'时间 s'});pline(ctx,P2,tx.slice(0,n),ex.slice(0,n),C.bad,1.8);
+  info(ctx,C,['稳态误差峰值 = '+emax.toFixed(2)+'°',st.tog.ff?(Math.abs(p.kff-1)<0.06?['前馈 ≈ 1：误差仅来自内环动态',C.ok]:['前馈增益偏离 1',C.warn]):['纯 P：误差 ≈ ω/Kp',C.warn],'理论纯 P 误差 ≈ '+(A*TAU*p.f/p.kp).toFixed(1)+'°'],P2.b.x+8,P2.b.y+16);}});
+
+/* ---------- C09 旋变误差 ---------- */
+SPECS.push({host:'anim-C09',title:'旋变 sin/cos 非理想 → 解码角度误差谐波',h:HH,
+ params:[{k:'amp',label:'幅值不平衡 Δk/k',min:-10,max:10,step:0.5,v:0,unit:'%',dp:1},{k:'off',label:'sin 直流偏置',min:-5,max:5,step:0.25,v:0,unit:'%',dp:2},{k:'ph',label:'非正交 δ',min:-5,max:5,step:0.25,v:0,unit:'°',dp:2}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),G=plane(ctx,C,inset(S.L,8,10,8,8),1.25,['cos','sin']);
+  const sn=t=>(1+p.amp/100)*Math.sin(t)+p.off/100,cs=t=>Math.cos(t+p.ph*D2R);
+  const err=t=>{let e=Math.atan2(sn(t),cs(t))-t;while(e>Math.PI)e-=TAU;while(e<-Math.PI)e+=TAU;return e/D2R;};
+  ctx.save();ctx.strokeStyle=C.acc;ctx.lineWidth=1.8;ctx.beginPath();for(let i=0;i<=200;i++){const t=TAU*i/200,P=G.S(cs(t),sn(t));i?ctx.lineTo(P[0],P[1]):ctx.moveTo(P[0],P[1]);}ctx.stroke();ctx.restore();
+  ctx.save();ctx.strokeStyle=C.grid;ctx.beginPath();ctx.arc(G.cx,G.cy,G.k,0,TAU);ctx.stroke();ctx.restore();
+  const th=(st.t*0.8)%TAU,Pp=G.S(cs(th),sn(th));arrow(ctx,G.cx,G.cy,Pp[0],Pp[1],C.warn,2.4,'θ̂');
+  let em=0;for(let i=0;i<=360;i++)em=Math.max(em,Math.abs(err(i*D2R)));const yr=Math.max(1,Math.ceil(em*1.3));
+  const P=plotBox(ctx,C,inset(S.R,46,22,10,30),[0,360],[-yr,yr],{nx:6,ny:4,title:'机械角度误差 θ̂ − θ（°）vs 真实角度',xl:'θ（°，1 对极旋变）'});
+  pfn(ctx,P,x=>err(x*D2R),0,360,360,C.bad,2);vl(ctx,P,[-yr,yr],th/D2R,C.warn);
+  let h1=0,h2=0;for(let i=0;i<360;i++){const t=i*D2R,e=err(t);h1+=e*Math.sin(t)/180;h2+=e*Math.sin(2*t)/180;}
+  info(ctx,C,['误差峰值 = '+em.toFixed(2)+'° 机械 = '+(em*4).toFixed(2)+'° 电角度',['1 次分量 ≈ '+Math.abs(h1).toFixed(2)+'°（偏置）',Math.abs(h1)>0.1?C.warn:C.fg],['2 次分量 ≈ '+Math.abs(h2).toFixed(2)+'°（幅值 / 正交）',Math.abs(h2)>0.1?C.warn:C.fg],'电角度上表现为 4×、8× 机械阶次'],P.b.x+8,P.b.y+16);}});
+
+/* ---------- C10 PLL 收敛 ---------- */
+SPECS.push({host:'anim-C10',title:'反电动势观测 + PLL：角度收敛与低速信噪比',h:HH,
+ params:[{k:'n',label:'转速',min:100,max:6000,step:50,v:2000,unit:'rpm',dp:0},{k:'bw',label:'PLL 带宽 ωn',min:30,max:1500,step:10,v:250,unit:'rad/s',dp:0},{k:'noise',label:'反电动势估计噪声',min:0,max:1,step:0.02,v:0.15,unit:'V',dp:2}],
+ toggles:[{k:'lag',label:'SMO 低通相位未补偿（ωc = 1.5ωe）',v:false}],
+ draw(ctx,w,h,st,C){const p=st.p,dt=50e-6,N=3000,we=PP*p.n/60*TAU,E=we*PSI,Ki=p.bw*p.bw,Kp=2*p.bw,lag=st.tog.lag?Math.atan(1/1.5):0;
+  let th=0,thh=30*D2R,wi=0,wh=0;const tx=[],ex=[],wx=[];let es=0,ns=0;
+  for(let k=0;k<N;k++){th+=we*dt;const tr=th-lag;const eA=-E*Math.sin(tr)+p.noise*hr(k*1.3),eB=E*Math.cos(tr)+p.noise*hr(k*2.7+11);
+    const mag=Math.hypot(eA,eB)+1e-6,er=(-eA*Math.cos(thh)-eB*Math.sin(thh))/mag;wi+=Ki*dt*er;wh=Kp*er+wi;thh+=wh*dt;
+    let e=th-thh;e=((e+Math.PI)%TAU+TAU)%TAU-Math.PI;if(k%6===0){tx.push(k*dt*1000);ex.push(e/D2R);wx.push(wh/(PP*TAU)*60);}if(k>N*0.6){es+=e*e;ns++;}}
+  const S=split(w,h),fr=st.t===0?1:clamp((st.t%4)/3,0.02,1),n=Math.max(2,Math.floor(tx.length*fr)),G=plane(ctx,C,inset(S.L,8,10,8,8),1.3,['α','β']);
+  const ti=Math.floor((n-1)*6),thN=we*ti*dt,eT=G.S(-Math.sin(thN-lag),Math.cos(thN-lag));arrow(ctx,G.cx,G.cy,eT[0],eT[1],C.muted,2.2,'e');
+  const thE=thN-ex[n-1]*D2R,eE=G.S(-Math.sin(thE),Math.cos(thE));arrow(ctx,G.cx,G.cy,eE[0],eE[1],C.d,2.2,'PLL');
+  const P=plotBox(ctx,C,inset(S.R,46,22,10,30),[0,150],[-45,45],{nx:5,ny:6,title:'角度误差 θ − θ̂（°电角度）',xl:'时间 ms'});
+  pline(ctx,P,tx.slice(0,n),ex.slice(0,n),C.bad,1.6);
+  const rms=Math.sqrt(es/Math.max(1,ns))/D2R,snr=E/Math.max(1e-6,p.noise);
+  info(ctx,C,['|e| = ωe·ψf = '+E.toFixed(2)+' V，SNR = '+(p.noise>0?snr.toFixed(1):'∞'),['稳态误差 RMS = '+rms.toFixed(2)+'°',rms>5?C.bad:C.ok],'PLL ωn = '+p.bw+' rad/s，ζ = 1',st.tog.lag?['⚠ 未补偿低通滞后 '+(lag/D2R).toFixed(1)+'°',C.bad]:'',snr<3?['低速信噪比不足：观测不可靠',C.bad]:''].filter(s=>s!==''),P.b.x+8,P.b.y+16);}});
+
+/* ---------- C13 死区 ---------- */
+SPECS.push({host:'anim-C13',title:'死区效应：电压误差随电流方向翻转（dq 中为 6 倍频）',h:HH,
+ params:[{k:'td',label:'死区时间 Td',min:0,max:3,step:0.1,v:1,unit:'µs',dp:1},{k:'v',label:'基波相电压幅值',min:0.3,max:6.5,step:0.1,v:1,unit:'V',dp:1},{k:'phi',label:'电流滞后电压角',min:0,max:90,step:1,v:30,unit:'°',dp:0},{k:'i0',label:'补偿线性区 I0（相对峰值）',min:0.01,max:0.5,step:0.01,v:0.1,dp:2}],
+ toggles:[{k:'comp',label:'启用死区补偿',v:false}],
+ draw(ctx,w,h,st,C){const p=st.p,S=split(w,h),dV=p.td/50*12,fs=x=>clamp(x/p.i0,-1,1);
+  const vref=t=>p.v*Math.cos(t),ia=t=>Math.cos(t-p.phi*D2R);
+  const vact=t=>vref(t)-dV*Math.sign(ia(t))+(st.tog.comp?dV*fs(ia(t)):0);
+  const P1=plotBox(ctx,C,inset(S.L,44,22,10,30),[0,360],[-p.v*1.6-0.3,p.v*1.6+0.3],{nx:4,ny:4,title:'A 相：给定（灰）实际平均（红）电流方向（蓝）',xl:'电角度 (°)'});
+  pfn(ctx,P1,x=>vref(x*D2R),0,360,360,C.muted,1.6);pfn(ctx,P1,x=>vact(x*D2R),0,360,720,C.bad,2);pfn(ctx,P1,x=>ia(x*D2R)*p.v,0,360,360,C.acc,1.2,[4,3]);
+  const ed=t=>{let ea=0,eb=0;[0,1,2].forEach(j=>{const sh=j*TAU/3,e=vact(t-sh)-vref(t-sh);ea+=2/3*e*Math.cos(sh);eb+=2/3*e*Math.sin(sh);});return -ea*Math.sin(t)+eb*Math.cos(t);};
+  const P2=plotBox(ctx,C,inset(S.R,44,22,10,30),[0,360],[-dV*2-0.1,dV*2+0.1],{nx:4,ny:4,title:'dq 中 q 轴电压误差（三相合成）',xl:'电角度 (°)'});
+  pfn(ctx,P2,x=>ed(x*D2R),0,360,720,C.q,2);
+  let pk=0;for(let i=0;i<360;i++)pk=Math.max(pk,Math.abs(ed(i*D2R)));
+  info(ctx,C,['ΔV = Td/Ts·Vdc = '+dV.toFixed(3)+' V（12 V）',['误差 / 基波 = '+(dV/p.v*100).toFixed(0)+' %',dV/p.v>0.1?C.bad:C.ok],'q 轴误差峰值 = '+pk.toFixed(3)+' V（6 倍频）',st.tog.comp?['已补偿：残差来自线性区',C.ok]:['未补偿',C.warn]],P2.b.x+8,P2.b.y+16);}});
+})();
+
 </script>
 <script>document.readyState==="loading"?document.addEventListener("DOMContentLoaded",FOC_INIT):FOC_INIT();</script>
 </body>
 </html>
-<!-- NEXT_SEGMENT: B01 B02 B03 -->

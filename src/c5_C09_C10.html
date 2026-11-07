@@ -1,0 +1,258 @@
+
+<!-- ================= C09 ================= -->
+<section class="chap" id="C09" data-title="C09 角度传感方案">
+<h2 class="chap-h">C09 角度传感：霍尔、编码器、旋变——解码、零位标定与角度误差</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 9 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>Park / 反 Park 的角度来源；测速来源</td></tr>
+<tr><th>输入 / 输出</th><td>输入：旋变 sin/cos 包络（经 AD2S1210 解码）；输出：gFoc.thetaM、thetaE、速度</td></tr>
+<tr><th>工程价值</th><td>角度误差 = 换向误差：力矩下降、正反转不对称、力矩脉动（误差谐波）</td></tr>
+<tr><th>上下游依赖</th><td>下游 C03、A05 测速、C12 角度诊断</td></tr>
+<tr><th>适用角色</th><td>底层、算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A02 atan2、A03 三角、A07 跟踪环</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>FOC 的「电子换向」完全依赖角度；EPS 零速也要满力矩，必须有绝对位置传感器。</div>
+<div><b>② 量产怎么做</b>旋变 + 解码芯片（跟踪型 R/D 转换）；零位产线标定写 NVM；解码芯片故障位（信号丢失 / 退化 / 跟踪丢失）进入诊断。</div>
+<div><b>③ 如何证明</b>对拖反电动势过零与 θe 对齐（误差 &lt; 1° 电角度量级）；正反转对称；恒速时角度误差频谱。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>硬件：旋变激磁驱动、sin/cos 差分接收、解码芯片与 MCU 接口（SPI / 并口）。</li>
+<li>配置：分辨率、激磁频率（AD2S1210 支持 10/12/14/16 位分辨率与可编程激磁频率，具体范围与跟踪速率以 ADI 数据手册为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>旋变极对数：本案例假设为 1 对极旋变，θe = 4·θres <span class="tg tg-case">【案例假设】</span>；若旋变极对数与电机相同，θe 直接等于旋变电角度。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>方案</th><th>分辨率</th><th>零速</th><th>环境鲁棒性</th><th>典型应用</th></tr>
+<tr><td>霍尔（3 路）</td><td>60° 电角度</td><td>只知扇区</td><td>好</td><td>低成本 BLDC、风机；需插值</td></tr>
+<tr><td>增量编码器</td><td>高</td><td>需找零（Z 信号 / 对齐）</td><td>一般（污染、振动）</td><td>工业伺服</td></tr>
+<tr><td>绝对编码器 / 磁编</td><td>高</td><td>是</td><td>较好</td><td>伺服、部分 EPS</td></tr>
+<tr><td>旋变</td><td>由解码决定（12~16 位）</td><td>是</td><td>很好（耐温、耐振）</td><td>车载电驱、EPS</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+旋变输出：Vsin = k·Vex·sin θ·sin(ωex·t)，Vcos = k·Vex·cos θ·sin(ωex·t)
+跟踪型解码：误差 ε = sin θ·cos θ̂ − cos θ·sin θ̂ = sin(θ − θ̂)，II 型环路驱动 θ̂ → θ
+典型误差源与角度误差谐波（小误差近似）：
+   sin/cos 直流偏置 → 1 次谐波误差
+   幅值不平衡 Δk/k → 约 (Δk/2k)·sin 2θ，2 次谐波
+   非正交（相位误差 δ）→ 约 δ/2 的常值 + 2 次谐波
+   激磁 / 信号相位延迟（随温度、线缆变化）→ 需解码芯片相位补偿
+   跟踪环动态滞后 → 随转速 / 加速度增大
+零位：θe = p·θm − θoff；θoff 由 d 轴对齐或反电动势法标定</div>
+<div id="anim-C09"></div>
+<div class="anim-note"><b>动画在演示什么：</b>旋变 sin、cos 包络（左图 XY 为李萨如图，理想为圆），以及 atan2 解码角度相对真实角度的误差曲线（右图，横轴为真实电角度）。<br>
+<b>拖动滑块：</b>「幅值不平衡」→ 李萨如图变椭圆，误差出现 2 次谐波；「直流偏置」→ 圆心偏移，1 次谐波误差；「非正交」→ 椭圆倾斜。误差最终以 p × 谐波阶次出现在电角度上，引起力矩脉动。<br>
+<b>正常：</b>圆、误差 ≈ 0。<b>异常：</b>按谐波阶次反推原因。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>读取角度</b>：每 PWM 周期在采样时刻锁存解码芯片位置（与电流采样同步），12 位左移 4 位转 uint16。</li>
+<li><b>电角度</b>：θe = (uint16)(θm × 4 − Cal_ThetaOffset)（A03）。</li>
+<li><b>零位标定（d 轴对齐法）</b>：注入 id = 恒定（如 20 A，iq = 0），开环角度固定为 0，转子被吸到 d 轴；稳定后读 θm，Cal_ThetaOffset = θm × 4（取低 16 位）。正反两个方向接近后取平均以减小摩擦影响。</li>
+<li><b>零位标定（反电动势法）</b>：对拖，PWM 关闭，测 A 相反电动势过零时刻对应的 θe，与理论值比较（更准，需要对拖台架）。</li>
+<li><b>诊断</b>：解码芯片故障位（信号丢失 LOS、信号退化 DOS、跟踪丢失 LOT 等，以手册为准）；角度跳变（相邻周期 Δθ 超出物理可能）；与无感观测角度比较。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>恒速：θe 均匀锯齿；Δθ 每周期恒定（±少量噪声）。</li>
+<li>零位正确：id = 0 控制、空载对拖时 vd ≈ 0（小电流下），正反转 vd 对称。</li>
+<li>角度误差谐波：力矩脉动频谱中出现对应阶次。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile uint16_t Cal_ThetaOffset = 0u;      /* 产线标定写 NVM */
+
+/* 【伪代码】d 轴对齐法零位标定（台架标定模式，D06 调用）*/
+typedef enum { ZC_IDLE, ZC_ALIGN, ZC_SETTLE, ZC_DONE } ZeroCal_ten;
+void FOC_ZeroCal_1ms(void)
+{
+    static ZeroCal_ten st = ZC_IDLE;  static uint16_t t; static uint32_t acc; static uint16_t n;
+    switch (st) {
+    case ZC_IDLE:   FOC_SetOpenLoopAngle(0u); FOC_SetIdqRef(AMP_TO_Q15(20.0f), 0);
+                    t = 0u; acc = 0u; n = 0u; st = ZC_ALIGN; break;
+    case ZC_ALIGN:  if (++t &gt; 800u) { st = ZC_SETTLE; t = 0u; } break;        /* 0.8 s 吸合 */
+    case ZC_SETTLE: acc += (uint16_t)(gFoc.thetaM * FOC_POLE_PAIRS); n++;      /* 注意过零：真实代码用矢量平均 */
+                    if (n &gt;= 200u) { Cal_ThetaOffset = (uint16_t)(acc / n); st = ZC_DONE; } break;
+    default:        FOC_SetIdqRef(0, 0); break;
+    }
+}
+
+/* 角度跳变诊断：相邻周期增量超过 8000 rpm 对应值的 2 倍 */
+void FOC_AngleJumpDiag_Isr(int16_t dTh)
+{
+    if ((dTh &gt; 3500) || (dTh &lt; -3500)) { Diag_Debounce(DIAG_ANGLE_JUMP); }
+}</code></pre>
+<p class="note">伪代码中对角度求算术平均在 0 / 65535 附近会出错，真实实现应对 sin、cos 分别求平均再 atan2（矢量平均）。对齐电流的大小要能克服齿槽与摩擦，同时不超过热与保护限制。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>力矩脉动在 2×p 阶（机械）突出</h5><dl>
+<dt>现象</dt><dd>转向时感到与机械转速相关的周期脉动，频谱在机械 8 阶（2×4）突出。</dd>
+<dt>可能根因</dt><dd>旋变 sin/cos 幅值不平衡 → 2 次角度误差，乘极对数 4。</dd>
+<dt>排查</dt><dd>采集 sin/cos 包络或解码误差；对比编码器参考角度。</dd>
+<dt>修复</dt><dd>硬件增益匹配；软件误差补偿表（按 θm 查表）。</dd>
+<dt>验证</dt><dd>对应阶次脉动下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>零位标定结果每次差几度</h5><dl>
+<dt>现象</dt><dd>重复标定 Cal_ThetaOffset 分散 ±3° 电角度。</dd>
+<dt>可能根因</dt><dd>齿槽 / 摩擦使转子停不到 d 轴；对齐电流太小；单方向接近。</dd>
+<dt>排查</dt><dd>不同对齐电流、正反方向接近比较。</dd>
+<dt>修复</dt><dd>增大对齐电流、双向平均；或用反电动势法。</dd>
+<dt>验证</dt><dd>重复性 &lt; 0.5°。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高温下高速力矩下降</h5><dl>
+<dt>现象</dt><dd>冷态正常，高温高速力矩不足。</dd>
+<dt>可能根因</dt><dd>旋变信号相位随温度变化，解码延迟改变；ψf 下降。</dd>
+<dt>排查</dt><dd>高温对拖测零位是否漂移。</dd>
+<dt>修复</dt><dd>解码芯片相位补偿；延迟补偿按温度修正。</dd>
+<dt>验证</dt><dd>高低温力矩一致性。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>角度锁存时刻与电流采样不同步：引入与转速成正比的角度误差。</li>
+<li><span class="tg tg-red">【风险红线】</span>角度传感器失效时继续闭环 → 力矩方向错误。EPS 必须有角度合理性诊断（跳变、与观测器比较、解码故障位）并进入安全状态或降级。</li>
+<li>对齐法标定时电机必须无负载、可自由转动；否则标定值错误。</li>
+<li>旋变与电机极对数配置不一致：θe 每圈锯齿数错误（B07 动画判据）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C09" id="quiz-C09"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：传感器对比、旋变解码原理、误差源与谐波阶次、零位标定两种方法、角度诊断。</li>
+<li>台架高频：正反转不对称、力矩脉动阶次分析、标定重复性。</li></ul></div>
+</section>
+
+<!-- ================= C10 ================= -->
+<section class="chap" id="C10" data-title="C10 无感观测">
+<h2 class="chap-h">C10 无感观测：MRAS、滑模观测器 SMO、龙伯格观测器、PLL 角度提取</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 10 节（本案例用作旋变失效后的降级备份）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>替代 / 校验位置传感器：电压、电流 → 估计角度与速度</td></tr>
+<tr><th>输入 / 输出</th><td>输入：vα、vβ（给定电压）、iα、iβ、参数；输出：θ̂e、ω̂e</td></tr>
+<tr><th>工程价值</th><td>EPS：旋变故障降级、角度合理性交叉校验；低成本应用：取消传感器</td></tr>
+<tr><th>上下游依赖</th><td>上游 C02、C04、C11（参数）；下游 C03、C12</td></tr>
+<tr><th>适用角色</th><td>算法</td></tr>
+<tr><th>前置数学依赖</th><td>A04 复数、A06 积分、A07 传递函数、A08 PI（PLL）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>反电动势 e = ωe·ψf·(−sinθ, cosθ) 中包含角度信息；从可测的电压电流中把它「估计」出来即可得到角度。</div>
+<div><b>② 量产怎么做</b>中高速用反电动势类观测器（SMO / 龙伯格 / 磁链观测）+ PLL；零低速用高频注入（IPMSM 凸极）或开环 I/F 启动；参数在线修正。</div>
+<div><b>③ 如何证明</b>与旋变角度对比的角度误差（稳态、动态、各转速）；切换过程电流平滑；参数偏差 ±30% 下的误差。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>准确的 Rs、Ls（SPMSM）或 Ld、Lq（IPMSM 用扩展反电动势模型）。</li>
+<li>输入电压：通常用给定电压，需要死区补偿（C13），否则低速误差大。</li>
+<li>不满足：低速反电动势太小，信噪比不足 → 观测失效（反电动势类方法的根本限制）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+静止坐标电压方程（SPMSM）：v_αβ = Rs·i_αβ + Ls·di_αβ/dt + e_αβ，e_αβ = ωe·ψf·[−sinθ, cosθ]
+IPMSM 扩展反电动势（EEMF）：把凸极项并入「扩展反电动势」，模型对称化（来源：Morimoto / Chen 等提出的 EEMF 模型）
+① 滑模观测器 SMO：
+   估计电流 d î/dt = (v − Rs·î − z)/Ls，z = k·sign(î − i)（或饱和函数）
+   滑模面上 z 的等效值 ≈ e，需低通得到 ê，再提取角度；低通相位滞后 Δφ = atan(ωe/ωc) 需补偿
+   优点：鲁棒、实现简单；缺点：抖振、需滤波与补偿
+② 龙伯格观测器：以反电动势为状态（慢变），用线性增益 L·(î − i) 修正
+   优点：无抖振、可按极点配置设计；缺点：对参数更敏感
+③ MRAS：参考模型（电压模型）与可调模型（电流模型）的输出误差驱动自适应律估计 ω
+   优点：理论成熟；缺点：低速对 Rs 敏感
+角度提取：
+   atan2(−êα, êβ)：简单但噪声直接进入角度
+   PLL：ε = −êα·cosθ̂ − êβ·sinθ̂ ≈ |ê|·sin(θ − θ̂)，PI 输出 ω̂，积分得 θ̂（同时得到平滑速度）
+零低速：高频注入（脉振 / 旋转注入），利用 Ld ≠ Lq 的凸极性 <span class="tg tg-check">【待核对：具体注入方案依项目】</span>
+<span class="tg tg-vendor">【厂商参考】</span>TI InstaSPIN-FOC 的 FAST 观测器为 TI 私有算法 <span class="tg tg-check">【厂商私有方案】</span>；ST MC SDK 提供基于 PLL / CORDIC 的状态观测器；NXP 提供开源的 MCAT / RTCESL 中的反电动势观测器组件——均为参考实现，不是唯一标准。</div>
+<div id="anim-C10"></div>
+<div class="anim-note"><b>动画在演示什么：</b>估计反电动势（含噪声）送入 PLL，PLL 从 30° 初始误差开始收敛。左图：αβ 中真实反电动势（灰）与 PLL 角度对应的单位矢量（紫）；右图：角度误差与速度估计随时间收敛。<br>
+<b>拖动滑块：</b>增大 PLL 带宽 → 收敛快但噪声大；降低转速 → 反电动势幅值变小，信噪比下降，误差抖动变大（低速限制）；「SMO 低通未补偿」引入与转速相关的常值角度误差。<br>
+<b>正常：</b>误差快速收敛到 0 附近。<b>异常：</b>低速发散、常值偏差。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>SMO 电流模型</b>（20 kHz）：î[k+1] = î[k] + Ts/Ls·(v − Rs·î − z)，使用上周期电压（与电流时刻对齐）。</li>
+<li><b>开关函数</b>：sign 用饱和函数（边界层）减小抖振；增益 k 大于反电动势最大值。</li>
+<li><b>低通</b>：ê = LPF(z)，截止频率随转速自适应（如 ωc = 1.5~2·ωe），相位补偿 atan(ωe/ωc)。</li>
+<li><b>PLL</b>：误差归一化（除以 |ê|）使环路增益与转速无关。</li>
+<li><b>启动</b>：I/F 开环升速到观测可用转速（如额定 10% 以上），角度误差稳定后切换（D06）。</li>
+<li><b>EPS 降级</b>：低速不可用时的策略（限制助力 / 安全状态）由系统安全设计决定。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>中高速：观测角与旋变角误差在若干度以内；速度估计平滑。</li>
+<li>低速：误差增大并抖动；死区补偿与 Rs 准确度显著影响低速表现。</li>
+<li>负载阶跃：短暂角度误差后恢复；PLL 带宽决定恢复速度。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 浮点示意（S32K146 带单精度 FPU，可在中断中使用 float；定点版本见 D02 思路）*/
+typedef struct { float iaHat, ibHat, eA, eB, thHat, wHat, integ; } SMO_tst;
+static SMO_tst s_smo;
+volatile float Cal_SmoK = 8.0f, Cal_SmoBnd = 2.0f;     /* 增益 V、边界层 A 【案例假设】 */
+volatile float Cal_PllKp = 400.0f, Cal_PllKi = 40000.0f;
+
+static float satf(float x, float b) { return (x &gt; b) ? 1.0f : ((x &lt; -b) ? -1.0f : x / b); }
+
+void FOC_Smo_Isr(float vA, float vB, float iA, float iB)
+{
+    const float Ts = 50e-6f, Rs = 0.012f, Ls = 60e-6f;   /* Ls 取 (Ld+Lq)/2 近似，IPMSM 应用 EEMF */
+    float zA = Cal_SmoK * satf(s_smo.iaHat - iA, Cal_SmoBnd);
+    float zB = Cal_SmoK * satf(s_smo.ibHat - iB, Cal_SmoBnd);
+    s_smo.iaHat += Ts / Ls * (vA - Rs * s_smo.iaHat - zA);
+    s_smo.ibHat += Ts / Ls * (vB - Rs * s_smo.ibHat - zB);
+    float wc = fmaxf(1.5f * fabsf(s_smo.wHat), 300.0f);  /* 自适应低通截止 rad/s */
+    float a  = wc * Ts;
+    s_smo.eA += a * (zA - s_smo.eA);
+    s_smo.eB += a * (zB - s_smo.eB);
+    /* PLL：误差 = |e|·sin(θ − θ̂)，归一化 */
+    float s = sinf(s_smo.thHat), c = cosf(s_smo.thHat);
+    float mag = sqrtf(s_smo.eA * s_smo.eA + s_smo.eB * s_smo.eB) + 1e-3f;
+    float err = (-s_smo.eA * c - s_smo.eB * s) / mag;
+    s_smo.integ += Cal_PllKi * Ts * err;
+    s_smo.wHat   = Cal_PllKp * err + s_smo.integ;
+    s_smo.thHat += s_smo.wHat * Ts;
+    if (s_smo.thHat &gt;  3.14159265f) { s_smo.thHat -= 6.2831853f; }   /* 取模，防止 A06 的精度问题 */
+    if (s_smo.thHat &lt; -3.14159265f) { s_smo.thHat += 6.2831853f; }
+    gFoc.thetaEObs = (uint16_t)(int32_t)(s_smo.thHat * 10430.378f) + (uint16_t)(atanf(s_smo.wHat / wc) * 10430.378f);
+}</code></pre>
+<p class="note">最后一行为低通相位补偿（rad → uint16：×65536/2π = 10430.4）。PLL 参数按带宽设计：ωn ≈ √Ki，ζ = Kp/(2√Ki)，示例约 200 rad/s、ζ = 1。该代码用于教学说明结构，量产需完成定点化 / 执行时间评估与充分台架验证。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>无感切入失败、切入后失步</h5><dl>
+<dt>现象</dt><dd>I/F 升速后切换到观测角，电流冲击、电机抖动停转。</dd>
+<dt>可能根因</dt><dd>切换时观测角与开环角相差大；观测器尚未收敛；切换转速过低。</dd>
+<dt>排查</dt><dd>切换前记录 θ_obs − θ_IF；不同切换转速试验。</dd>
+<dt>修复</dt><dd>误差小于阈值并保持一段时间再切；切换过程逐步过渡（角度 / 电流斜坡）；积分器预置（C05）。</dd>
+<dt>验证</dt><dd>多次重复切换成功率 100%，电流平滑。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>观测角存在随转速变化的常值偏差</h5><dl>
+<dt>现象</dt><dd>与旋变比较，误差随转速增大。</dd>
+<dt>可能根因</dt><dd>低通相位滞后未补偿 / 补偿不正确；计算延迟未补偿。</dd>
+<dt>排查</dt><dd>扫转速绘制误差曲线。</dd>
+<dt>修复</dt><dd>补偿 atan(ωe/ωc) 与 1.5Ts 延迟。</dd>
+<dt>验证</dt><dd>误差曲线平直接近 0。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>低速观测抖动、力矩脉动</h5><dl>
+<dt>现象</dt><dd>额定转速 10% 以下估计角度抖动明显。</dd>
+<dt>可能根因</dt><dd>反电动势小，逆变器非线性（死区）误差占比大；Rs 不准（温漂）。</dd>
+<dt>排查</dt><dd>开启 / 关闭死区补偿对比；Rs 改变 ±20% 对比。</dd>
+<dt>修复</dt><dd>死区补偿；Rs 在线估计；低速改用高频注入或限制工作区。</dd>
+<dt>验证</dt><dd>目标最低转速下误差满足要求。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>用给定电压而非实际电压：死区 / 管压降误差直接进入观测器（C13）。</li>
+<li>电流与电压时刻不对齐：使用本周期给定电压配本周期采样电流，差了一个周期。</li>
+<li>atan2 直接取角度：噪声与量化直接进入 Park，不如 PLL 平滑。</li>
+<li><span class="tg tg-red">【风险红线】</span>反电动势类观测器在零速不可观：EPS 若以无感作降级，必须定义低速下的安全行为，不能「假装可用」。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C10" id="quiz-C10"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：反电动势含角度信息、SMO / 龙伯格 / MRAS 原理与优缺点、低通相位补偿、PLL 原理与参数、低速限制与 HFI、切换逻辑。</li>
+<li>面试高频：「SMO 为什么要低通和相位补偿？」「无感低速为什么不行？」</li></ul></div>
+</section>

@@ -1,0 +1,225 @@
+
+<!-- ================= A05 ================= -->
+<section class="chap" id="A05" data-title="A05 微分与差分">
+<h2 class="chap-h">A05 微分与差分：变化率、测速、噪声放大与一阶低通</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 5 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>由角度求速度、电感压降 L·di/dt、反电动势 dψ/dt、PID 的 D 项、低通滤波</td></tr>
+<tr><th>输入 / 输出</th><td>输入：采样序列 x[k]；输出：差分 / 滤波后的变化率</td></tr>
+<tr><th>工程价值</th><td>速度反馈质量决定速度环上限；不懂差分噪声与延迟，就会盲目加大滤波导致环路振荡</td></tr>
+<tr><th>上下游依赖</th><td>上游 A01、A03；下游 A07、C08、C09、C10、D01</td></tr>
+<tr><th>适用角色</th><td>算法、标定工程师</td></tr>
+<tr><th>前置数学依赖</th><td>A01、A03</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>电机方程全是「变化率」：v = R·i + L·di/dt；速度 = dθ/dt。MCU 里只有离散采样，必须用差分近似。</div>
+<div><b>② 量产怎么做</b>角度差分（uint16 相减转 int16 处理过零）+ 适当窗口 + 一阶低通；低速用 M/T 法、PLL 或解码芯片速度输出。</div>
+<div><b>③ 如何证明</b>恒速对拖时速度信号纹波（rpm 峰峰）与延迟；对比台架转速计 / 编码器。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A01 斜率（Δy/Δx）、A03 正弦。导数 = 时间间隔趋近 0 时的斜率。</li>
+<li>信号：旋变机械角度 thetaM；采样周期确定（定时中断）。</li>
+<li>不满足：测速噪声大 → 速度环电流给定噪声 → 力矩脉动、噪声；滤波过重 → 速度环相位滞后振荡。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+导数：dx/dt = lim(Δt→0) [x(t) − x(t−Δt)] / Δt；d(sin ωt)/dt = ω·cos ωt
+<span class="tg tg-disc">【离散实现】</span>后向差分：x'[k] ≈ (x[k] − x[k−1]) / Ts
+  · 等效延迟约 Ts/2（相当于在两个采样点中间求斜率）
+  · 噪声放大：若采样噪声标准差 σ，差分噪声 ≈ √2·σ / Ts —— Ts 越小，噪声越大
+一阶低通（后向欧拉离散）：y[k] = y[k−1] + α·(x[k] − y[k−1])，α = Ts / (τf + Ts)，fc = 1/(2π·τf)
+  · α 越小越平滑，但延迟（相位滞后）越大
+测速分辨率（12 位旋变，窗口 Tw）：Δn = 60 / (4096·Tw) rpm
+  · Tw = 50 µs → 293 rpm/码；Tw = 1 ms → 14.6 rpm/码</div>
+<div id="anim-A05"></div>
+<div class="anim-note"><b>动画在演示什么：</b>上图：50 Hz 正弦被以 Ts 采样（点）并叠加噪声；下图：真实导数（灰，已除以 ω 归一化）、后向差分（红）与一阶低通后的差分（蓝）。<br>
+<b>拖动滑块：</b>减小 Ts 但保持噪声 → 红线噪声急剧变大（噪声 ∝ 1/Ts）；增大 Ts → 红线阶梯化、滞后；减小 α → 蓝线变平滑但明显滞后于灰线。<br>
+<b>正常折中：</b>蓝线贴近灰线、轻微滞后。<b>异常：</b>红线毛刺远大于信号（直接用差分做反馈会让速度环抖动）。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>角度差分处理过零</b>：<code>(int16_t)(uint16_t)(θ[k] − θ[k−1])</code>，只要一个窗口内转过不足半圈即正确。8000 rpm、1 ms 窗口机械转 48°，安全。</li>
+<li><b>窗口选择</b>：快速中断里只记录角度，1 ms 任务里做差分（窗口 = 1 ms）。</li>
+<li><b>换算</b>：rpm = Δθ / 65536 × 60 / Tw，Tw = 1 ms → rpm = Δθ × 60000 / 65536。</li>
+<li><b>低通</b>：系数 <code>Cal_SpdLpfK_q15</code>，int32 状态；结果用于速度环（C08）。</li>
+<li><b>低速</b>：分辨率不足时改用 M/T 法、角度 PLL 观测器或解码芯片速度通道（AD2S1210 具有速度输出，具体格式以 ADI 数据手册为准 <span class="tg tg-check">【待核对】</span>）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>恒速 1000 rpm：原始差分以 ±1 码（±14.6 rpm）跳变，滤波后纹波明显减小。</li>
+<li>速度阶跃：滤波输出滞后于真实速度，延迟约 τf；若 τf 接近速度环带宽倒数，速度环超调增大。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 1 ms 任务：由旋变机械角度计算转速（Tw = 1 ms）【案例假设】 */
+void FOC_SpeedCalc_1ms(void)
+{
+    static uint16_t s_thPrev = 0u;
+    static int32_t  s_filt_q8 = 0;                 /* rpm × 256，提升滤波分辨率 */
+    int16_t dTh = (int16_t)(uint16_t)(gFoc.thetaM - s_thPrev);   /* 自动处理过零 */
+    int32_t rpmRaw_q8;
+
+    s_thPrev = gFoc.thetaM;
+    /* rpm = dTh × 60000 / 65536；×256 保留小数 → dTh × 60000 / 256 */
+    rpmRaw_q8 = ((int32_t)dTh * 60000) &gt;&gt; 8;
+    /* 一阶低通：y += α(x − y)，α = Cal_SpdLpfK_q15 / 32768 */
+    s_filt_q8 += (int32_t)(((int64_t)(rpmRaw_q8 - s_filt_q8) * Cal_SpdLpfK_q15) &gt;&gt; 15);
+    gFoc.spdRpmFilt = s_filt_q8 &gt;&gt; 8;
+}
+/* 例：期望 fc = 50 Hz → τf = 3.18 ms，α = 1/(3.18+1) = 0.239 → Cal_SpdLpfK_q15 ≈ 7838 */</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>低速速度环抖动</h5><dl>
+<dt>现象</dt><dd>30 rpm 速度模式下电机一顿一顿，速度反馈呈台阶。</dd>
+<dt>可能根因</dt><dd>测速量化：12 位、1 ms 窗口分辨率 14.6 rpm，30 rpm 只有约 2 码。</dd>
+<dt>排查顺序</dt><dd>① CANape 看原始 dTh 是否只在 1~3 之间跳 → ② 估算分辨率 → ③ 检查滤波设置。</dd>
+<dt>修复</dt><dd>低速段加长窗口 / M-T 法 / PLL；提升解码分辨率配置；速度环低速段降增益。</dd>
+<dt>验证</dt><dd>低速速度信号纹波 &lt; 2 rpm，电机平稳。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>加大滤波后速度环反而振荡</h5><dl>
+<dt>现象</dt><dd>为了降噪把 fc 从 50 Hz 降到 5 Hz，速度阶跃出现持续摆动。</dd>
+<dt>可能根因</dt><dd>低通引入的相位滞后吃掉了速度环相位裕度。</dd>
+<dt>排查</dt><dd>比较 fc 与速度环穿越频率；扫频测开环相位。</dd>
+<dt>修复</dt><dd>fc 至少为速度环带宽的 3~5 倍；从源头提升测速质量。</dd>
+<dt>验证</dt><dd>阶跃超调 &lt; 10%，无持续振荡。</dd></dl></div>
+<div class="issue"><h5>数学易错点：差分过零跳变</h5><dl>
+<dt>现象</dt><dd>每转一次速度信号出现一个巨大尖峰。</dd>
+<dt>根因</dt><dd>用 int32 直接相减，65535→0 时得到 −65535。</dd>
+<dt>排查</dt><dd>观察尖峰位置是否对应角度过零。</dd>
+<dt>修复</dt><dd>uint16 相减后转 int16。</dd>
+<dt>验证</dt><dd>匀速时速度曲线无尖峰。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>在 20 kHz 中断里对角度直接差分：分辨率 293 rpm/码，几乎不可用。</li>
+<li>滤波系数在不同执行周期的任务间复用：α 与 Ts 绑定，任务周期改了 α 必须重算。</li>
+<li>低通状态只存 int16：小增量被截断，滤波输出卡死在某值（「死区」现象）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A05" id="quiz-A05"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：后向差分延迟 Ts/2、噪声 ∝ 1/Ts、α = Ts/(τf+Ts)、测速分辨率计算、过零处理。</li>
+<li>台架高频：低速抖动、滤波导致振荡。</li></ul></div>
+</section>
+
+<!-- ================= A06 ================= -->
+<section class="chap" id="A06" data-title="A06 积分与累加">
+<h2 class="chap-h">A06 积分与累加：积分器、相位累加器、漂移与积分饱和</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 6 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>PI 的 I 项、开环角度发生器 θ = ∫ω dt、电压模型磁链观测 ψ = ∫(v − R·i)dt、电量/热模型累加</td></tr>
+<tr><th>输入 / 输出</th><td>输入：每周期增量；输出：累加状态</td></tr>
+<tr><th>工程价值</th><td>积分消除稳态误差，也带来漂移、溢出与饱和三大风险</td></tr>
+<tr><th>上下游依赖</th><td>上游 A01、A05；下游 A07、A08、C05、C10、D06</td></tr>
+<tr><th>适用角色</th><td>全部角色</td></tr>
+<tr><th>前置数学依赖</th><td>A01、A05（积分是微分的逆运算）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>开环拖动需要由频率「积」出角度；PI 需要累积误差消除稳态偏差；无感观测从电压「积」出磁链。</div>
+<div><b>② 量产怎么做</b>int32/uint32 累加器；相位累加器利用溢出自动取模；积分器有上下限；纯积分用低通/泄漏替代。</div>
+<div><b>③ 如何证明</b>长时间运行（数小时）累加量不漂移、不溢出；开环频率实测 = 设定。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A01 累加、A05 差分。积分 = 曲线下面积 = Σ x[k]·Ts。</li>
+<li>信号：输入的偏置必须尽量小（A01 偏移校准）。</li>
+<li>不满足：磁链观测随时间漂移；积分饱和导致超调；开环角度运行越久越抖（浮点精度丢失）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>y(t) = ∫₀ᵗ u(τ)dτ；∫ sin(ωt)dt = (1 − cos ωt)/ω（从 0 开始）
+<span class="tg tg-disc">【离散实现】</span>
+  前向矩形：y[k] = y[k−1] + Ts·u[k−1]
+  后向矩形：y[k] = y[k−1] + Ts·u[k]
+  梯形：    y[k] = y[k−1] + Ts·(u[k] + u[k−1])/2
+直流偏置的后果：u = 信号 + b → y 中多出 b·t，线性增长直到溢出
+泄漏积分（低通替代）：y[k] = (1 − λ)·y[k−1] + Ts·u[k]  ≈ 1/(s + λ/Ts)，偏置只造成有限误差 b·Ts/λ
+相位累加器：acc[k] = acc[k−1] + inc（uint32 自然回绕），inc = fe·2³²·Ts，θe = acc &gt;&gt; 16
+  案例：10 Hz 电频率 → inc = 10 × 4294967296 × 50 µs ≈ 2147484</div>
+<div id="anim-A06"></div>
+<div class="anim-note"><b>动画在演示什么：</b>输入为正弦 + 小直流偏置（类比带偏移的反电动势电压）。蓝线是数字积分器输出，灰虚线是无偏置时的理想积分。<br>
+<b>拖动滑块：</b>偏置 &gt; 0 时蓝线线性爬升（漂移）；开启「积分器限幅」后卡在上限（饱和）；增大泄漏系数 λ，漂移被抑制但积分结果幅值和相位出现误差（低通替代纯积分的代价）。<br>
+<b>正常：</b>偏置 0 时蓝灰重合。<b>异常：</b>持续爬升或长时间贴限幅。参数修改实时生效。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>累加器位宽</b>：状态至少 int32；增量远小于状态时，需更高的小数位（如 Q30），避免「增量 &lt; 1 LSB 被截断」。</li>
+<li><b>相位累加器</b>：uint32，溢出即取模，无需判断；高 16 位作为 uint16 电角度。</li>
+<li><b>限幅</b>：积分器上下限与输出限幅匹配（A08 抗饱和）。</li>
+<li><b>漂移抑制</b>：纯积分观测器改为低通 / 泄漏积分 + 幅相补偿（C10）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>开环 I/F 拖动：θe 为均匀锯齿，频率与设定一致；电流幅值稳定。</li>
+<li>纯积分磁链：有偏移时估计磁链轨迹圆心逐渐偏移；泄漏积分时圆心稳定。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 开环角度发生器（I/F 启动，D06 使用）*/
+static uint32_t s_phAcc = 0u;
+
+void FOC_OpenLoopAngle_Isr(uint32_t incPerTs)
+{
+    s_phAcc += incPerTs;                     /* 溢出回绕 = 自动对 2π 取模 */
+    gFoc.thetaE = (uint16_t)(s_phAcc &gt;&gt; 16);
+}
+/* fe(Hz) → inc：inc = fe × 2^32 × Ts = fe × 214748.36（Ts = 50 µs）*/
+static inline uint32_t FOC_FreqToInc(uint32_t fe_mHz)
+{
+    return (uint32_t)(((uint64_t)fe_mHz * 214748uLL) / 1000uLL);
+}
+
+/* 泄漏积分器（C10 磁链观测的基础单元），状态 Q30 */
+typedef struct { int32_t y_q30; int32_t leak_q30; } LEAKINT_tst;
+static inline q15_t LeakInt_Run(LEAKINT_tst *s, q15_t uTs_q15)
+{
+    int64_t y = (int64_t)s-&gt;y_q30;
+    y -= (y * s-&gt;leak_q30) &gt;&gt; 30;           /* (1 − λ)·y */
+    y += (int64_t)uTs_q15 &lt;&lt; 15;           /* + u·Ts    */
+    if (y &gt;  (int64_t)0x3FFFFFFF) { y =  0x3FFFFFFF; }
+    if (y &lt; -(int64_t)0x40000000) { y = -0x40000000; }
+    s-&gt;y_q30 = (int32_t)y;
+    return (q15_t)(s-&gt;y_q30 &gt;&gt; 15);
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>开环拖动「运行越久越抖」</h5><dl>
+<dt>现象</dt><dd>台架开环拖动几分钟后电流开始抖动，越来越严重。</dd>
+<dt>可能根因</dt><dd>角度用 float 弧度累加且不取模：θ 越来越大，float 24 位尾数精度下降，每步增量被量化。</dd>
+<dt>排查顺序</dt><dd>记录 θ 原始值；观察每周期增量是否出现「跳格」。</dd>
+<dt>修复</dt><dd>改用 uint32 相位累加器，或 float 每步对 2π 取模。</dd>
+<dt>验证</dt><dd>连续运行 1 小时，θ 增量恒定，电流稳定。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>PI 有稳态误差，积分「不动」</h5><dl>
+<dt>现象</dt><dd>iq 稳定在给定下方 0.5 A 不再收敛。</dd>
+<dt>可能根因</dt><dd>积分器用 Q15 int16 存储，Ki·Ts·e 小于 1 LSB 被截断为 0。</dd>
+<dt>排查</dt><dd>手算小误差下每步增量的 LSB 数。</dd>
+<dt>修复</dt><dd>积分状态 int32 Q30（A08 代码）。</dd>
+<dt>验证</dt><dd>稳态误差 → 0。</dd></dl></div>
+<div class="issue"><h5>数学易错点：矩形积分与梯形积分混用于离散化</h5><dl>
+<dt>现象</dt><dd>仿真与代码在高频下结果不同。</dd>
+<dt>根因</dt><dd>Simulink 积分器默认方法与手写代码不一致。</dd>
+<dt>排查</dt><dd>核对积分器方法设置。</dd>
+<dt>修复</dt><dd>统一离散化方法（D01）。</dd>
+<dt>验证</dt><dd>SIL 与模型逐点比对误差 &lt; 1 LSB。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li><span class="tg tg-red">【风险红线】</span>开环拖动无电流限制时积分角度过快，转子跟不上失步，电流冲击可损坏 MOS：开环必须带电流闭环（I/F）或严格限幅。</li>
+<li>积分器复位时机：模式切换（开环→闭环）时积分器初值不当导致电流跳变，需预置积分器（C05/D06）。</li>
+<li>uint32 乘法溢出：fe × 2³² 必须用 64 位中间量。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A06" id="quiz-A06"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：离散积分形式、偏置漂移、泄漏积分、相位累加器 inc 计算、积分位宽。</li>
+<li>高频出现于：I/F 启动、观测器漂移、PI 稳态误差问题。</li></ul></div>
+</section>

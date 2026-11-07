@@ -1,0 +1,51 @@
+
+<!-- ================= 模块 A 综合自测 ================= -->
+<section class="chap" id="A-test" data-title="模块 A 章节综合自测卷">
+<h2 class="chap-h">模块 A 章节综合自测卷</h2>
+<p class="chap-sub">从 A01~A08 题库随机抽取 16 道客观题 + 2 道主观题。客观题作答后点「交卷」统一判分，错题自动进入错题本；主观题展开参考解答自评。</p>
+<div class="exam" data-scope="A" data-nobj="16" data-nsub="2" data-key="examA"></div>
+</section>
+
+<!--SEGMENT_INSERT_POINT: 后续分段的 section 插入到此注释之前，结业试卷保持在全文最末 -->
+
+<!-- ================= 结业综合大试卷 ================= -->
+<section class="chap" id="final" data-title="结业综合大试卷">
+<h2 class="chap-h">结业综合大试卷</h2>
+<p class="chap-sub">覆盖全部已交付模块的题库（随分段交付自动扩充）：随机 30 道客观题 + 4 道工程分析 / 简答题。建议在全部模块完成后作为完整自测。</p>
+<div class="exam" data-scope="ALL" data-nobj="30" data-nsub="4" data-key="examFinal"></div>
+</section>
+
+</main>
+
+<aside id="rightbar">
+  <h4>快速公式卡片</h4>
+  <div class="fcard"><b>线性换算</b><br>I = (N − N0)·K；每码 = 16 LSB(Q15)</div>
+  <div class="fcard"><b>电频率</b><br>fe = p·n/60；Δθ = ωe·Ts</div>
+  <div class="fcard"><b>Park</b><br>id = iα·c + iβ·s<br>iq = −iα·s + iβ·c</div>
+  <div class="fcard"><b>欧拉</b><br>e^(jθ) = cosθ + j·sinθ</div>
+  <div class="fcard"><b>电压上限</b><br>|v| ≤ Vdc/√3 = 6.93 V @12 V</div>
+  <div class="fcard"><b>一阶低通</b><br>α = Ts/(τf + Ts)</div>
+  <div class="fcard"><b>RL 对象</b><br>G = 1/(Ls+R)，τ = L/R</div>
+  <div class="fcard"><b>PI 对消</b><br>Kp = ωc·L，Ki = ωc·R</div>
+  <div class="fcard"><b>延迟相位</b><br>φ = 360°·f·Td（Td≈1.5Ts）</div>
+  <h4>调试提示</h4>
+  <div class="fcard" style="font-family:inherit">dq 纹波 1×fe → 电流偏移<br>2×fe → 两相增益差 / Park 写反<br>6×fe → 死区 / 反电动势谐波<br>正反转不对称 → 零位偏差</div>
+  <h4>动画快捷启停</h4>
+  <div class="rb-list" id="rbAnims"></div>
+  <h4>习题快捷跳转</h4>
+  <div class="rb-list" id="rbQuiz"></div>
+</aside>
+
+<footer id="bottombar">
+  <span id="progTxt">已学 0 / 0 节</span>
+  <div id="progBar"><div id="progFill"></div></div>
+  <button class="btn btn-sm hide-sm" id="btnPrint">🖨 打印</button>
+  <button class="btn btn-sm" id="toTop">↑ 返回顶部</button>
+</footer>
+
+<div id="modal" role="dialog" aria-modal="true">
+  <div id="modalBox">
+    <div id="modalHead"><span id="modalTitle"></span><button class="btn btn-sm" id="modalClose">✕ 关闭</button></div>
+    <div id="modalBody"></div>
+  </div>
+</div>

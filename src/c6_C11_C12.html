@@ -1,0 +1,246 @@
+
+<!-- ================= C11 ================= -->
+<section class="chap" id="C11" data-title="C11 参数辨识">
+<h2 class="chap-h">C11 参数辨识：Rs、Ld、Lq、磁链——离线辨识与在线辨识</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 11 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>参数来源：PI 设计、解耦前馈、MTPA、弱磁、观测器都依赖它</td></tr>
+<tr><th>输入 / 输出</th><td>输入：注入电压 / 电流与响应；输出：Rs、Ld(id)、Lq(iq)、ψf(T)</td></tr>
+<tr><th>工程价值</th><td>参数错误会同时影响 4~5 个模块，是很多「玄学」问题的共同根因</td></tr>
+<tr><th>上下游依赖</th><td>下游 A08/C05、C06、C07、C10</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A01 两点法、A07 阶跃响应与时间常数、A06 积分</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>供应商数据通常是常温、小电流或线间值；IPMSM 的 Lq 随电流饱和明显，ψf 随温度变化，必须在实际工况下测。</div>
+<div><b>② 量产怎么做</b>开发阶段台架完整离线辨识（含饱和曲线、温度）→ 生成标定表；量产上电可做简化 Rs 自检；运行中可在线修正 Rs / ψf（温度估计）。</div>
+<div><b>③ 如何证明</b>多种方法交叉验证（误差 &lt; 10%）；用辨识参数设计的电流环阶跃符合预期；前馈 vd、vq 与稳态实测一致。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>零位已标定（Ld/Lq 依赖 d、q 方向准确）；电流采样已校准；死区补偿（低电压注入时影响大）。</li>
+<li>台架：可锁止转子的工装（测 Lq）、对拖电机（测 ψf）、温度测量。</li>
+<li>不满足：结果把逆变器压降、线缆电阻混入电机参数。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+Rs（直流两点法，消除死区 / 管压降常值误差）：d 轴注入两个电流 I1、I2，记录给定电压 V1、V2
+   Rs ≈ (V2 − V1)/(I2 − I1)；其中含线缆与 MOS 导通电阻，需按需求扣除或保留
+Ld：转子对齐 d 轴，d 轴电压阶跃 / 方波，τ = Ld/R（A07），或 Ld = V·Δt/Δi（短脉冲，忽略 R）
+Lq：方法一 锁止转子后沿 q 轴注入；方法二 静止时 q 轴高频小幅注入（平均转矩为零，转子基本不动）
+   饱和曲线：在多个偏置电流下测量，得到 Ld(id)、Lq(iq) 表
+ψf：方法一 对拖测反电动势：ψf = E_phase_peak/ωe（最准确）
+    方法二 空载 id = 0 运行：ψf ≈ (vq − Rs·iq)/ωe（受电压误差影响）
+在线辨识：递推最小二乘 RLS（以 dq 方程为回归模型）、模型参考自适应；需持续激励，且参数之间存在耦合，不宜同时辨识全部参数 <span class="tg tg-check">【待核对：具体方案依项目与文献】</span>
+温度模型：Rs(T) = Rs25·[1 + 0.00393·(T − 25)]（铜）</div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>电压阶跃法的动态过程可直接使用 A07 的交互动画（拖动 R、L 观察 τ 与 63.2% 点）；本节重点是台架流程与误差来源。</p>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>参数</th><th>推荐方法</th><th>主要误差源</th><th>交叉验证</th></tr>
+<tr><td>Rs</td><td>直流两点法</td><td>死区、MOS、线缆、温度</td><td>微欧计测线间电阻 ÷ 2</td></tr>
+<tr><td>Ld</td><td>d 轴阶跃 / 方波注入</td><td>R 偏差、死区、转子未对齐</td><td>LCR 线间电感最小值 ÷ 2（量级参考）</td></tr>
+<tr><td>Lq</td><td>锁止转子 q 轴注入 / 高频注入</td><td>转子微动、饱和</td><td>LCR 线间电感最大值 ÷ 2</td></tr>
+<tr><td>ψf</td><td>对拖反电动势</td><td>转速测量、温度</td><td>空载 vq 估算</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>辨识状态机（标定模式，D04）：OFFSET → ALIGN_D → RS_TEST → LD_TEST → LQ_TEST（可选）→ DONE。</li>
+<li>Rs：id = 10 A、20 A 各稳态 0.5 s，记录 vd 平均值（PWM 中断累加、1 ms 任务处理）。</li>
+<li>Ld：d 轴方波电压（如 ±0.3 V、1 kHz），测 Δi/Δt；或阶跃法（A07 伪代码）。</li>
+<li>结果写入标定量并通过 XCP 读出；超出合理范围（如 ±50% 设计值）判失败。</li>
+<li>在线 Rs 修正（可选）：低速、稳态时 vd 积分器均值与模型比较，慢速修正；或由温度传感器 + 温度模型估计。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>Rs 两点：V–I 直线截距即逆变器压降常值，斜率为 Rs。</li>
+<li>Lq 饱和曲线：随 iq 增大单调下降，IPMSM 大电流时可能下降明显。</li>
+<li>ψf：与转速无关、随温度下降。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 【伪代码】Rs 两点法（1 ms 任务驱动，PWM 中断负责累加 vd、id）*/
+float Ident_Rs_TwoPoint(void)
+{
+    float v1, i1, v2, i2;
+    FOC_SetIdqRef(AMP_TO_Q15(10.0f), 0);  Wait_ms(500);  Avg_vd_id(200, &amp;v1, &amp;i1);
+    FOC_SetIdqRef(AMP_TO_Q15(20.0f), 0);  Wait_ms(500);  Avg_vd_id(200, &amp;v2, &amp;i2);
+    FOC_SetIdqRef(0, 0);
+    return (v2 - v1) / (i2 - i1);          /* Ω，含线缆 + MOS；截距 v1 − Rs·i1 ≈ 逆变器压降 */
+}
+
+/* 1 s 任务：铜电阻温度修正（温度来自绕组温度估计 / 传感器）*/
+void FOC_RsTempUpdate_1s(float tWinding_C)
+{
+    Cal_Rs_mOhm = Cal_Rs25_mOhm * (1.0f + 0.00393f * (tWinding_C - 25.0f));
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>辨识的 Rs 比微欧计大一倍</h5><dl>
+<dt>现象</dt><dd>单点 V/I 得 Rs = 30 mΩ，微欧计 12 mΩ。</dd>
+<dt>可能根因</dt><dd>单点法包含死区 / 管压降常值；线缆 + MOS 电阻。</dd>
+<dt>排查</dt><dd>两点法看截距；不同电流点画 V–I 曲线。</dd>
+<dt>修复</dt><dd>两点法；明确参数是否包含逆变器侧电阻（观测器通常需要包含）。</dd>
+<dt>验证</dt><dd>两点法斜率与微欧计 + 回路电阻一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>测 Lq 时转子转动</h5><dl>
+<dt>现象</dt><dd>q 轴注入时电机抖动转动，结果离散。</dd>
+<dt>可能根因</dt><dd>q 轴电流产生转矩；注入频率太低 / 幅值太大。</dd>
+<dt>排查</dt><dd>观察 θm 变化。</dd>
+<dt>修复</dt><dd>锁止转子工装；或提高注入频率（平均转矩为零、惯量滤除）。</dd>
+<dt>验证</dt><dd>注入期间 θm 变化 &lt; 0.5° 电角度，结果重复性好。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>ψf 两种方法结果差 10%</h5><dl>
+<dt>现象</dt><dd>对拖 3.5 mWb，空载 vq 法 3.15 mWb。</dd>
+<dt>可能根因</dt><dd>vq 为给定电压，含死区误差；转速信号误差；温度不同。</dd>
+<dt>排查</dt><dd>死区补偿开 / 关对比；同温度测试。</dd>
+<dt>修复</dt><dd>以对拖结果为准；vq 法仅作在线趋势。</dd>
+<dt>验证</dt><dd>温度一致时两者差 &lt; 3%。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>辨识结果直接覆盖运行参数：应先人工审核再写 NVM。</li>
+<li>只在一个电流点测电感：IPMSM 饱和后 PI 与 MTPA 都会偏离。</li>
+<li>在线同时辨识 Rs 与 ψf：两者在稳态方程中相关，缺乏激励时不可分辨。</li>
+<li><span class="tg tg-red">【风险红线】</span>辨识注入电压从大值开始：低阻电机 0.5 V 即可产生 40 A 以上（A07），必须由小到大并开保护。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C11" id="quiz-C11"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：两点法原理、Ld/Lq 测量条件、ψf 对拖法、饱和与温度、在线辨识的激励与耦合问题。</li>
+<li>台架高频：参数偏大偏小的误差来源判断。</li></ul></div>
+</section>
+
+<!-- ================= C12 ================= -->
+<section class="chap" id="C12" data-title="C12 保护与诊断">
+<h2 class="chap-h">C12 保护与诊断：过流、过压、欠压、过温、堵转、失步、角度异常、采样断线</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 12 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>贯穿全链路：硬件快速通路 + 中断级诊断 + 慢任务诊断 + 故障响应</td></tr>
+<tr><th>输入 / 输出</th><td>输入：电流、电压、温度、角度、观测器、执行时间；输出：故障码、安全动作（关管 / 降额 / 降级）</td></tr>
+<tr><th>工程价值</th><td>防止硬件损坏与危险行为；EPS 涉及功能安全，诊断覆盖率与响应时间是评审重点</td></tr>
+<tr><th>上下游依赖</th><td>依赖全部前序模块信号；与 D03 中断架构、D04 状态机紧密相关</td></tr>
+<tr><th>适用角色</th><td>全部，功能安全工程师</td></tr>
+<tr><th>前置数学依赖</th><td>A01 阈值换算、A05 滤波 / 去抖</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>MOS 过流能力以微秒计，软件中断周期 50 µs 太慢；温度、堵转则需要秒级热模型。不同故障需要不同时间尺度的检测通路。</div>
+<div><b>② 量产怎么做</b>硬件比较器 → PWM 故障输入（纳秒~微秒关管）；中断内软件过流 / 角度跳变；慢任务过温、堵转、欠压降额；故障分级与去抖。</div>
+<div><b>③ 如何证明</b>故障注入测试：每个诊断注入实际故障，测检测时间、响应动作与误报率（FMEA / 安全分析要求）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>硬件：电流比较器、PWM 故障输入引脚、温度传感器、母线电压采样。</li>
+<li>安全需求：故障容错时间、安全状态定义（EPS 的安全状态以项目安全目标为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>不满足：只有软件过流 → 短路时 MOS 在软件反应前损坏。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>故障</th><th>检测方法</th><th>阈值 / 时间 <span class="tg tg-case">【案例假设】</span></th><th>通路</th><th>响应</th></tr>
+<tr><td>硬件过流</td><td>独立于 ADC 通路的比较器（或驱动芯片过流 / 退饱和检测）→ PWM 故障输入</td><td>|i| &gt; 60 A，&lt; 2 µs</td><td>硬件</td><td>立即关管、锁存</td></tr>
+<tr><td>软件过流</td><td>|ia|、|ib|、|ic| 与 ADC 码值阈值比较</td><td>&gt; 48 A（接近 ±50 A 采样量程），连续 3 周期</td><td>中断</td><td>关管</td></tr>
+<tr><td>过压</td><td>Vdc ADC 码值</td><td>&gt; 18 V，1 ms</td><td>中断 / 1 ms</td><td>关管或限制回馈（弱磁 / 减速）</td></tr>
+<tr><td>欠压</td><td>Vdc</td><td>&lt; 9 V 降额，&lt; 7 V 停机</td><td>1 ms</td><td>力矩降额 / 停止</td></tr>
+<tr><td>过温</td><td>MOS / 绕组温度（传感器 + 热模型）</td><td>降额曲线，&gt; 150 °C 停机</td><td>10 ms~1 s</td><td>线性降额</td></tr>
+<tr><td>堵转</td><td>|iq| 大且 |ω| 小，持续时间 / I²t</td><td>&gt; 40 A 且 &lt; 30 rpm，1 s</td><td>10 ms</td><td>降额</td></tr>
+<tr><td>失步</td><td>观测角与旋变角差、反电动势与给定不一致</td><td>&gt; 30° 电角度，10 ms</td><td>1 ms</td><td>关管 / 降级</td></tr>
+<tr><td>角度异常</td><td>解码故障位、相邻增量跳变、sin²+cos² 幅值</td><td>按芯片与物理极限</td><td>中断</td><td>降级到无感或安全状态</td></tr>
+<tr><td>采样断线</td><td>偏移范围、ADC 饱和、PWM 关闭时电流 ≠ 0、三相和</td><td>见 C01</td><td>上电 / 中断</td><td>禁止运行</td></tr>
+<tr><td>中断超时</td><td>执行时间计数</td><td>&gt; 预算</td><td>中断</td><td>故障</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+I²t 热累积（简化一阶热模型）：ΔT[k] = ΔT[k−1] + Ts_slow/τth·(Rth·Ploss − ΔT[k−1])，Ploss ∝ i²
+去抖：连续 N 次超限才置故障；恢复需要更严格条件（迟滞）
+<span class="tg tg-red">【风险红线】</span>高速关管：反电动势经体二极管整流回馈，母线可能被推高（C07）；故障响应策略（关管 vs 主动短路 ASC）要结合转速与过压风险评估</div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>保护逻辑以阈值、时间与状态为主，用表格与状态机描述更准确。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>硬件通路</b>：电流比较器阈值 &gt; 软件阈值，接 PWM 模块故障输入，配置为自动关管且需软件清除。</li>
+<li><b>中断级</b>：软件过流、角度跳变、ADC 饱和、执行时间——只做比较与计数，复杂处理放慢任务。</li>
+<li><b>慢任务</b>：过温降额、欠压降额、堵转 I²t、失步判断。</li>
+<li><b>故障管理</b>：统一故障码、去抖、分级（警告 / 降额 / 关管 / 锁存）、记录冻结帧（故障时刻的电流、角度、Vdc、转速）。</li>
+<li><b>关管处理</b>：PWM 关闭同时 PI 积分器清零、弱磁积分清零、状态机进入 FAULT。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>故障注入：示波器测故障发生到 PWM 关闭的时间（硬件通路微秒级，软件通路若干个 PWM 周期）。</li>
+<li>降额：温度上升时 iqRef 上限按曲线平滑下降，无台阶。</li>
+<li>误报：全工况（低温、高速、电压波动、EMC）下无误报。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>typedef struct { uint16_t cnt; uint16_t setN; uint16_t clrN; uint8_t active; } DIAG_DEB_tst;
+
+static inline void Diag_Deb(DIAG_DEB_tst *d, uint8_t cond)
+{
+    if (cond) { if (d-&gt;cnt &lt; d-&gt;setN) { d-&gt;cnt++; } else { d-&gt;active = 1u; } }
+    else      { if (d-&gt;cnt &gt; 0u) { d-&gt;cnt--; } if ((d-&gt;cnt == 0u) &amp;&amp; (d-&gt;clrN != 0u)) { d-&gt;active = 0u; }   /* clrN = 0：锁存 */ }
+}
+
+/* 软件过流：直接比较 ADC 码值（相对零点），避免 Q15 基值饱和问题 */
+#define OC_SW_CNT   (1966)    /* 48 A ÷ 0.024414 A/码 【案例假设】 */
+
+void FOC_FastDiag_Isr(void)
+{
+    static DIAG_DEB_tst s_oc = { 0u, 3u, 0u, 0u };     /* 连续 3 周期，锁存（clrN = 0 表示不自动清除）*/
+    int32_t da = (int32_t)gFoc.adcIa - Cal_IaOffset_cnt;
+    int32_t db = (int32_t)gFoc.adcIb - Cal_IbOffset_cnt;
+    int32_t dc = -da - db;
+    uint8_t oc = (da &gt; OC_SW_CNT) || (da &lt; -OC_SW_CNT) ||
+                 (db &gt; OC_SW_CNT) || (db &lt; -OC_SW_CNT) ||
+                 (dc &gt; OC_SW_CNT) || (dc &lt; -OC_SW_CNT);
+    Diag_Deb(&amp;s_oc, oc);
+    if (s_oc.active) { FOC_EmergencyOff(DIAG_OC_SW); }
+}
+
+void FOC_EmergencyOff(uint16_t code)
+{
+    Pwm_DisableAll();                 /* 先关管，再做其余处理 */
+    FOC_PiResetAll();
+    Diag_SetFault(code);
+    Diag_FreezeFrame();               /* 冻结帧：ia ib thetaE vdc spd */
+    gFoc.state = FOC_ST_FAULT;
+}</code></pre>
+<p class="note"><b>量程设计提醒：</b>案例中采样量程 ±50 A，而 C07 讨论的电流极限达 50~60 A，软件过流只能设在量程边缘（48 A），与工作电流几乎没有裕量；60 A 的硬件保护也必须走独立于 ADC 运放的通路，否则运放饱和后无法检测。量产设计应让采样量程 ≥ 最大保护阈值 × 1.2（例如 ±80 A），同时相应修改 I_BASE、每码 LSB 与全部标幺参数（X2 讨论）。软件过流阈值不能超过采样量程，否则诊断永远不会触发（B07 过压例子同理）。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>偶发过流误报</h5><dl>
+<dt>现象</dt><dd>正常行驶中偶发 DIAG_OC_SW，无真实过流。</dd>
+<dt>可能根因</dt><dd>采样尖刺（B06）、去抖次数太少、EMC 干扰。</dd>
+<dt>排查</dt><dd>冻结帧数据；故障时刻占空比；EMC 试验复现。</dd>
+<dt>修复</dt><dd>改善采样时刻；合理去抖（不超过 MOS 安全时间）。</dd>
+<dt>验证</dt><dd>耐久与 EMC 试验零误报，故障注入仍能检出。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>堵转保护过早触发，影响原地转向</h5><dl>
+<dt>现象</dt><dd>停车原地打满方向时助力很快衰减。</dd>
+<dt>可能根因</dt><dd>EPS 原地转向本身就是低速大电流工况，堵转判据与热模型过于保守。</dd>
+<dt>排查</dt><dd>比较热模型估计温度与实测。</dd>
+<dt>修复</dt><dd>以热模型（I²t）为主而非简单计时；标定热参数。</dd>
+<dt>验证</dt><dd>原地转向耐久试验温度在限值内且助力满足需求。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>故障后重新使能瞬间过流</h5><dl>
+<dt>现象</dt><dd>故障恢复使能 PWM 时电流冲击。</dd>
+<dt>可能根因</dt><dd>积分器未清零；电机仍在旋转（反电动势）时直接闭环。</dd>
+<dt>排查</dt><dd>恢复时刻 vd、vq、转速。</dd>
+<dt>修复</dt><dd>清零 + 按当前转速预置前馈电压（飞车启动）。</dd>
+<dt>验证</dt><dd>旋转中恢复无冲击。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>阈值超出测量量程 / 定点基值：诊断永远不触发（本节代码与 B07 过压例子）。</li>
+<li>所有诊断放在中断：执行时间超标；按时间尺度分层。</li>
+<li>故障清除过于容易：间歇性故障反复触发，硬件累积损伤；关键故障锁存至下次上电。</li>
+<li><span class="tg tg-red">【风险红线】</span>调试时屏蔽保护后忘记恢复：发布前检查所有诊断使能标定量。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C12" id="quiz-C12"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：分层检测通路、去抖与锁存、阈值与量程关系、关管后处理、高速关管风险。</li>
+<li>面试高频：「过流保护为什么要硬件实现？」</li></ul></div>
+</section>

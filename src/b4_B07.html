@@ -1,0 +1,119 @@
+
+<!-- ================= B07 ================= -->
+<section class="chap" id="B07" data-title="B07 常用信号">
+<h2 class="chap-h">B07 常用信号：相电流、母线电压、电角度、机械角度、电角速度、机械角速度</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 7 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>所有模块共用的信号字典（变量名、单位、格式、来源）</td></tr>
+<tr><th>输入 / 输出</th><td>原始硬件信号 → 统一格式的 gFoc 字段</td></tr>
+<tr><th>工程价值</th><td>单位 / 基值 / 机械电气混淆是量产最常见的「低级大问题」，统一字典可从源头避免</td></tr>
+<tr><th>上下游依赖</th><td>下游：全部章节，尤其 D02、D08</td></tr>
+<tr><th>适用角色</th><td>全部，标定工程师必修</td></tr>
+<tr><th>前置数学依赖</th><td>A01 标幺、A03 电角度换算</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>速度环用机械 rpm、观测器用电 rad/s、角度补偿用 uint16 每周期增量，换算错一个 p 或 2π 就差 4 倍或 6.28 倍。</div>
+<div><b>② 量产怎么做</b>一个头文件定义所有基值与换算宏；A2L 中写明物理换算；变量名带单位后缀。</div>
+<div><b>③ 如何证明</b>CANape 中物理值与台架仪表（转速计、电压表、功率分析仪）逐项比对。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>硬件分压比、采样电阻、运放增益、旋变解码分辨率已确定。</li>
+<li>不满足：XCP 中显示的物理值不可信，标定无从谈起。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>信号</th><th>变量</th><th>格式 / 基值</th><th>来源与换算</th></tr>
+<tr><td>相电流</td><td>gFoc.ia / ib / ic</td><td>Q15，基值 50 A</td><td>ADC 双电阻，每码 16 LSB（A01）</td></tr>
+<tr><td>母线电压</td><td>gFoc.vdcPu</td><td>Q15，基值 16 V</td><td>分压采样，如 0~4095 ↔ 0~20 V <span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>机械角度</td><td>gFoc.thetaM</td><td>uint16，0~65535 ↔ 0~2π</td><td>AD2S1210 12 位结果左移 4 位</td></tr>
+<tr><td>电角度</td><td>gFoc.thetaE</td><td>uint16</td><td>θe = p·θm − 零位（uint16 自然取模）</td></tr>
+<tr><td>机械转速</td><td>gFoc.spdRpmFilt</td><td>int32 rpm</td><td>1 ms 窗口角度差分 + 低通（A05）</td></tr>
+<tr><td>电角速度</td><td>gFoc.thetaEIncPerTs</td><td>int16，uint16 角度/Ts</td><td>ωe(rad/s) = inc × 2π / 65536 / Ts</td></tr>
+<tr><td>相电压给定</td><td>gFoc.vd / vq / vAlpha / vBeta</td><td>Q15，基值 16 V</td><td>电流环输出</td></tr>
+<tr><td>占空比</td><td>gFoc.dutyA / B / C</td><td>Q15，0~1</td><td>SVPWM 输出（C04）</td></tr>
+</table></div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+ωm(rad/s) = 2π·n/60；ωe = p·ωm；fe = p·n/60
+每周期电角度增量（uint16）：inc = ωe·Ts·65536/(2π) = p·n/60·Ts·65536
+   案例 3000 rpm：inc = 4×3000/60×50e-6×65536 = 655.4
+   8000 rpm：inc ≈ 1748（≈ 9.6°）
+母线电压标幺：vdcPu = Vdc/16 V；SVPWM 可用相电压上限 vMax = vdcPu/√3</div>
+<div id="anim-B07"></div>
+<div class="anim-note"><b>动画在演示什么：</b>4 对极转子（N/S 交替 8 个磁极）旋转。左图标注机械角度 θm；右图显示同一时刻电角度 θe = 4·θm 的锯齿波以及 uint16 码值。<br>
+<b>拖动滑块：</b>改变转速，右图锯齿频率是机械频率的 4 倍；「零位偏移」把电角度整体平移。<br>
+<b>正常：</b>机械一圈内电角度走 4 个完整锯齿。<b>异常判断：</b>若你在 CANape 中看到每机械圈锯齿数 ≠ 极对数，说明极对数配置或角度换算错误。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>建立 <code>foc_units.h</code>：所有基值、换算宏、Q 格式说明（D02 提供模板）。</li>
+<li>变量命名后缀：<code>_rpm</code>、<code>_q15</code>、<code>_cnt</code>、<code>_mOhm</code>，跨模块接口禁止无单位裸数。</li>
+<li>A2L：每个测量量配置 COMPU_METHOD，使 CANape 直接显示物理单位（D08）。</li>
+<li>母线电压采样也需滤波（但滤波过重会让 Vmax 跟不上负载突变，导致短时过调制）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>匀速时 θm 为锯齿（每机械转一次），θe 每机械转 4 次。</li>
+<li>母线电压在大电流加速时有压降和纹波；EPS 12 V 系统还要考虑车载电源波动（启动瞬间跌落）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* foc_units.h 片段 */
+#define SPD_BASE_RPM        (8000)
+#define VDC_ADC_FULL_V      (20.0f)                   /* 分压满量程 【案例假设】 */
+#define ANG_INC_PER_RPM_Q8  (56)                      /* p×Ts×65536/60 ×256 = 0.2185×256 ≈ 56 */
+
+static inline q15_t FOC_VdcAdcToPu(uint16_t adc)
+{   /* Vdc = adc/4096×20 V；pu = Vdc/16 → ×32768 → adc × 10 */
+    return Q15_Sat((int32_t)adc * 10);
+}
+static inline int16_t FOC_RpmToAngInc(int32_t rpm)
+{
+    return (int16_t)((rpm * ANG_INC_PER_RPM_Q8) &gt;&gt; 8);   /* 3000 rpm → 656 */
+}</code></pre>
+<p class="note">核对：adc × 10：4096 × 10 = 40960 → 超过 32767，即 Vdc &gt; 16 V 时饱和——Q15 基值 16 V 意味着 16 V 以上的过压无法表示，过压诊断（阈值 18 V）应直接比较 ADC 码值或使用更大基值。这类基值上限问题必须在设计时检查。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>CANape 显示转速是实际的 4 倍</h5><dl>
+<dt>现象</dt><dd>台架转速计 1000 rpm，CANape 显示 4000 rpm。</dd>
+<dt>可能根因</dt><dd>用电角度差分算转速却按机械换算。</dd>
+<dt>排查</dt><dd>检查测速输入是 thetaM 还是 thetaE。</dd>
+<dt>修复</dt><dd>机械转速用 thetaM，或除以 p。</dd>
+<dt>验证</dt><dd>与转速计一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>过压诊断永不触发</h5><dl>
+<dt>现象</dt><dd>母线升到 18 V 仍无报警。</dd>
+<dt>可能根因</dt><dd>vdcPu 基值 16 V，Q15 在 16 V 饱和，阈值 18 V 永远达不到。</dd>
+<dt>排查</dt><dd>手算基值上限。</dd>
+<dt>修复</dt><dd>过压诊断用 ADC 码值或单独基值。</dd>
+<dt>验证</dt><dd>过压注入试验触发。</dd></dl></div>
+<div class="issue"><h5>易错点：rad/s 与 Hz 混用</h5><dl>
+<dt>现象</dt><dd>解耦前馈差 2π 倍，高速电流振荡。</dd>
+<dt>根因</dt><dd>ωe 用了 fe。</dd>
+<dt>排查</dt><dd>手算 3000 rpm 时 ωe = 1256.6 rad/s。</dd>
+<dt>修复</dt><dd>统一换算宏。</dd>
+<dt>验证</dt><dd>vd 前馈与稳态 vd 一致。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>转速有正负：反转为负值，所有 int32/rpm 变量必须有符号；用 abs 前确认算法是否需要方向。</li>
+<li>旋变解码结果的位数配置改变（12→14 位）后左移位数未同步修改，角度错乱。</li>
+<li>母线电压基值选取要覆盖过压测试范围（如 ISO 16750-2 规定的车载电压试验，具体值以项目要求为准 <span class="tg tg-check">【待核对】</span>）。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B07" id="quiz-B07"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：电 / 机角速度换算、uint16 每周期增量计算、基值上限、命名规范。</li>
+<li>标定高频：CANape 物理值核对、基值饱和导致诊断失效。</li></ul></div>
+</section>
+
+<!-- ================= 模块 B 综合自测 ================= -->
+<section class="chap" id="B-test" data-title="模块 B 章节综合自测卷">
+<h2 class="chap-h">模块 B 章节综合自测卷</h2>
+<p class="chap-sub">从 B01~B07 题库随机抽取 14 道客观题 + 2 道主观题，交卷统一判分。</p>
+<div class="exam" data-scope="B" data-nobj="14" data-nsub="2" data-key="examB"></div>
+</section>

@@ -1,0 +1,252 @@
+
+<!-- ================= C05 ================= -->
+<section class="chap" id="C05" data-title="C05 电流环 PID">
+<h2 class="chap-h">C05 电流环：解耦前馈、交叉耦合、积分饱和与定点实现</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 5 节（PI 基础见 A08）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>Park 之后、反 Park 之前；FOC 的「力矩环」</td></tr>
+<tr><th>输入 / 输出</th><td>输入：idRef、iqRef、id、iq、ωe、Vdc；输出：vd、vq（已限幅）</td></tr>
+<tr><th>工程价值</th><td>力矩带宽、力矩脉动、低压 / 高速稳定性的直接决定者</td></tr>
+<tr><th>上下游依赖</th><td>上游 C03、C06、C07；下游 C03 反 Park、C04</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A04 dq 方程、A07 传递函数、A08 PI 与抗饱和</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>dq 电压方程中存在 −ωLq·iq、+ωLd·id、+ωψf 三项与转速相关的耦合 / 扰动；不前馈时 PI 只能靠误差去「追」，高速时动态严重恶化。</div>
+<div><b>② 量产怎么做</b>PI（零极点对消参数）+ 解耦与反电动势前馈 + d 轴优先电压圆限幅 + 条件积分抗饱和 + 模式切换时积分器预置。</div>
+<div><b>③ 如何证明</b>不同转速下 iq 阶跃：响应一致、id 扰动小；低压阶跃无大超调；扫频得闭环带宽 ≈ 1 kHz。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>参数：Rs、Ld、Lq、ψf（C11）；Cal_IdKp_q12 等（A08）。</li>
+<li>信号：滤波后电角速度标幺 gFoc.wePu_q15（基值 ωe@8000 rpm = 3351 rad/s）；Vdc。</li>
+<li>不满足：参数偏差 &gt; 30% 时前馈反而引入误差；ωe 噪声大时前馈把噪声注入电压。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+vd = Rs·id + Ld·did/dt − ωe·Lq·iq
+vq = Rs·iq + Lq·diq/dt + ωe·Ld·id + ωe·ψf
+前馈解耦（用估计参数）：vd_ff = −ωe·L̂q·iq，vq_ff = ωe·(L̂d·id + ψ̂f)
+   vd = PI_d(idRef − id) + vd_ff，vq = PI_q(iqRef − iq) + vq_ff
+   参数准确时两轴变为独立的 1/(Ls + R)，PI 按 A08 零极点对消
+另一种流派：复矢量 PI（在 dq 复数域设计，对高速 / 低开关频率比更鲁棒），常见于主驱高速应用 <span class="tg tg-check">【待核对：具体实现依文献与项目】</span>
+<span class="tg tg-fix">【定点实现】</span>标幺前馈系数（基值：ωb = 3351 rad/s，I_BASE 50 A，V_BASE 16 V）<span class="tg tg-case">【案例假设】</span>
+   kLq = ωb·Lq·Ib/Vb = 0.785 → Q15 25734；kLd = 0.471 → 15441；kψ = ωb·ψf/Vb = 0.733 → 24020
+   vd_ff_pu = −ωe_pu·kLq·iq_pu；vq_ff_pu = ωe_pu·(kLd·id_pu + kψ)
+抗饱和：PI 的输出限幅 = 电压圆限幅值 − 前馈量（PI 知道自己还剩多少电压）</div>
+<div id="anim-C05"></div>
+<div class="anim-note"><b>动画在演示什么：</b>dq 两轴耦合的离散电流环（案例参数、Ts = 50 µs、1 拍延迟），给 iq 阶跃 0 → 20 A，观察 id 被交叉耦合「拖动」的程度。上图 iq / id，下图 vd、vq。<br>
+<b>拖动滑块：</b>提高转速，未解耦时 id 出现大扰动、iq 响应变慢；勾选「解耦前馈」后两轴近似独立。「参数误差」模拟 L̂ 与真实值偏差，前馈效果随之下降。<br>
+<b>正常：</b>解耦后 id 扰动 &lt; 1 A。<b>异常：</b>高速时 id 大幅偏离 0。转速升到约 4000 rpm 以上时稳态所需电压超过 6.6 V，动画会提示电压饱和——这正是 C07 弱磁要解决的问题。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>误差：ed = idRef − id，eq = iqRef − iq（int32 → 饱和 Q15）。</li>
+<li>前馈：由 wePu、id、iq 计算 vdFf、vqFf（Q15 乘法）。</li>
+<li>电压上限：vMax = Cal_VmaxK × vdcPu / √3（每周期）。</li>
+<li>d 轴：PI 限幅 [−vMax − vdFf, vMax − vdFf]，vd = PI + vdFf。</li>
+<li>q 轴：vqMax = √(vMax² − vd²)，PI 限幅 [−vqMax − vqFf, vqMax − vqFf]，vq = PI + vqFf。</li>
+<li>积分器预置：开环→闭环或无感切入时，integ = (v_当前 − ff) &lt;&lt; 15，保证输出连续。</li>
+<li>故障关管时积分器清零（A08 风险红线）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>低速：前馈影响小；高速：解耦显著改善 id 扰动与 iq 上升时间。</li>
+<li>电压饱和：vq 贴限幅，iq 跟不上 → 应触发弱磁（C07），而不是继续增大 PI。</li>
+<li>扫频：小信号注入 iqRef，闭环幅频 −3 dB 点约 1 kHz，相位裕度 ≥ 45°。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile q15_t Cal_KLq_q15  = 25734;   /* ωb·Lq·Ib/Vb 【案例假设】 */
+volatile q15_t Cal_KLd_q15  = 15441;
+volatile q15_t Cal_KPsi_q15 = 24020;
+volatile q15_t Cal_VmaxK_q15 = 31130;  /* 0.95 电压裕量 */
+volatile uint8_t Cal_DecoupleEn = 1u;
+
+static PI_tst s_piD, s_piQ;
+
+void FOC_CurrentLoop_Isr(void)
+{
+    q15_t ed = Q15_Sat((int32_t)gFoc.idRef - gFoc.id);
+    q15_t eq = Q15_Sat((int32_t)gFoc.iqRef - gFoc.iq);
+    q15_t vdFf = 0, vqFf = 0;
+    q15_t vMax = Q15_Mul(Q15_Mul(gFoc.vdcPu, Q15_INV_SQRT3), Cal_VmaxK_q15);
+    int32_t vqMax;
+
+    if (Cal_DecoupleEn != 0u) {
+        vdFf = Q15_Sat(-(int32_t)Q15_Mul(gFoc.wePu_q15, Q15_Mul(Cal_KLq_q15, gFoc.iq)));
+        vqFf = Q15_Mul(gFoc.wePu_q15, Q15_Sat((int32_t)Q15_Mul(Cal_KLd_q15, gFoc.id) + Cal_KPsi_q15));
+    }
+    /* d 轴优先 */
+    s_piD.kp_q12 = Cal_IdKp_q12;  s_piD.kiTs_q15 = Cal_IdKiTs_q15;
+    s_piD.outMax = Q15_Sat((int32_t)vMax - vdFf);
+    s_piD.outMin = Q15_Sat(-(int32_t)vMax - vdFf);
+    gFoc.vd = Q15_Sat((int32_t)PI_Run(&amp;s_piD, ed) + vdFf);
+    /* q 轴使用剩余电压 */
+    vqMax = Q15_SqrtQ30(((int32_t)vMax * vMax) - ((int32_t)gFoc.vd * gFoc.vd));
+    s_piQ.kp_q12 = Cal_IqKp_q12;  s_piQ.kiTs_q15 = Cal_IqKiTs_q15;
+    s_piQ.outMax = Q15_Sat(vqMax - vqFf);
+    s_piQ.outMin = Q15_Sat(-vqMax - vqFf);
+    gFoc.vq = Q15_Sat((int32_t)PI_Run(&amp;s_piQ, eq) + vqFf);
+    gFoc.vSat = (uint8_t)((gFoc.vq &gt;= vqMax) || (gFoc.vq &lt;= -vqMax));   /* 给弱磁使用 */
+}
+
+/* 开环 → 闭环切换：积分器预置，保证电压连续 */
+void FOC_CurrentLoop_Preset(q15_t vdNow, q15_t vqNow, q15_t vdFf, q15_t vqFf)
+{
+    s_piD.integ_q30 = ((int32_t)vdNow - vdFf) &lt;&lt; 15;
+    s_piQ.integ_q30 = ((int32_t)vqNow - vqFf) &lt;&lt; 15;
+}</code></pre>
+<p class="note">PI_Run 中积分器限幅使用 outMax/outMin（A08），因此这里传入的动态限幅同时完成了「抗饱和 + 电压圆」。预置时忽略了 P 项（切换瞬间误差应很小），如误差较大可同时扣除 Kp·e。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电流环高频振荡（啸叫），提高转速更明显</h5><dl>
+<dt>现象</dt><dd>iq 在数百 Hz~1 kHz 振荡，电机啸叫。</dd>
+<dt>可能根因</dt><dd>Kp 过大（按偏大的 L 算）、延迟未考虑、前馈 ωe 噪声大、Lq 饱和后实际变小导致带宽升高。</dd>
+<dt>排查</dt><dd>① 关闭前馈对比；② Kp 减半对比；③ 不同电流幅值对比（判断饱和）；④ 扫频测相位裕度。</dd>
+<dt>修复</dt><dd>按实测 L（分电流区间）调度 Kp；ωe 用滤波值；降低带宽。</dd>
+<dt>验证</dt><dd>各工况阶跃超调 &lt; 10%，噪声消失。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>开环切闭环瞬间电流冲击</h5><dl>
+<dt>现象</dt><dd>I/F 切入旋变闭环时 iq 尖峰、手感「咔哒」。</dd>
+<dt>可能根因</dt><dd>积分器未预置（输出从 0 开始）；开环角度与旋变角度不一致。</dd>
+<dt>排查</dt><dd>记录切换前后 vd、vq、θ 差。</dd>
+<dt>修复</dt><dd>预置积分器；角度差逐步收敛后再切换（D06）。</dd>
+<dt>验证</dt><dd>切换瞬间电流平滑。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速大力矩时力矩突然掉落、电流畸变</h5><dl>
+<dt>现象</dt><dd>接近基速时 iq 跟不上，电压饱和。</dd>
+<dt>可能根因</dt><dd>电压用尽，应进入弱磁；限幅后抗饱和缺失导致积分器失控。</dd>
+<dt>排查</dt><dd>观察 vSat 标志、积分器值、vd/vq 与 vMax。</dd>
+<dt>修复</dt><dd>启用弱磁（C07）；确认抗饱和使用动态限幅。</dd>
+<dt>验证</dt><dd>进出电压饱和平滑无超调。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>前馈项单位 / 基值错误（ωe 用 Hz、电感用 mH）→ 前馈变成扰动；上台架前用离线数值逐项核对。</li>
+<li>d、q 两个 PI 参数相同：Ld ≠ Lq，Kp 应不同（A08：0.283 vs 0.471 V/A）。</li>
+<li>电流给定阶跃过陡：配合给定斜率限制，降低电压饱和概率。</li>
+<li><span class="tg tg-red">【风险红线】</span>Kp 符号或误差方向写反 → 正反馈，电流瞬间到硬件过流点；首次闭环小电流、硬件保护先行。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C05" id="quiz-C05"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：三项耦合 / 扰动、前馈公式、标幺系数计算、动态限幅抗饱和、积分器预置。</li>
+<li>综合卷与面试高频：「什么是解耦？为什么高速需要？」「抗饱和怎么做？」</li></ul></div>
+</section>
+
+<!-- ================= C06 ================= -->
+<section class="chap" id="C06" data-title="C06 MTPA">
+<h2 class="chap-h">C06 MTPA：最大转矩电流比——公式法、查表法与在线寻优</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 6 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>给定生成：力矩需求 / iqRef → idRef（基速以下）</td></tr>
+<tr><th>输入 / 输出</th><td>输入：iqRef（或 Te 需求）、温度、Vdc；输出：idRef</td></tr>
+<tr><th>工程价值</th><td>同力矩电流最小 → 铜损、发热、MOS 电流应力最小；案例中 35 A 时力矩提升约 4%，60 A 时约 11%</td></tr>
+<tr><th>上下游依赖</th><td>上游 B02 转矩公式；下游 C05、C07（弱磁区与 MTPA 衔接）</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A05（求导找极值）、A02（电流圆）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>IPMSM 有磁阻转矩，id = 0 不是最优；同样转矩下 MTPA 电流更小，热和保护裕量更好。</div>
+<div><b>② 量产怎么做</b>台架实测「同电流扫电流角」找最大力矩点，生成 MTPA 表（考虑 Ld/Lq 饱和），按温度插值；公式法作为初值。</div>
+<div><b>③ 如何证明</b>扭矩传感器验证：同力矩下实测电流 ≤ id = 0 方案；表中每点为电流角扫描的峰值。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>准确零位（零位误差会让「最大力矩角」测量整体偏移）。</li>
+<li>扭矩传感器台架；Ld、Lq 随电流的实测数据（C11）。</li>
+<li>不满足：用常数电感的公式表 → 大电流时偏离真正 MTPA。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（来源：IPMSM MTPA 经典推导，对 Te 关于电流角求极值）
+Te = 1.5·p·[ψf·iq + (Ld − Lq)·id·iq]，|is|² = id² + iq²
+以 |is| 表示：id = [−ψf + √(ψf² + 8(Ld−Lq)²·|is|²)] / [4(Ld − Lq)]
+以 iq 表示（量产以 iq 为索引时）：id = ψf/(2ΔL) − √(ψf²/(4ΔL²) + iq²)，ΔL = Lq − Ld
+案例 <span class="tg tg-case">【案例假设，常数电感】</span>ψf/(2ΔL) = 58.33 A：
+   iq = 10 / 20 / 30 / 40 / 50 / 60 A → id = −0.85 / −3.33 / −7.26 / −12.4 / −18.5 / −25.4 A
+SPMSM：ΔL = 0 → id = 0（MTPA 退化为 id = 0 控制）
+三类实现：
+   ① 公式法：在线计算，依赖参数准确，饱和时偏差大
+   ② 查表法（量产主流）：台架标定 2D 表（Te 或 iq，Vdc / 温度）→ (id, iq)
+   ③ 在线寻优：信号注入 / 扰动观察找 dTe/dβ = 0，抗参数变化，但实现与验证复杂 <span class="tg tg-check">【待核对：各厂商在线 MTPA 多为私有方案】</span></div>
+<div id="anim-C06"></div>
+<div class="anim-note"><b>动画在演示什么：</b>dq 电流平面：灰色同心圆为等电流圆，彩色曲线为等转矩曲线（IPMSM 为双曲线族），绿色为 MTPA 轨迹（等转矩线与电流圆的切点连线）。黄色点为当前工作点。<br>
+<b>拖动滑块：</b>改变转矩需求，工作点沿 MTPA 轨迹移动；改变 Lq/Ld，凸极比为 1 时轨迹退化为 q 轴；「用 id = 0」对比同转矩所需电流。<br>
+<b>正常：</b>MTPA 点电流最小。<b>注意：</b>为常数电感模型（L0 证据），实测 MTPA 以台架电流角扫描为准。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>表结构：以 |iqRef|（0~60 A，步长 5 A）为索引的 idRef 一维表；高精度项目用 Te × 温度二维表。</li>
+<li>查表：线性插值（1 ms 任务）；iqRef 为负（反向力矩）时 id 同为负（对称）。</li>
+<li>温度修正：多张表按磁钢温度插值，或乘温度系数。</li>
+<li>与弱磁衔接：idRef = min(idMTPA, idFW)（取更负者，C07）。</li>
+<li>电流圆限幅：|is| ≤ Imax，id 优先保证（C07）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>台架电流角扫描：固定 |is|，β 从 90° 扫到 130°，力矩曲线在峰值附近平坦——这意味着 MTPA 角误差几度对力矩影响很小，但对电流有效值仍有收益。</li>
+<li>MTPA 下 id 随负载增加而变得更负，相电流相位领先反电动势。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* MTPA 表：索引 |iq| = 0,5,...,60 A；值为 idRef（Q15）。公式初值，需台架覆盖 【案例假设】*/
+#define MTPA_N   (13u)
+volatile q15_t Cal_MtpaId_q15[MTPA_N] = {
+   0, -140, -558, -1244, -2185, -3363, -4759,
+   -6353, -8124, -10053, -12122, -14313, -16613
+};
+
+q15_t FOC_MtpaIdRef(q15_t iqRef)
+{
+    const int32_t step = 3277;                      /* 5 A = 5/50 × 32768 */
+    int32_t a   = (iqRef &lt; 0) ? -(int32_t)iqRef : (int32_t)iqRef;
+    int32_t idx = a / step;
+    int32_t frac_q15;
+    if (idx &gt;= (int32_t)(MTPA_N - 1u)) { return Cal_MtpaId_q15[MTPA_N - 1u]; }
+    frac_q15 = ((a - idx * step) * 32768) / step;   /* 0..32767 */
+    return (q15_t)(Cal_MtpaId_q15[idx] +
+           (((int32_t)(Cal_MtpaId_q15[idx + 1] - Cal_MtpaId_q15[idx]) * frac_q15) &gt;&gt; 15));
+}</code></pre>
+<p class="note">节点值由第三部分公式按 iq = 0、5…60 A 计算得出（Q15，基值 50 A）。注意：用 iq 作索引时，加入 id 后实际力矩比 Kt·iq 略大，严格的力矩闭环应使用 Te → (id, iq) 表；EPS 上层通常有力矩闭环 / 标定补偿。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>启用 MTPA 后力矩反而下降</h5><dl>
+<dt>现象</dt><dd>同 |is| 下 MTPA 力矩小于 id = 0。</dd>
+<dt>可能根因</dt><dd>零位偏差（实际电流角 ≠ 给定）、id 符号反（给了正 id）、Ld/Lq 填反。</dd>
+<dt>排查</dt><dd>台架扫电流角找峰值；检查 id 正负与参数。</dd>
+<dt>修复</dt><dd>先修零位，再重做 MTPA 表。</dd>
+<dt>验证</dt><dd>同电流力矩 ≥ id = 0。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>大电流时 MTPA 表与实测峰值偏离</h5><dl>
+<dt>现象</dt><dd>60 A 时实测最大力矩角比表中大 / 小若干度。</dd>
+<dt>可能根因</dt><dd>Lq 饱和，常数电感公式不再适用。</dd>
+<dt>排查</dt><dd>多电流幅值扫角度。</dd>
+<dt>修复</dt><dd>改用实测表。</dd>
+<dt>验证</dt><dd>各电流点工作点位于实测峰值附近。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>力矩过零附近手感不连续</h5><dl>
+<dt>现象</dt><dd>回正 / 小力矩换向时有台阶感。</dd>
+<dt>可能根因</dt><dd>MTPA 表在 iq 正负切换时 id 不连续或插值越界。</dd>
+<dt>排查</dt><dd>扫 iqRef 从 −5 到 +5 A 记录 idRef。</dd>
+<dt>修复</dt><dd>表在 0 附近连续、对称；边界处理。</dd>
+<dt>验证</dt><dd>idRef 连续，手感平顺。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>MTPA 表标定时温度不受控：磁钢温度变化使 ψf 变化，表中混入温度误差。</li>
+<li>MTPA 与弱磁切换点若用硬切换，会产生 id 台阶；用「取更负者」自然过渡。</li>
+<li>只看力矩不看电流：MTPA 的价值是降电流，验收指标应包括电流有效值与温升。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C06" id="quiz-C06"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：MTPA 原理、公式（两种索引）、SPMSM 退化、三类实现取舍、零位对 MTPA 的影响。</li>
+<li>面试高频：「MTPA 是什么，量产怎么实现？」</li></ul></div>
+</section>

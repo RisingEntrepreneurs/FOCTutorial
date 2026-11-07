@@ -1,0 +1,121 @@
+
+<!-- ================= C13 ================= -->
+<section class="chap" id="C13" data-title="C13 扰动补偿">
+<h2 class="chap-h">C13 扰动补偿：死区补偿、逆变器非线性补偿、齿槽转矩补偿</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 13 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>SVPWM 之前修正电压（死区 / 非线性）；给定侧叠加力矩（齿槽）</td></tr>
+<tr><th>输入 / 输出</th><td>输入：相电流方向 / 幅值、角度、Vdc；输出：补偿电压或补偿电流</td></tr>
+<tr><th>工程价值</th><td>EPS 低速手感（颗粒感、6 阶脉动）、无感低速精度、参数辨识准确度都受其影响</td></tr>
+<tr><th>上下游依赖</th><td>上游 C01、C09；下游 C04、C10、C11</td></tr>
+<tr><th>适用角色</th><td>算法、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A01 分段函数、A03 谐波、A04 dq 变换中的谐波阶次</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>死区让实际电压偏离给定，误差符号由电流方向决定——在 dq 中表现为 6×fe 电压扰动；12 V 低压系统中 1 µs 死区约 0.24 V，低速时与所需电压同量级。</div>
+<div><b>② 量产怎么做</b>按相电流方向前馈补偿 ΔV（过零附近线性过渡）；逆变器压降按电流查表；齿槽按机械角度查表前馈电流。</div>
+<div><b>③ 如何证明</b>低速 iq 频谱 6 阶下降；相电流过零「平台」消失；扭矩脉动阶次分析。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>已知死区时间、MOS 开关延迟、导通压降（规格书 + 实测）。</li>
+<li>电流过零判断的可靠信号（电流给定或滤波后的反馈）。</li>
+<li>齿槽表需要高精度角度与无负载 / 低速台架测量。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+死区平均电压误差（每相）：ΔV ≈ −sign(i)·(Td + ton − toff)/Ts·Vdc − sign(i)·Vf（导通压降，近似）
+   案例：Td = 1 µs，Ts = 50 µs，Vdc = 12 V → ΔV ≈ 0.24 V <span class="tg tg-case">【案例假设，未计开关延迟与压降】</span>
+   对比：300 rpm、iq = 20 A 时所需 vq ≈ Rs·iq + ωe·ψf ≈ 0.24 + 0.44 = 0.68 V，误差占比约 35%
+补偿：vX_comp = vX + Kdt·f(iX)，f 为符号函数的平滑版本（|i| &lt; I0 时线性）
+   方向判据：用电流给定方向（相位稳定）或反馈（含噪声，过零附近易误判）
+dq 视角：三相方波电压误差 → dq 中 6×fe 扰动，电流环带宽有限，高速时无法抑制
+齿槽转矩：Tcog(θm) 为机械角周期函数，基本周期由极槽数决定（Nc = LCM(槽数, 极数)）
+   补偿：iq_comp(θm) = −Tcog(θm)/Kt，查表前馈 <span class="tg tg-check">【待核对：本案例未给槽数，表需实测】</span></div>
+<div id="anim-C13"></div>
+<div class="anim-note"><b>动画在演示什么：</b>一个电周期内 A 相给定电压（灰）、死区后的实际平均电压（红）与相电流（蓝）。右图为 dq 中 q 轴电压误差（6 倍频）。<br>
+<b>拖动滑块：</b>增大死区时间或降低转速（降低基波电压幅值），误差占比变大，电流过零处出现「平台」；勾选「死区补偿」，按电流方向加回 ΔV；「过零线性区 I0」太小时补偿在过零附近来回切换（产生噪声），太大时补偿不足。<br>
+<b>正常：</b>补偿后红线贴近灰线、6 倍频减小。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>在反 Clarke 之后、零序注入之前，对每相电压加补偿：vX += Cal_DtCompV × fsat(iX/I0)。</li>
+<li>iX 使用给定电流经反 Park / 反 Clarke 得到的三相给定（相位干净）或滤波反馈。</li>
+<li>补偿量随 Vdc 缩放：ΔV ∝ Vdc（每周期更新）。</li>
+<li>齿槽补偿：1 ms 或中断内按 θm 查表叠加到 iqRef，表长按机械周期分辨率。</li>
+<li>标定：低速恒力矩运行，调 Cal_DtCompV 使 6 阶分量最小。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>未补偿：低速相电流过零处平台、波形「方化」；iq 6 阶纹波。</li>
+<li>过补偿：过零处反向尖峰。</li>
+<li>齿槽补偿：空载极低速转动时 iq 脉动 / 速度脉动在齿槽阶次下降。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile q15_t Cal_DtCompV_q15 = 492;     /* 0.24 V / 16 V × 32768 @12 V，随 Vdc 缩放 【案例假设】*/
+volatile q15_t Cal_DtI0_q15    = 655;     /* 线性区 1 A */
+
+static inline int32_t DtComp_OnePhase(q15_t iRef)
+{
+    int32_t x = ((int32_t)iRef &lt;&lt; 15) / Cal_DtI0_q15;            /* i/I0，Q15 */
+    if (x &gt;  32767) { x =  32767; }
+    if (x &lt; -32768) { x = -32768; }
+    /* ΔV = Kdt × fsat(i/I0) × (Vdc/12 V)；vdcPu@12 V = 24576 */
+    return (((x * Cal_DtCompV_q15) &gt;&gt; 15) * gFoc.vdcPu) / 24576;
+}
+
+/* 在 FOC_Svpwm_Isr 中、求 v0 之前调用：va += DtComp(iaRef) … */
+void FOC_DeadTimeComp(int32_t *va, int32_t *vb, int32_t *vc,
+                      q15_t iaRef, q15_t ibRef, q15_t icRef)
+{
+    *va += DtComp_OnePhase(iaRef);
+    *vb += DtComp_OnePhase(ibRef);
+    *vc += DtComp_OnePhase(icRef);
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>低速 6 阶力矩脉动（颗粒感）</h5><dl>
+<dt>现象</dt><dd>慢打方向盘时有周期颗粒，频率 = 6 × 电频率。</dd>
+<dt>可能根因</dt><dd>死区未补偿或补偿量不足；反电动势 5、7 次谐波。</dd>
+<dt>排查</dt><dd>改变 Cal_DtCompV 观察 6 阶变化；对拖测反电动势谐波。</dd>
+<dt>修复</dt><dd>标定死区补偿；反电动势谐波可用谐波电流注入抑制（进阶）。</dd>
+<dt>验证</dt><dd>力矩 / iq 频谱 6 阶下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>启用补偿后轻载噪声增大</h5><dl>
+<dt>现象</dt><dd>小电流时出现高频噪声。</dd>
+<dt>可能根因</dt><dd>过零判断用含噪反馈 + 线性区太窄，补偿来回翻转。</dd>
+<dt>排查</dt><dd>记录补偿量随时间变化。</dd>
+<dt>修复</dt><dd>用电流给定判方向；加宽 I0。</dd>
+<dt>验证</dt><dd>轻载噪声恢复。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>无感低速观测偏差大</h5><dl>
+<dt>现象</dt><dd>C10 观测器低速角度误差大。</dd>
+<dt>可能根因</dt><dd>观测器输入为给定电压，死区误差未补偿。</dd>
+<dt>排查</dt><dd>开 / 关补偿对比观测误差。</dd>
+<dt>修复</dt><dd>补偿后的电压送观测器；或测量实际相电压。</dd>
+<dt>验证</dt><dd>低速误差下降。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>补偿量不随 Vdc 缩放：电源电压变化时补偿失配。</li>
+<li>死区补偿与 MOS 温度、电流相关：开关延迟随温度变化，严格项目需表格化。</li>
+<li>齿槽表角度基准与旋变零位绑定：重新标定零位后表需同步平移。</li>
+<li><span class="tg tg-red">【风险红线】</span>修改硬件死区以「减少补偿」：死区过小会导致上下管直通，严禁为软件效果压缩低于驱动 / MOS 要求的死区。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C13" id="quiz-C13"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：死区误差公式、低压系统影响大小、6 倍频机理、补偿方向判据与线性区、齿槽补偿方法、死区直通红线。</li>
+<li>台架高频：颗粒感、过补偿、轻载噪声。</li></ul></div>
+</section>
+
+<!-- ================= 模块 C 综合自测 ================= -->
+<section class="chap" id="C-test" data-title="模块 C 章节综合自测卷">
+<h2 class="chap-h">模块 C 章节综合自测卷</h2>
+<p class="chap-sub">从 C01~C13 题库随机抽取 20 道客观题 + 3 道主观题，交卷统一判分。</p>
+<div class="exam" data-scope="C" data-nobj="20" data-nsub="3" data-key="examC"></div>
+</section>

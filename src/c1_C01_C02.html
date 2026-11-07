@@ -1,0 +1,226 @@
+
+<!-- ================= C01 ================= -->
+<section class="chap" id="C01" data-title="C01 电流采样与校准">
+<h2 class="chap-h">C01 电流采样：偏移校准、增益校准、采样时序、噪声抑制</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 1 节（数学基础见 A01，时序基础见 B06）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>FOC 链路第一环：ADC → ia、ib、ic（Q15）</td></tr>
+<tr><th>输入 / 输出</th><td>输入：adcIa、adcIb、Cal_ 偏移 / 增益；输出：gFoc.ia / ib / ic</td></tr>
+<tr><th>工程价值</th><td>电流环的反馈就是它：采样误差 100% 进入力矩误差（电流环只能跟踪「测到的」电流）</td></tr>
+<tr><th>上下游依赖</th><td>上游：硬件采样电路、B06 时序；下游：C02 及全部控制</td></tr>
+<tr><th>适用角色</th><td>MCU 底层、标定</td></tr>
+<tr><th>前置数学依赖</th><td>A01 线性映射与两点标定、A05 滤波、A06 平均（累加）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>偏移 → 1×fe 力矩脉动；增益差 → 2×fe 脉动；采样时刻错 → 噪声与畸变。没有干净的电流，后续所有环节都无从谈起。</div>
+<div><b>② 量产怎么做</b>上电关管偏移校准（每次上电）+ 产线增益标定（写 NVM）+ 运行中零矢量期间慢速偏移跟踪（可选）+ 范围诊断。</div>
+<div><b>③ 如何证明</b>静止零电流 &lt; 0.1 A；直流注入增益误差 &lt; 1%；运行 dq 电流 1×、2× fe 分量低于目标；示波器确认采样点位置。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>硬件：采样电阻（低边双电阻）+ 差分运放偏置到 ADC 中点；RC 抗混叠滤波（截止频率需远高于电流环带宽、低于开关噪声）。</li>
+<li>时序：PWM 顶点硬件触发 ADC（B06）；两相同时采样（两个 ADC 并行）。</li>
+<li>标定量：Cal_IaOffset_cnt、Cal_IbOffset_cnt、Cal_IaGainCorr_q15、Cal_IbGainCorr_q15。</li>
+<li>不满足：两相非同时采样 → 高速时两相时间差造成相位误差（ωe × Δt）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+采样链：I_phase × R_shunt × G_amp + V_bias → ADC
+   案例：±50 A ↔ 0~3.3 V；若 R = 0.5 mΩ，则需 G = 1.65 V / (50 A × 0.5 mΩ) = 66 <span class="tg tg-case">【案例假设】</span>
+偏移平均：N 次独立采样的噪声标准差下降为 σ/√N（1024 次 → 下降 32 倍）
+偏移误差的力矩影响：相电流直流偏置 b → dq 中幅值 b 的 1×fe 纹波 → 力矩纹波 ≈ Kt·b
+增益差 ε：dq 中出现幅值约 ε·|I|/2 的 2×fe 纹波
+<span class="tg tg-disc">【离散实现】</span>运行中偏移跟踪（仅在 PWM 关闭或电流确知为 0 时）：
+   off[k] = off[k−1] + λ·(adc[k] − off[k−1])，λ 很小（时间常数秒级）
+采样电阻温漂：锰铜合金温度系数低（约数十 ppm/°C 量级 <span class="tg tg-check">【待核对：以电阻规格书为准】</span>），主要温漂来自运放偏置</div>
+<div id="anim-C01"></div>
+<div class="anim-note"><b>动画在演示什么：</b>上电偏移校准过程：每个点是一次 ADC 采样（含噪声），橙线是累加平均的估计值逐步收敛到真实零点。右图为用该估计值运行时 iq 的 1×fe 纹波幅度。<br>
+<b>拖动滑块：</b>「平均次数 N」越大估计越准；「运放稳定前就开始校准」勾选后，前段采样有漂移，估计值被拉偏；「校准期间有电流」模拟 PWM 未关断。<br>
+<b>正常：</b>估计误差 &lt; 1 码，iq 纹波很小。<b>异常：</b>估计偏离、纹波增大。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>上电偏移校准</b>：PWM 关闭、运放供电稳定后等待 ≥ 数十 ms（以硬件设计为准）→ 1024 次平均 → 范围检查（A01 代码）。</li>
+<li><b>产线增益标定</b>：直流注入（A 进 B 出），精密分流器 / 功率分析仪测实际电流，两点法求增益修正，写 NVM，上电加载到 Cal_。</li>
+<li><b>中断换算</b>：int32 中间量、增益修正、饱和（A01 FOC_AdcToIq15）。</li>
+<li><b>诊断</b>：ADC 码值接近 0 / 4095（饱和）、偏移超范围、ia+ib+ic 合理性（三电阻时）、运行中 PWM 关闭期间电流应为 0。</li>
+<li><b>噪声抑制</b>：优先硬件（布局、差分走线、RC），软件不建议对电流环反馈再加大低通（引入相位滞后）；必要时用很短的滤波或过采样平均。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>静止：ia、ib 平均 ≈ 0，峰峰噪声若干码。</li>
+<li>恒速恒力矩：iq 频谱中 1×fe、2×fe 分量很低；若出现，按 A01/B03 定位。</li>
+<li>示波器：ADC 触发脉冲落在低边导通窗口中部、远离开关沿振铃。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 运行中慢速偏移跟踪：只在 PWM 关闭（READY 状态）时执行 */
+#define OFFS_TRACK_SHIFT  (12u)          /* λ = 1/4096，20 kHz 下时间常数约 0.2 s */
+static int32_t s_offA_q12, s_offB_q12;   /* 偏移 × 4096；上电校准完成后初始化为 Cal_IxOffset_cnt &lt;&lt; 12 */
+
+void FOC_OffsetTrack_Isr(void)
+{
+    if (gFoc.pwmEnabled == 0u) {
+        int32_t xA = (int32_t)gFoc.adcIa &lt;&lt; OFFS_TRACK_SHIFT;
+        int32_t xB = (int32_t)gFoc.adcIb &lt;&lt; OFFS_TRACK_SHIFT;
+        s_offA_q12 += (xA - s_offA_q12) &gt;&gt; OFFS_TRACK_SHIFT;     /* 一阶低通 */
+        s_offB_q12 += (xB - s_offB_q12) &gt;&gt; OFFS_TRACK_SHIFT;
+        Cal_IaOffset_cnt = (int16_t)(s_offA_q12 &gt;&gt; OFFS_TRACK_SHIFT);
+        Cal_IbOffset_cnt = (int16_t)(s_offB_q12 &gt;&gt; OFFS_TRACK_SHIFT);
+    }
+}
+
+/* ADC 饱和诊断：码值连续 N 次接近满量程 → 采样超量程 */
+void FOC_IsenseSatDiag_Isr(void)
+{
+    static uint8_t s_cnt;
+    uint8_t sat = (gFoc.adcIa &lt; 16u) || (gFoc.adcIa &gt; 4079u) ||
+                  (gFoc.adcIb &lt; 16u) || (gFoc.adcIb &gt; 4079u);
+    s_cnt = sat ? (uint8_t)(s_cnt + 1u) : 0u;
+    if (s_cnt &gt;= 3u) { Diag_SetFault(DIAG_ISENSE_SAT); }
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>热机后低速力矩脉动变大</h5><dl>
+<dt>现象</dt><dd>冷机正常，运行半小时后低速出现 1×fe 顿挫。</dd>
+<dt>可能根因</dt><dd>运放偏置温漂，上电校准值不再准确。</dd>
+<dt>排查</dt><dd>热机后关管读 ADC 原始均值，与 Cal_ 偏移比较。</dd>
+<dt>修复</dt><dd>停机 / 零力矩期间慢速偏移跟踪；硬件选低温漂运放。</dd>
+<dt>验证</dt><dd>热态 iq 1×fe 分量与冷态一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速时相电流相位误差</h5><dl>
+<dt>现象</dt><dd>高速 dq 出现 2×fe 纹波，低速没有。</dd>
+<dt>可能根因</dt><dd>两相分时采样（共用一个 ADC），Δt × ωe 在高速时不可忽略。</dd>
+<dt>排查</dt><dd>检查 ADC 通道配置；计算 8000 rpm 下 2 µs 间隔对应 0.38° 电角度。</dd>
+<dt>修复</dt><dd>双 ADC 同时采样；或对第二相做时间差补偿。</dd>
+<dt>验证</dt><dd>高速 2×fe 纹波下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>上电偶发「采样偏移超范围」故障</h5><dl>
+<dt>现象</dt><dd>冷启动时偶发 DIAG_ISENSE_OFFSET。</dd>
+<dt>可能根因</dt><dd>电机仍在惯性转动（反电动势经体二极管形成电流）；运放供电爬升慢。</dd>
+<dt>排查</dt><dd>记录故障时转速与供电时序。</dd>
+<dt>修复</dt><dd>校准前判断转速为零；延长等待；校准失败可重试。</dd>
+<dt>验证</dt><dd>冷启动 / 转动中上电试验通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>在电流反馈上加重低通「降噪」：相位滞后直接降低电流环相位裕度，参见 A05/A07。</li>
+<li>增益标定只在一个电流点做：运放与 ADC 存在非线性，建议多点检查。</li>
+<li>偏移跟踪在电机转动时执行：反电动势产生电流，偏移被「学坏」。</li>
+<li><span class="tg tg-red">【风险红线】</span>采样饱和时过流保护读数偏小；硬件比较器过流保护必须独立于 ADC 路径。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C01" id="quiz-C01"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：偏移 / 增益影响的纹波阶次、校准时序、σ/√N、同时采样、温漂跟踪条件。</li>
+<li>台架高频：静止有电流、热机顿挫、高速 2 倍频。</li></ul></div>
+</section>
+
+<!-- ================= C02 ================= -->
+<section class="chap" id="C02" data-title="C02 Clarke 变换">
+<h2 class="chap-h">C02 Clarke 变换：三相合成空间矢量</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 2 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>采样之后：ia、ib → iα、iβ</td></tr>
+<tr><th>输入 / 输出</th><td>输入：gFoc.ia、ib；输出：gFoc.iAlpha、iBeta</td></tr>
+<tr><th>工程价值</th><td>把三相（实际两个独立量）变成正交两轴，为 Park 做准备</td></tr>
+<tr><th>上下游依赖</th><td>上游 C01；下游 C03</td></tr>
+<tr><th>适用角色</th><td>算法、底层</td></tr>
+<tr><th>前置数学依赖</th><td>A02 合成与投影、A04 空间矢量 a = e^(j120°)</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>三相绕组空间上互差 120°，三个电流的磁势叠加就是一个空间矢量；Clarke 求出它在正交 αβ 轴上的坐标。</div>
+<div><b>② 量产怎么做</b>两相输入、一次乘法（1/√3）、int32 中间量、饱和；第三相不参与计算（隐含 ic = −ia − ib）。</div>
+<div><b>③ 如何证明</b>iα 与 ia 重合；XY 轨迹为圆，半径 = 相电流峰值（幅值不变约定）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>C01 校准完成；全书约定：α 轴与 A 相轴线重合，幅值不变系数 2/3。</li>
+<li>不满足：系数约定混用 → 电流、转矩、PI 参数整体差一个比例。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+空间矢量：i_s = K·(ia + a·ib + a²·ic)，a = e^(j120°)
+   幅值不变：K = 2/3 → |i_s| = 相电流峰值（本教程）
+   功率不变：K = √(2/3) → |i_s| = √(3/2)·峰值，转矩公式系数变为 p·(…)
+展开（K = 2/3）：
+   iα = (2/3)·[ia − (ib + ic)/2]
+   iβ = (2/3)·(√3/2)·(ib − ic) = (ib − ic)/√3
+代入 ia + ib + ic = 0：iα = ia，iβ = (ia + 2·ib)/√3
+<span class="tg tg-fix">【定点实现】</span>1/√3 → Q15 18919；ia + 2·ib 最大约 ±3 pu，先 int32 再乘，乘积 ±3×32768×18919 ≈ ±1.86×10⁹ &lt; 2³¹，不溢出</div>
+<div id="anim-C02"></div>
+<div class="anim-note"><b>动画在演示什么：</b>三个相轴（A 0°、B 120°、C 240°）上，各相电流产生的分矢量 ia·e^(j0)、ib·e^(j120°)、ic·e^(j240°)（细箭头），首尾相接合成后乘 2/3 得到 i_s（粗橙箭头），其 α、β 投影即 Clarke 输出。<br>
+<b>拖动滑块：</b>「电流角」旋转合成矢量；「C 相断线」模拟 C 相电流为 0（星接时 ia、ib 也会改变，这里演示「采样以为平衡但实际不平衡」时合成矢量的畸变）；「系数」切换 2/3 与 √(2/3)，观察 |i_s| 变化。<br>
+<b>正常：</b>2/3 系数下 |i_s| 恒等于相电流峰值。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>读取 ia、ib（Q15）。</li>
+<li>iAlpha = ia。</li>
+<li>iBeta = sat(((ia + 2·ib) × 18919) &gt;&gt; 15)，int32 运算。</li>
+<li>可选：三电阻采样时用三相 iα = (2ia − ib − ic)/3，降低单相误差影响。</li>
+<li>执行时间：几个指令周期，无需优化。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>iα 与 ia 波形完全重合；iβ 与 iα 正交、同幅值。</li>
+<li>XY：圆；椭圆 → 增益；偏心 → 偏移；尖角 / 平顶 → 采样饱和或死区。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>void FOC_Clarke_Isr(void)          /* 两相输入版本（双电阻采样）*/
+{
+    int32_t sum = (int32_t)gFoc.ia + ((int32_t)gFoc.ib &lt;&lt; 1);
+    gFoc.iAlpha = gFoc.ia;
+    gFoc.iBeta  = Q15_Sat((sum * Q15_INV_SQRT3) &gt;&gt; 15);
+}
+
+/* 单元测试（PIL / 主机端）：ia = 0.5 pu，ib = −0.25，ic = −0.25 → iα = 0.5，iβ = 0 */
+void UT_Clarke(void)
+{
+    gFoc.ia = 16384; gFoc.ib = -8192;
+    FOC_Clarke_Isr();
+    UT_ASSERT(gFoc.iAlpha == 16384);
+    UT_ASSERT((gFoc.iBeta &gt;= -1) &amp;&amp; (gFoc.iBeta &lt;= 1));
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电流幅值比钳形表大 22%</h5><dl>
+<dt>现象</dt><dd>|i_s| 与钳形表峰值之比约 1.22。</dd>
+<dt>可能根因</dt><dd>Clarke 使用了功率不变系数 √(2/3)，√(3/2) ≈ 1.225。</dd>
+<dt>排查</dt><dd>检查系数和单位测试。</dd>
+<dt>修复</dt><dd>统一幅值不变，并检查转矩公式系数。</dd>
+<dt>验证</dt><dd>|i_s| = 相电流峰值。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>某一扇区电流畸变</h5><dl>
+<dt>现象</dt><dd>XY 圆在一个方向上被「削掉」。</dd>
+<dt>可能根因</dt><dd>某相采样饱和或采样窗口不足（B06）。</dd>
+<dt>排查</dt><dd>看 ADC 原始码值是否触顶，对应时刻占空比。</dd>
+<dt>修复</dt><dd>量程 / 窗口修正。</dd>
+<dt>验证</dt><dd>XY 圆完整。</dd></dl></div>
+<div class="issue"><h5>易错点：β 用 (ib − ic)/√3 但 ic 来自重构</h5><dl>
+<dt>现象</dt><dd>结果与两相公式一致，但多一步误差。</dd>
+<dt>根因</dt><dd>ic 本身由 ia、ib 推出，三相公式不增加信息。</dd>
+<dt>排查</dt><dd>—</dd>
+<dt>修复</dt><dd>双电阻直接用两相公式。</dd>
+<dt>验证</dt><dd>单元测试。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>相序定义与硬件不符（B、C 相接线互换）：Clarke 本身没错，但旋转方向反了，Park 后 2×fe（B03）。</li>
+<li>Q15 输入 −32768 时 ia + 2·ib 的边界：保证输入已饱和到合法范围。</li>
+<li>电压 Clarke（观测器用 vα、vβ）与电流 Clarke 必须使用相同约定。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C02" id="quiz-C02"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：两相公式、2/3 与 √(2/3) 差异、定点溢出边界、XY 判据。</li>
+<li>面试高频：「幅值不变和功率不变 Clarke 有什么区别？」</li></ul></div>
+</section>

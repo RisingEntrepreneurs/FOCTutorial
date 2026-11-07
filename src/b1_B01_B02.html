@@ -1,0 +1,215 @@
+
+<!-- ================= B01 ================= -->
+<section class="chap" id="B01" data-title="B01 为什么用 FOC">
+<h2 class="chap-h">B01 为什么要用 FOC？V/F、DTC 与 FOC 的工程取舍</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 1 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>方案选型阶段：决定整个控制软件架构</td></tr>
+<tr><th>输入 / 输出</th><td>输入：应用需求（力矩精度、动态、噪声、转速范围、成本）；输出：控制方案与传感器方案</td></tr>
+<tr><th>工程价值</th><td>EPS 直接作用在方向盘手感上：力矩脉动、延迟、噪声都会被驾驶员感知，选错方案后期无法靠标定弥补</td></tr>
+<tr><th>上下游依赖</th><td>下游：B04 矢量控制思想、F01 FOC vs DTC、F02 有感 vs 无感</td></tr>
+<tr><th>适用角色</th><td>系统 / 算法工程师；嵌入式工程师需理解选型理由</td></tr>
+<tr><th>前置数学依赖</th><td>A02 矢量、A04 复数（理解「控制矢量」）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>V/F 只控制电压幅值和频率，不直接控制力矩；EPS 需要毫秒级、低脉动的力矩响应，只有直接控制 dq 电流的方案才能满足。</div>
+<div><b>② 量产怎么做</b>EPS、电驱主流采用带位置传感器的 FOC + 电流环 20 kHz 执行；风机、水泵等对力矩不敏感的场合仍常用 V/F 或无感 FOC。</div>
+<div><b>③ 如何证明</b>力矩阶跃响应时间、力矩脉动百分比、低速平稳性、噪声主观评价——用台架扭矩传感器数据对比，而不是看仿真。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>需求：力矩精度、带宽、转速范围、功能安全等级（EPS 常见为 ASIL D 相关要求，具体以项目安全目标为准 <span class="tg tg-check">【待核对】</span>）。</li>
+<li>硬件：有无位置传感器、电流采样方式、MCU 算力（FOC 每周期需数十 µs 级计算余量）。</li>
+<li>不满足：算力或采样不支持 20 kHz 电流环 → 力矩带宽不足，手感「发木」。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>三类方案控制的核心量
+V/F：     控制 |V| 与 f，保持 V/f ≈ 常数（磁通近似恒定）；力矩是「结果」而非被控量
+DTC：     直接控制定子磁链 |ψs| 与电磁转矩 Te，滞环比较 + 开关表选电压矢量
+FOC：     控制 dq 电流：Te = 1.5·p·[ψf·iq + (Ld − Lq)·id·iq]（B02 推导）
+           → 力矩 ≈ 正比 iq（SPMSM 严格正比），电流环带宽即力矩带宽</div>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>维度</th><th>V/F</th><th>DTC</th><th>FOC</th></tr>
+<tr><td>力矩控制</td><td>间接，开环</td><td>直接，滞环</td><td>直接，经电流环</td></tr>
+<tr><td>开关频率</td><td>固定</td><td>变化（滞环），噪声频谱宽</td><td>固定（SVPWM），噪声可控</td></tr>
+<tr><td>力矩脉动</td><td>大</td><td>较大（滞环宽度决定）</td><td>小</td></tr>
+<tr><td>低速性能</td><td>差</td><td>依赖磁链估计，低速差</td><td>有位置传感器时零速满力矩</td></tr>
+<tr><td>参数依赖</td><td>低</td><td>定子电阻</td><td>电感、磁链（解耦、MTPA、弱磁）</td></tr>
+<tr><td>算力 / 采样要求</td><td>低</td><td>高采样率</td><td>中等，需精确同步采样</td></tr>
+<tr><td>EPS 适用性</td><td>不适用</td><td>少见</td><td>主流</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>本节是方案取舍，用对比表更清楚；三种方案的动态差异在 B04（矢量控制）与 F01（FOC vs DTC）中演示。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（方案落地评估）</h3>
+<ol><li><b>算力预算</b>：20 kHz 主中断 50 µs 周期，FOC 主链路（采样换算、Clarke、Park、2×PI、反 Park、SVPWM、诊断）通常占用一部分；需在 PIL 实测执行时间，保留余量给诊断与通信 <span class="tg tg-check">【待核对：具体占比以 S32K146 实测为准】</span>。</li>
+<li><b>外设能力</b>：PWM 中心对齐 + 互补 + 死区 + 硬件故障关断；ADC 由 PWM 定时硬件触发（不能软件触发，否则抖动）。</li>
+<li><b>位置传感</b>：EPS 要求零速满力矩 → 旋变为主，无感算法作为降级备份。</li>
+<li><b>标定接口</b>：XCP 测量与标定，确保所有 Cal_ 量可在线改。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>FOC：力矩阶跃时 iq 在 ~0.35 ms 量级跟踪到位（1 kHz 带宽），相电流为正弦。</li>
+<li>V/F：负载突变时电流冲击大、转速掉落，力矩响应慢且可能失步。</li>
+<li>DTC：相电流含较宽频谱的纹波，听感为「沙沙」宽频噪声。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* EPS 控制模式枚举（D04 状态机使用）*/
+typedef enum {
+    FOC_MODE_TORQUE = 0,   /* 力矩模式：上层 EPS 助力算法给 iqRef（主模式） */
+    FOC_MODE_SPEED,        /* 速度模式：台架 / 回正 / 测试用              */
+    FOC_MODE_POSITION      /* 位置模式：标定、终端保护等特殊功能          */
+} FOC_Mode_ten;
+
+/* 上层（1 ms）给出目标电磁力矩，转换为 iq 给定（SPMSM 近似；IPMSM 用 C06 MTPA 表）*/
+#define FOC_KT_NM_PER_A   (0.021f)   /* 1.5·p·ψf = 1.5×4×3.5e-3 【案例假设】 */
+q15_t FOC_TorqueToIqRef(float teRef_Nm)
+{
+    float iq_A = teRef_Nm / FOC_KT_NM_PER_A;
+    return Q15_Sat((int32_t)(iq_A / FOC_I_BASE * 32768.0f));   /* 1 ms 任务内，可用浮点 */
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>力矩响应「发木」、手感延迟</h5><dl>
+<dt>现象</dt><dd>驾驶员快速打方向时助力滞后。</dd>
+<dt>可能根因</dt><dd>电流环带宽不足（参数保守 / 执行周期过长）、上层力矩给定滤波过重、通信延迟。</dd>
+<dt>排查顺序</dt><dd>① iq 给定 vs 反馈阶跃 → ② 上层给定到 iqRef 的延迟 → ③ 各级滤波器截止频率。</dd>
+<dt>修复</dt><dd>按 A08 重新设计电流环；削减上层冗余滤波。</dd>
+<dt>验证</dt><dd>扭矩传感器测力矩阶跃响应时间满足需求。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>低速转向有「颗粒感」</h5><dl>
+<dt>现象</dt><dd>慢打方向盘感到周期性顿挫。</dd>
+<dt>可能根因</dt><dd>齿槽转矩、电流偏移（一倍频）、角度误差、死区（六倍频）。</dd>
+<dt>排查顺序</dt><dd>按频率分解：计算顿挫频率与电频率的倍数关系。</dd>
+<dt>修复</dt><dd>对应 A01 偏移、C09 零位、C13 死区 / 齿槽补偿。</dd>
+<dt>验证</dt><dd>力矩脉动频谱中对应阶次下降。</dd></dl></div>
+<div class="issue"><h5>选型易错点：用 V/F 做低成本降级模式</h5><dl>
+<dt>现象</dt><dd>传感器故障后 V/F 降级运行时电机失步、方向盘抖。</dd>
+<dt>可能根因</dt><dd>V/F 无力矩控制，EPS 负载随转向剧烈变化。</dd>
+<dt>排查</dt><dd>负载突变试验。</dd>
+<dt>修复</dt><dd>降级用无感 FOC 或安全关断策略（按功能安全设计）。</dd>
+<dt>验证</dt><dd>故障注入试验通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>只看仿真比较方案：DTC 仿真曲线可能很漂亮，但开关频率不固定带来的 EMC、噪声问题仿真不体现。</li>
+<li>低估参数依赖：FOC 的解耦、MTPA、弱磁都依赖 Ld、Lq、ψf，参数辨识（C11）必须进入项目计划。</li>
+<li>把「能转」当成「能量产」：V/F 一天就能让电机转起来，但离满足 EPS 力矩指标差距很大。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B01" id="quiz-B01"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：三方案控制量差异、FOC 力矩 ∝ iq、EPS 为何选有感 FOC。</li>
+<li>面试高频：「FOC 和 DTC 的本质区别？」——控制电流矢量（固定开关频率）vs 直接控制磁链和转矩（滞环）。</li></ul></div>
+</section>
+
+<!-- ================= B02 ================= -->
+<section class="chap" id="B02" data-title="B02 PMSM 基础">
+<h2 class="chap-h">B02 永磁同步电机基础：SPMSM / IPMSM、磁阻转矩、反电动势</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 2 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>被控对象模型：所有算法的「物理基础」</td></tr>
+<tr><th>输入 / 输出</th><td>输入：id、iq、ωe；输出：电磁转矩 Te、反电动势、dq 电压</td></tr>
+<tr><th>工程价值</th><td>理解为何 IPMSM 要用负 id（MTPA、弱磁），为何高速电压不够</td></tr>
+<tr><th>上下游依赖</th><td>上游 A04 dq 方程；下游 C05、C06、C07、C10、C11</td></tr>
+<tr><th>适用角色</th><td>全部</td></tr>
+<tr><th>前置数学依赖</th><td>A03、A04</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>不知道转矩公式中的磁阻项，就不会理解 IPMSM 的 MTPA；不知道反电动势随转速增长，就无法理解弱磁。</div>
+<div><b>② 量产怎么做</b>用 dq 模型 + 实测参数表（Ld、Lq 随电流变化）建立仿真与查表；反电动势常数在台架对拖测得。</div>
+<div><b>③ 如何证明</b>对拖测线反电动势幅值与转速成正比、与设计 ψf 一致；扭矩传感器测 Te–iq 曲线与公式一致。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>数学：A04 dq 电压方程。物理：磁体产生转子磁链 ψf，定子电流产生旋转磁场。</li>
+<li>参数：p、Rs、Ld、Lq、ψf（导读案例表）。</li>
+<li>不满足：把 IPMSM 当 SPMSM 用 id = 0 控制 → 同电流下力矩偏小、高速提前电压饱和。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（幅值不变 Clarke 约定，来源：PMSM 矢量控制经典教材通用式）
+磁链：ψd = Ld·id + ψf，ψq = Lq·iq
+电压：vd = Rs·id + Ld·did/dt − ωe·Lq·iq
+      vq = Rs·iq + Lq·diq/dt + ωe·Ld·id + ωe·ψf      ← ωe·ψf 即反电动势
+转矩：Te = 1.5·p·(ψd·iq − ψq·id) = 1.5·p·[ψf·iq + (Ld − Lq)·id·iq]
+             永磁转矩 ↑        磁阻转矩 ↑（IPMSM：Ld &lt; Lq，id &lt; 0 时为正）
+SPMSM：Ld ≈ Lq，磁阻转矩 ≈ 0 → Te = 1.5·p·ψf·iq，id = 0 控制即最优
+反电动势峰值（相）：E = ωe·ψf；ke（线反电动势有效值/krpm）可由 ψf 换算
+案例 <span class="tg tg-case">【案例假设】</span>：Kt = 1.5×4×3.5 mWb = 0.021 N·m/A（峰值电流）
+   iq = 35 A（额定峰值）、id = 0：Te = 0.735 N·m（电机轴，EPS 经减速机构放大）
+   3000 rpm：E = 1256.6 × 3.5e-3 = 4.40 V；8000 rpm：11.7 V &gt; Vdc/√3 = 6.93 V</div>
+<div id="anim-B02"></div>
+<div class="anim-note"><b>动画在演示什么：</b>固定电流幅值 |is|，改变电流角 β（从 +d 轴逆时针量起，β = 90° 即纯 q 轴），绘制永磁转矩、磁阻转矩、总转矩随 β 的变化。<br>
+<b>拖动滑块：</b>Ld = Lq（SPMSM）时总转矩最大点在 β = 90°；Ld &lt; Lq（IPMSM）时最大点右移到 β &gt; 90°（即 id &lt; 0），这就是 MTPA 的来源（C06）。增大 |is| 时磁阻转矩占比增加。<br>
+<b>正常：</b>曲线平滑、最大点随凸极比移动。<b>注意：</b>实际 Ld、Lq 随电流饱和变化，量产 MTPA 用实测表。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>参数结构体</b>：Rs、Ld、Lq、ψf 以标定量存放（Cal_ 前缀），用于解耦前馈、MTPA、弱磁、观测器。</li>
+<li><b>温度修正</b>：Rs 随铜温升高（约 +0.39%/°C），ψf 随磁钢温度降低（钕铁硼常见约 −0.1%/°C 量级 <span class="tg tg-check">【待核对：以磁钢供应商数据为准】</span>），慢任务按温度估计更新。</li>
+<li><b>转矩估计</b>：用 Te 公式在 1 ms 任务中估算实际力矩，供上层监控（功能安全对力矩合理性检查常用）。</li>
+<li><b>定点</b>：转矩计算涉及三个量相乘，在慢任务用浮点或 int64，避免 Q 格式链式溢出。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>对拖（PWM 关闭）：线反电动势正弦，幅值 ∝ 转速；THD 低。若含明显 5、7 次谐波 → 力矩脉动来源之一。</li>
+<li>同电流扫电流角：IPMSM 实测最大力矩点在 β &gt; 90°；若在 90° 附近，说明凸极比小或零位偏差（C09）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 电机参数标定量（物理单位 float，慢任务使用；快环使用其 Q 格式副本）【案例假设】*/
+volatile float Cal_Rs_mOhm   = 12.0f;
+volatile float Cal_Ld_uH     = 45.0f;
+volatile float Cal_Lq_uH     = 75.0f;
+volatile float Cal_PsiF_mWb  = 3.5f;
+
+/* 1 ms 任务：电磁转矩估算（N·m），输入为 A */
+float FOC_TorqueEst(float id_A, float iq_A)
+{
+    float psiF = Cal_PsiF_mWb * 1.0e-3f;
+    float dL   = (Cal_Ld_uH - Cal_Lq_uH) * 1.0e-6f;      /* IPMSM: 负值 */
+    return 1.5f * (float)FOC_POLE_PAIRS * (psiF * iq_A + dL * id_A * iq_A);
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>同 iq 力矩比设计值低 10%</h5><dl>
+<dt>现象</dt><dd>扭矩传感器读数持续偏低。</dd>
+<dt>可能根因</dt><dd>ψf 实际偏小（磁钢温度高 / 批次差）、零位偏差导致电流不在 q 轴、Clarke 系数约定错误（2/3 vs √(2/3)）。</dd>
+<dt>排查顺序</dt><dd>① 对拖测反电动势反推 ψf → ② 零位检查 → ③ 核对 Clarke 系数。</dd>
+<dt>修复</dt><dd>更新 ψf 标定；修正零位；统一系数。</dd>
+<dt>验证</dt><dd>多温度点 Te–iq 曲线与公式一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高温下最高转速提高、低温下下降</h5><dl>
+<dt>现象</dt><dd>不同环境温度最高转速差异明显。</dd>
+<dt>可能根因</dt><dd>ψf 随温度变化 → 反电动势变化；弱磁表未按温度修正。</dd>
+<dt>排查</dt><dd>记录不同温度的 vq 稳态与反电动势。</dd>
+<dt>修复</dt><dd>弱磁用电压闭环（C07）而非纯查表；或表按温度插值。</dd>
+<dt>验证</dt><dd>−40 / 25 / 85 °C 性能一致性满足需求。</dd></dl></div>
+<div class="issue"><h5>易错点：把 ke 单位混淆</h5><dl>
+<dt>现象</dt><dd>由供应商 ke 反推的 ψf 差 √3 或 √2 倍。</dd>
+<dt>根因</dt><dd>ke 可能是线电压有效值 / 线电压峰值 / 相电压峰值，单位 V/krpm 或 V·s/rad。</dd>
+<dt>排查</dt><dd>与供应商确认定义；自行对拖测量。</dd>
+<dt>修复</dt><dd>统一换算：ψf = 相电压峰值 / ωe。</dd>
+<dt>验证</dt><dd>vq 稳态 ≈ ωe·ψf（id = 0、低电流）。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>Ld、Lq 当常数：IPMSM 的 Lq 随 iq 增大饱和下降明显，大电流时 MTPA 和解耦误差变大。</li>
+<li>只测线间电感：LCR 线间读数随转子位置变化，需要按位置找最大 / 最小值推算 Ld、Lq（C11）。</li>
+<li><span class="tg tg-red">【风险红线】</span>高速对拖时 PWM 关闭，若反电动势峰值超过母线电压，经体二极管向电池回馈，可能引起过压；12 V 系统 8000 rpm 线反电动势峰值约 20 V（√3 × 11.7 V），必须评估。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B02" id="quiz-B02"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：转矩公式两项、IPMSM 负 id 增力矩、反电动势 ∝ 转速、ψf 温度特性。</li>
+<li>面试高频：「IPMSM 为什么要用负 d 轴电流？」——获得磁阻转矩（MTPA）和削弱磁场（弱磁）。</li></ul></div>
+</section>

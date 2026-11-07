@@ -1,0 +1,214 @@
+
+<!-- ================= B05 ================= -->
+<section class="chap" id="B05" data-title="B05 控制环层级">
+<h2 class="chap-h">B05 控制环层级：电流环（力矩环）→ 速度环 → 位置环</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 5 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>串级控制结构：外环输出 = 内环给定</td></tr>
+<tr><th>输入 / 输出</th><td>位置环：θRef → ωRef；速度环：ωRef → iqRef；电流环：iRef → vdq</td></tr>
+<tr><th>工程价值</th><td>决定任务划分（20 kHz / 1 kHz / 更慢）和每个环的带宽上限</td></tr>
+<tr><th>上下游依赖</th><td>上游 A08；下游 C05、C08、D03</td></tr>
+<tr><th>适用角色</th><td>算法、软件架构</td></tr>
+<tr><th>前置数学依赖</th><td>A07 带宽、A08 PI</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>外环看到的内环必须「足够快、近似为 1」，否则两个环相互作用产生振荡；带宽分离是串级设计的基本前提。</div>
+<div><b>② 量产怎么做</b>电流环 20 kHz 执行、带宽约 1 kHz；速度环 1 kHz 执行、带宽数十到一百多 Hz；位置环更低。EPS 主模式是力矩模式，速度 / 位置环用于台架和特殊功能。</div>
+<div><b>③ 如何证明</b>逐级阶跃：先验证电流环，再闭速度环，最后位置环；每级超调、上升时间、稳态误差分别达标。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>电流环已调好并验证（否则外环参数没有意义）。</li>
+<li>速度反馈质量足够（A05）：低速分辨率、滤波延迟。</li>
+<li>不满足：外环带宽接近内环 → 振荡；速度噪声大 → iq 给定抖。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+带宽分离经验：f_外 ≤ f_内 / (5 ~ 10)
+电流环闭环近似：Ti(s) ≈ 1/(s/ωci + 1)
+机械方程：J·dωm/dt = Te − TL − B·ωm
+速度环对象（电流环理想时）：G_ω(s) = Kt / (J·s + B)
+速度 PI 常用对称最优 / 极点配置；工程上常按目标带宽 ωcs 取 Kp_s ≈ ωcs·J/Kt，再整定 Ki
+<span class="tg tg-case">【案例假设】</span>电机侧折算转动惯量 J = 2×10⁻⁵ kg·m²（EPS 含减速机构后折算值会更大，按实测）</div>
+<div id="anim-B05"></div>
+<div class="anim-note"><b>动画在演示什么：</b>速度环 PI + 一阶电流环（带宽 f_i）+ 惯量对象的串级仿真（离散 1 ms 速度环），速度给定在 0.05 s 阶跃到 1000 rpm，0.25 s 加阶跃负载。<br>
+<b>拖动滑块：</b>减小电流环带宽或增大速度环带宽，使比值低于 5，可见超调与振荡增加；增大速度滤波时间常数也会降低相位裕度。<br>
+<b>正常：</b>比值 ≥ 10 时速度响应平滑、负载扰动后快速恢复。<b>异常：</b>持续振荡、iq 打到限幅。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>任务分配：电流环在 PWM 中断（50 µs）；速度环在 1 ms 任务；位置环在 1 ms 或 5 ms 任务。</li>
+<li>外环输出限幅：速度环输出 iqRef 限幅到电流极限；位置环输出速度限幅。</li>
+<li>跨任务数据：1 ms 任务写 iqRef，中断读；int16 写入天然原子，结构体多字段需双缓冲或关中断拷贝（D03）。</li>
+<li>抗饱和：速度环积分在 iqRef 饱和时冻结（A08 PI_Run 复用）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>逐级验收：电流阶跃 → 速度阶跃 → 位置阶跃，每级都抓给定、反馈、控制量三条波形。</li>
+<li>速度环振荡频率接近电流环带宽 → 带宽分离不足；接近速度滤波截止频率 → 滤波相位滞后。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>static PI_tst s_spdPi = {
+    .kp_q12 = 0, .kiTs_q15 = 0, .integ_q30 = 0,
+    .outMax = 22938, .outMin = -22938          /* ±35 A 峰值：35/50 × 32768 【案例假设】 */
+};
+
+/* 1 ms 任务：速度环（仅速度模式启用）*/
+void FOC_SpeedLoop_1ms(int32_t spdRef_rpm)
+{
+    int32_t err = spdRef_rpm - gFoc.spdRpmFilt;
+    q15_t   errPu = Q15_Sat((err * 32768) / 8000);    /* 速度基值 8000 rpm 【案例假设】 */
+    s_spdPi.kp_q12   = Cal_SpdKp_q12;
+    s_spdPi.kiTs_q15 = Cal_SpdKiTs_q15;
+    gFoc.iqRef = PI_Run(&amp;s_spdPi, errPu);
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>速度环持续低频振荡</h5><dl>
+<dt>现象</dt><dd>速度在给定附近 ±50 rpm、约 20 Hz 摆动。</dd>
+<dt>可能根因</dt><dd>速度环带宽过高、速度滤波相位滞后、机械谐振（联轴器、减速机构）。</dd>
+<dt>排查</dt><dd>降低 Kp 观察频率是否变化；扫频找机械谐振点。</dd>
+<dt>修复</dt><dd>带宽回调；滤波器改到 3~5 倍带宽以上；谐振点加陷波。</dd>
+<dt>验证</dt><dd>阶跃超调 &lt; 10%，无持续振荡。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>加载后速度恢复很慢</h5><dl>
+<dt>现象</dt><dd>负载扰动后数百 ms 才回到给定。</dd>
+<dt>可能根因</dt><dd>Ki 过小、iqRef 饱和期间积分冻结后恢复慢、负载超过电流能力。</dd>
+<dt>排查</dt><dd>看 iqRef 是否贴限幅、积分器值。</dd>
+<dt>修复</dt><dd>调整 Ki；加转矩前馈（C08）。</dd>
+<dt>验证</dt><dd>负载阶跃恢复时间满足需求。</dd></dl></div>
+<div class="issue"><h5>易错点：外环先调</h5><dl>
+<dt>现象</dt><dd>速度环怎么调都不好。</dd>
+<dt>根因</dt><dd>电流环本身未验证，外环在补偿内环问题。</dd>
+<dt>排查</dt><dd>先单独做电流阶跃。</dd>
+<dt>修复</dt><dd>从内到外逐级调试。</dd>
+<dt>验证</dt><dd>各级指标独立达标。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>速度环执行周期与测速窗口不一致，导致速度信号「台阶 + 重复」。</li>
+<li>外环在模式切换（力矩 → 速度）时积分器未预置，iqRef 跳变。</li>
+<li>EPS 力矩模式下没有速度环，但必须有<b>速度限制</b>（防止电机空转超速），通常用速度相关的力矩衰减实现。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B05" id="quiz-B05"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：带宽分离 5~10 倍、从内到外调试、任务周期划分、跨任务数据一致性。</li>
+<li>面试高频：「串级控制为什么内环要快？」</li></ul></div>
+</section>
+
+<!-- ================= B06 ================= -->
+<section class="chap" id="B06" data-title="B06 PWM/ADC/中断时序">
+<h2 class="chap-h">B06 时序：PWM、ADC 采样、中断与算法执行时序对 FOC 的决定性影响</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 6 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>硬件与软件的交界：决定采到的电流是否「真实平均值」、控制延迟有多大</td></tr>
+<tr><th>输入 / 输出</th><td>输入：PWM 计数器、ADC 触发配置；输出：采样时刻、中断时刻、占空比生效时刻</td></tr>
+<tr><th>工程价值</th><td>时序错一点，所有算法都会表现异常（噪声、偏移、振荡），且仿真完全看不出来</td></tr>
+<tr><th>上下游依赖</th><td>下游：C01、C04、C05、D03</td></tr>
+<tr><th>适用角色</th><td>MCU 底层、算法</td></tr>
+<tr><th>前置数学依赖</th><td>A07 延迟相位</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>相电流含 PWM 纹波；只有在纹波中点（中心对齐 PWM 的计数器顶点 / 底点）采样，读到的才是周期平均值。</div>
+<div><b>② 量产怎么做</b>PWM 计数器到达指定点时硬件触发 ADC，转换完成触发中断；中断算出新占空比写影子寄存器，下一周期加载。</div>
+<div><b>③ 如何证明</b>示波器同时抓 PWM、ADC 触发脚（或 GPIO 翻转）和相电流；用 GPIO 测中断执行时间。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>硬件：PWM 模块支持中心对齐、死区、影子寄存器同步加载；ADC 支持硬件触发与延时。</li>
+<li><span class="tg tg-vendor">【厂商参考】</span>S32K1 系列常见链路：FTM 产生 PWM → TRGMUX / PDB 产生带延时的 ADC 触发 → ADC 转换完成中断。具体寄存器配置以 NXP S32K1xx 参考手册与 SDK 为准 <span class="tg tg-check">【待核对】</span>。</li>
+<li>不满足：软件触发 ADC → 采样时刻随中断延迟抖动 → 电流噪声大。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+中心对齐 PWM：载波为三角波，周期 Ts = 1/fpwm（案例 50 µs）
+   低边电阻采样：在计数器顶点（三相下管都导通，零矢量 000 中段）采样
+   电感电流纹波在开关中点对称 → 中点采样 ≈ 周期平均值
+<span class="tg tg-disc">【离散实现】</span>单采样单更新时序：
+   k·Ts 采样 → 中断计算（耗时 tc）→ 写影子寄存器 → (k+1)·Ts 加载生效 → 对电流影响中心约在 (k+1.5)·Ts
+   ⇒ 总等效延迟 ≈ 1.5·Ts = 75 µs（A03 角度补偿、A07 相位裕度均基于此）
+采样窗口约束（低边）：下管导通时间 ≥ ADC 采样保持时间 + 运放建立时间 + 死区
+   ⇒ 最大占空比受限，例如需 ≥ 3 µs 窗口则 Dmax ≈ 1 − 3/50 = 94% <span class="tg tg-case">【案例假设】</span></div>
+<div id="anim-B06"></div>
+<div class="anim-note"><b>动画在演示什么：</b>两个 PWM 周期的中心对齐载波（三角波）、A 相比较值、A 相上管 PWM、A 相电流纹波、ADC 采样点（红点）和中断执行条，以及新占空比生效时刻。<br>
+<b>本动画约定：</b>顶点采样、下一个顶点加载（单采样单更新）。<b>拖动滑块：</b>「采样点偏移」让采样离开中点，读到的电流偏离平均值（偏差随占空比变化 → 表现为电流畸变）；「占空比」增大到窗口不足时提示低边采样失效；「中断执行时间」超过一个周期时提示溢出。<br>
+<b>正常：</b>红点落在纹波中点，平均值误差 ≈ 0。<b>异常：</b>误差随占空比变化、采样窗口不足、中断超时。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>PWM：中心对齐、互补、死区（案例 1 µs <span class="tg tg-case">【案例假设】</span>）、影子寄存器在计数器顶点加载（与采样同一时刻，中断有接近一个周期的预算，延迟 1.5Ts）。另一种做法是顶点采样、底点加载，可把延迟降到约 1Ts，但中断必须在半个周期内完成。</li>
+<li>ADC 触发：计数器顶点 + 固定延时（补偿驱动与运放延迟），两相同时采样（双 ADC 并行）或尽量紧邻。</li>
+<li>中断：ADC 转换完成中断 = FOC 主中断，最高优先级（故障中断除外）。</li>
+<li>执行时间监控：入口 / 出口翻转 GPIO 或读定时器计数，记录最大值 <code>gDiag.isrMaxTicks</code>。</li>
+<li>占空比限幅：保证低边采样窗口，超过时进入「单相采样 + 重构」或限制调制比（C01、C04）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>示波器：ADC 触发脉冲应稳定落在 PWM 中心，抖动 &lt; 数十 ns。</li>
+<li>中断 GPIO 高电平宽度稳定，最大值有足够余量。</li>
+<li>相电流采样点落在开关噪声之外（离开边沿 ≥ 振铃衰减时间）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 【伪代码】时序配置要点（寄存器名以 NXP SDK / 参考手册为准）*/
+void FOC_TimingInit(void)
+{
+    Pwm_InitCenterAligned(20000u /*Hz*/, 1000u /*ns 死区*/);
+    Pwm_SetReloadPoint(PWM_RELOAD_AT_PEAK);       /* 影子寄存器在顶点加载（与采样点同一时刻）*/
+    AdcTrig_AtCounterPeak(400u /*ns 延时*/);        /* 中点采样 + 驱动延迟补偿 */
+    Adc_EnableConvCompleteIrq(FOC_ISR_PRIO_HIGH);  /* FOC 主中断 */
+}
+
+/* 主中断入口：执行时间测量 */
+void ADC0_IRQHandler(void)
+{
+    uint32_t t0 = Tmr_Now();
+    FOC_FastLoop_Isr();
+    uint32_t dt = Tmr_Now() - t0;
+    if (dt &gt; gDiag.isrMaxTicks) { gDiag.isrMaxTicks = dt; }
+    if (dt &gt; ISR_BUDGET_TICKS)  { Diag_SetFault(DIAG_ISR_OVERRUN); }
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电流噪声大、偶发尖刺</h5><dl>
+<dt>现象</dt><dd>gFoc.ia 有随机尖刺，电流环抖动。</dd>
+<dt>可能根因</dt><dd>采样点落在开关沿振铃中；ADC 触发不是硬件触发；另一相开关沿干扰。</dd>
+<dt>排查</dt><dd>示波器对齐 ADC 触发与相电压沿；不同占空比下观察尖刺是否出现在特定区间。</dd>
+<dt>修复</dt><dd>调整触发延时；限制占空比保证窗口；硬件 RC 滤波（注意相位）。</dd>
+<dt>验证</dt><dd>静态电流噪声峰峰值回到若干码。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>大占空比时电流测量错误</h5><dl>
+<dt>现象</dt><dd>高速大电压时某相电流读数跳变，电流环异常。</dd>
+<dt>可能根因</dt><dd>低边导通时间小于采样窗口。</dd>
+<dt>排查</dt><dd>记录该相占空比与异常时刻对应关系。</dd>
+<dt>修复</dt><dd>占空比上限；或选择导通时间充足的两相重构第三相。</dd>
+<dt>验证</dt><dd>全调制比范围电流连续。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>新增诊断后偶发失控</h5><dl>
+<dt>现象</dt><dd>增加功能后，偶发电流环异常。</dd>
+<dt>可能根因</dt><dd>中断超时，占空比在下一周期之后才更新（延迟变 2.5Ts）。</dd>
+<dt>排查</dt><dd>gDiag.isrMaxTicks。</dd>
+<dt>修复</dt><dd>非实时功能移到慢任务（D03）。</dd>
+<dt>验证</dt><dd>最坏执行时间留足余量。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>仿真默认「采样即时、计算零耗时、输出即时」，与真实 1.5Ts 延迟不符（D05 必须建模）。</li>
+<li>调试器断点停在中断里：PWM 仍在输出最后占空比 <span class="tg tg-red">【风险红线】</span>，可能过流；调试时启用「调试暂停时关 PWM」功能（如 MCU 支持）并开硬件保护。</li>
+<li>影子寄存器加载点与采样点配合错误，导致占空比在半周期中途变化，电流纹波不对称。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B06" id="quiz-B06"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：中点采样原理、1.5Ts 延迟来源、低边采样窗口、硬件触发、中断执行时间监控。</li>
+<li>台架与面试高频：「为什么在 PWM 中点采样？」「FOC 的控制延迟是多少？」</li></ul></div>
+</section>

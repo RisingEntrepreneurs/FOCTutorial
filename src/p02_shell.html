@@ -1,0 +1,144 @@
+<body>
+<header id="topbar">
+  <button class="btn" id="navToggle" title="折叠/展开目录">☰</button>
+  <div class="ttl">永磁同步电机 FOC 量产工程实战教程<small>从工程数学、矢量控制到车载 PMSM 嵌入式落地与台架标定</small></div>
+  <div id="searchWrap"><input id="searchBox" type="search" placeholder="全文搜索：Park、Q15、积分饱和…" autocomplete="off"><div id="searchRes"></div></div>
+  <button class="btn" id="btnWB" title="全局错题本"><span class="tg tg-wb">【错题本】</span><span id="wbCount">0</span></button>
+  <button class="btn hide-sm" id="btnSim" title="调试模拟">🛠 台架调试模拟</button>
+  <button class="btn hide-sm" id="btnTheme" title="明暗切换">◐</button>
+</header>
+
+<nav id="sidenav" aria-label="目录"></nav>
+
+<main id="main">
+
+<!-- ================= 课程导读 ================= -->
+<section class="chap" id="intro" data-title="课程导读与统一案例">
+<h2 class="chap-h">课程导读与统一 EPS 工程案例</h2>
+<p class="chap-sub">学习对象：嵌入式软件 / 电机控制算法 / MCU‑DSP 底层 / BMS‑OBC‑EPS‑EHB‑电驱电控开发工程师。前置：熟练 C 语言、结构体指针中断、定时器 ADC PWM。<b>数学从零补齐</b>，不假设预先掌握代数变换、三角、复数、微积分、拉普拉斯、PID。</p>
+
+<div class="part"><h3>一、如何使用本教程</h3>
+<ul>
+<li>每个小节固定十个部分：小节基础 → 前置条件 → 核心原理与公式（含交互动画）→ 嵌入式实现 → 仿真与波形预期 → EPS 案例实现 → 高频调试问题 → 工程踩坑 → 本章习题组 → 考核小结。</li>
+<li>每个知识点固定回答三问：<b>① 为什么需要</b>、<b>② 量产项目里怎么做</b>、<b>③ 如何证明它工作正常</b>。</li>
+<li>单选 / 判断即时判分，答错自动进入【错题本】；简答 / 工程分析题展开参考解答自查。模块末有章节综合自测卷，全文末有结业综合大试卷（随已交付模块自动扩充题库）。</li>
+<li>顶栏「台架调试模拟」为情景推演：资深标定工程师抛现象，你选排查动作，系统持续追问。</li>
+<li>每节标题右侧「标记已学」，底栏显示学习进度（保存在本机浏览器）。</li>
+</ul>
+<h4 class="sub">全局标记说明</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>标记</th><th>含义</th><th>标记</th><th>含义</th></tr>
+<tr><td><span class="tg tg-theory">【理论公式】</span></td><td>数学推导、连续域理想公式</td><td><span class="tg tg-disc">【离散实现】</span></td><td>嵌入式离散版本</td></tr>
+<tr><td><span class="tg tg-fix">【定点实现】</span></td><td>定点 / Q 格式落地</td><td><span class="tg tg-anim">【交互动画】</span></td><td>内嵌可拖动、启停演示</td></tr>
+<tr><td><span class="tg tg-bench">【台架重点】</span></td><td>台架标定、示波器观测点</td><td><span class="tg tg-fault">【高频故障】</span></td><td>量产高频问题</td></tr>
+<tr><td><span class="tg tg-red">【风险红线】</span></td><td>可能炸管、失步、损坏硬件</td><td><span class="tg tg-case">【案例假设】</span></td><td>EPS 教学电机假设参数</td></tr>
+<tr><td><span class="tg tg-vendor">【厂商参考】</span></td><td>芯片厂商参考方案（非唯一标准）</td><td><span class="tg tg-check">【待核对】</span></td><td>私有算法、未确认内容</td></tr>
+<tr><td><span class="tg tg-quiz">【习题】</span></td><td>单选 / 判断 / 简答 / 工程分析</td><td><span class="tg tg-wb">【错题本】</span></td><td>全局错题汇总入口</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>二、贯穿全文的统一工程案例：车载 EPS 助力 IPMSM</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>项目</th><th>数值</th><th>来源</th></tr>
+<tr><td>电机类型</td><td>内置式永磁同步电机 IPMSM（Ld &lt; Lq）</td><td>项目给定</td></tr>
+<tr><td>极对数 p</td><td>4</td><td>项目给定</td></tr>
+<tr><td>额定 / 最高转速</td><td>3000 rpm / 8000 rpm（电频率 200 Hz / 533.3 Hz）</td><td>项目给定</td></tr>
+<tr><td>额定相电流</td><td>25 A rms（峰值 ≈ 35.4 A）</td><td>项目给定</td></tr>
+<tr><td>母线电压</td><td>12 V 标称；工作范围 9 ~ 16 V</td><td>给定 / <span class="tg tg-case">【案例假设】</span>范围</td></tr>
+<tr><td>相电阻 Rs</td><td>12 mΩ（25 °C）</td><td><span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>Ld / Lq</td><td>45 µH / 75 µH</td><td><span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>永磁磁链 ψf</td><td>3.5 mWb</td><td><span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>PWM</td><td>20 kHz 中心对齐互补，Ts = 50 µs，FOC 主环每 PWM 周期执行一次</td><td><span class="tg tg-case">【案例假设】</span>频率</td></tr>
+<tr><td>电流采样</td><td>双电阻，PWM 中点采样；±50 A ↔ ADC 0 ~ 4095，零点 2048</td><td><span class="tg tg-case">【案例假设】</span>量程</td></tr>
+<tr><td>位置传感</td><td>旋变 + AD2S1210 解码（按 12 位分辨率配置）；无感备份</td><td>给定 / <span class="tg tg-case">【案例假设】</span>分辨率</td></tr>
+<tr><td>主控</td><td>NXP S32K146（Arm Cortex‑M4F，主频与外设细节以 NXP 数据手册为准）</td><td>项目给定</td></tr>
+<tr><td>电流环带宽目标</td><td>1 kHz（≈ PWM 频率 1/20）</td><td><span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>标幺基值</td><td>I_BASE = 50 A，V_BASE = 16 V，角度 uint16：0 ~ 65535 ↔ 0 ~ 2π</td><td><span class="tg tg-case">【案例假设】</span></td></tr>
+<tr><td>标定 / 通信</td><td>CAN + XCP，CANape；MATLAB/Simulink 仿真 + 台架</td><td>项目给定</td></tr>
+</table></div>
+<div class="note">由上表可推出（后续章节反复使用）：基速 3000 rpm 时 ωe = 2π·200 = 1256.6 rad/s，反电动势峰值 ωe·ψf ≈ 4.40 V；SVPWM 线性区最大相电压矢量 Vdc/√3 = 6.93 V（12 V 时）；8000 rpm 反电动势 ≈ 11.7 V &gt; 6.93 V，<b>必须弱磁</b>。电气时间常数 τd = Ld/Rs = 3.75 ms，τq = 6.25 ms。</div>
+</div>
+
+<div class="part"><h3>三、全书统一约定（动画与代码严格一致）</h3>
+<ul>
+<li><b>Clarke 采用幅值不变形式（系数 2/3）</b>；α 轴与 A 相绕组轴线重合，β 轴超前 α 90°。</li>
+<li><b>正方向：逆时针为正</b>。A→B→C 正相序时电流空间矢量逆时针旋转，电角度 θe 增大，对应「正转」。</li>
+<li><b>Park</b>：id = iα·cosθ + iβ·sinθ；iq = −iα·sinθ + iβ·cosθ；复数写法 i_dq = i_αβ·e^(−jθ)。<b>反 Park</b>：vα = vd·cosθ − vq·sinθ；vβ = vd·sinθ + vq·cosθ。</li>
+<li>d 轴对准永磁体磁链方向，q 轴超前 d 轴 90°；iq &gt; 0 产生正向电磁转矩。</li>
+<li>相电流正方向：从逆变器流入电机为正。</li>
+<li>角度格式 uint16：16384 = 90°，32768 = 180°，加法溢出即自动取模 2π。</li>
+</ul>
+<h4 class="sub">统一命名（全书所有代码片段共用）</h4>
+<pre><code>/* ===== 全局 FOC 数据结构（模块 A 先出现的字段，后续章节扩充同一结构体） ===== */
+typedef int16_t q15_t;                 /* Q15：[-1, 1)                         */
+
+typedef struct {
+    uint16_t adcIa, adcIb;             /* 相电流 ADC 原始码值                   */
+    q15_t    ia, ib, ic;               /* 相电流 标幺 Q15，基值 FOC_I_BASE      */
+    q15_t    iAlpha, iBeta;            /* αβ 电流                               */
+    q15_t    id, iq;                   /* dq 电流                               */
+    q15_t    idRef, iqRef;             /* dq 电流给定                           */
+    q15_t    vd, vq, vAlpha, vBeta;    /* 电压，基值 FOC_V_BASE                 */
+    q15_t    vdcPu;                    /* 母线电压标幺                          */
+    uint16_t thetaE;                   /* 电角度 0..65535 ↔ 0..2π               */
+    uint16_t thetaM;                   /* 机械角度（旋变）                      */
+    int16_t  thetaEIncPerTs;           /* 每 Ts 电角度增量（uint16 单位）       */
+    q15_t    sinTh, cosTh;
+    int32_t  spdRpmFilt;               /* 机械转速 rpm（滤波后）                */
+    uint16_t thetaEInvPark;            /* 反 Park 用补偿后电角度（A03）         */
+} FOC_tst;
+
+extern FOC_tst gFoc;
+
+/* ===== 标定量：前缀 Cal_，通过 XCP 在 CANape 中在线修改 ===== */
+extern volatile int16_t Cal_IaOffset_cnt, Cal_IbOffset_cnt;   /* 偏移码值      */
+extern volatile q15_t   Cal_IaGainCorr_q15, Cal_IbGainCorr_q15; /* 增益修正    */
+extern volatile int16_t Cal_IdKp_q12, Cal_IqKp_q12;           /* 电流环 Kp     */
+extern volatile int16_t Cal_IdKiTs_q15, Cal_IqKiTs_q15;       /* 电流环 Ki·Ts  */
+extern volatile q15_t   Cal_SpdLpfK_q15;                      /* 速度低通系数  */
+
+#define FOC_I_BASE   (50.0f)   /* A   【案例假设】 */
+#define FOC_V_BASE   (16.0f)   /* V   【案例假设】 */
+#define FOC_TS       (50.0e-6f)/* s   【案例假设】 */
+#define FOC_POLE_PAIRS (4u)</code></pre>
+</div>
+
+<div class="part"><h3>四、证据等级：仿真 / 动画跑通 ≠ 台架可稳定运行</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>等级</th><th>证据</th><th>能证明</th><th>不能证明</th></tr>
+<tr><td>L0</td><td>本页交互动画</td><td>概念、方向、符号约定正确</td><td>任何实际性能</td></tr>
+<tr><td>L1</td><td>Simulink 浮点仿真</td><td>算法结构、理想参数下的稳定性</td><td>量化、延迟、死区、噪声、参数偏差</td></tr>
+<tr><td>L2</td><td>定点 MIL / SIL、PIL（MCU 在环）</td><td>溢出、Q 格式精度、执行时间</td><td>真实电机参数与逆变器非线性</td></tr>
+<tr><td>L3</td><td><span class="tg tg-bench">【台架重点】</span>台架实测：相电流、dq 电流、角度误差、阶跃响应、频谱</td><td>实质性能、标定结果</td><td>整车工况全覆盖（温度、电压、EMC）</td></tr>
+<tr><td>L4</td><td>整车 / 环境试验</td><td>量产可用</td><td>—</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>五、数学模块如何服务 FOC 主链路</h3>
+<p>下图是完整 FOC 数据流（静态总览），每个方框下方标注它依赖的模块 A 数学小节。点击方框跳转。<span class="tg tg-none">【暂无可交互动画】</span>端到端可交互数据流追踪动画在重点强化章节「X1 端到端数据流追踪」中提供。</p>
+<div class="tbl-wrap">
+<svg class="flow-svg" viewBox="0 0 980 190" role="img" aria-label="FOC 数据流">
+<defs><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker></defs>
+<g data-link="A01"><rect class="bx math" x="5" y="20" width="96" height="44" rx="6"/><text x="53" y="40" text-anchor="middle">ADC 原始码</text><text x="53" y="56" text-anchor="middle">偏移/增益</text><text class="sm" x="53" y="78" text-anchor="middle">A01 代数</text></g>
+<path class="ln" d="M101,42 L121,42"/>
+<g data-link="A02"><rect class="bx math" x="122" y="20" width="90" height="44" rx="6"/><text x="167" y="40" text-anchor="middle">Clarke</text><text x="167" y="56" text-anchor="middle">abc→αβ</text><text class="sm" x="167" y="78" text-anchor="middle">A02 A03</text></g>
+<path class="ln" d="M212,42 L232,42"/>
+<g data-link="A04"><rect class="bx math" x="233" y="20" width="90" height="44" rx="6"/><text x="278" y="40" text-anchor="middle">Park</text><text x="278" y="56" text-anchor="middle">αβ→dq</text><text class="sm" x="278" y="78" text-anchor="middle">A03 A04</text></g>
+<path class="ln" d="M323,42 L343,42"/>
+<g data-link="A08"><rect class="bx math" x="344" y="20" width="104" height="44" rx="6"/><text x="396" y="40" text-anchor="middle">dq 电流环 PI</text><text x="396" y="56" text-anchor="middle">解耦/抗饱和</text><text class="sm" x="396" y="78" text-anchor="middle">A06 A07 A08</text></g>
+<path class="ln" d="M448,42 L468,42"/>
+<g data-link="A02"><rect class="bx math" x="469" y="20" width="96" height="44" rx="6"/><text x="517" y="40" text-anchor="middle">电压限幅</text><text x="517" y="56" text-anchor="middle">|v|≤Vdc/√3</text><text class="sm" x="517" y="78" text-anchor="middle">A02 矢量</text></g>
+<path class="ln" d="M565,42 L585,42"/>
+<g data-link="A04"><rect class="bx math" x="586" y="20" width="90" height="44" rx="6"/><text x="631" y="40" text-anchor="middle">反 Park</text><text x="631" y="56" text-anchor="middle">dq→αβ</text><text class="sm" x="631" y="78" text-anchor="middle">A03 A04</text></g>
+<path class="ln" d="M676,42 L696,42"/>
+<g><rect class="bx" x="697" y="20" width="90" height="44" rx="6"/><text x="742" y="40" text-anchor="middle">SVPWM</text><text x="742" y="56" text-anchor="middle">扇区/时间</text><text class="sm" x="742" y="78" text-anchor="middle">C04</text></g>
+<path class="ln" d="M787,42 L807,42"/>
+<g><rect class="bx" x="808" y="20" width="96" height="44" rx="6"/><text x="856" y="40" text-anchor="middle">PWM 寄存器</text><text x="856" y="56" text-anchor="middle">占空比/死区</text><text class="sm" x="856" y="78" text-anchor="middle">B06 C13</text></g>
+<g data-link="A05"><rect class="bx math" x="233" y="120" width="120" height="44" rx="6"/><text x="293" y="140" text-anchor="middle">旋变角度/测速</text><text x="293" y="156" text-anchor="middle">差分+低通</text><text class="sm" x="293" y="178" text-anchor="middle">A03 A05</text></g>
+<g data-link="A06"><rect class="bx math" x="420" y="120" width="130" height="44" rx="6"/><text x="485" y="140" text-anchor="middle">开环角度/观测器</text><text x="485" y="156" text-anchor="middle">累加/积分</text><text class="sm" x="485" y="178" text-anchor="middle">A06 A07</text></g>
+<path class="ln" d="M293,120 L280,66"/><path class="ln" d="M330,120 L620,66"/>
+<g><rect class="bx" x="620" y="120" width="170" height="44" rx="6"/><text x="705" y="140" text-anchor="middle">速度环/位置环/MTPA/弱磁</text><text x="705" y="156" text-anchor="middle">→ idRef / iqRef</text><text class="sm" x="705" y="178" text-anchor="middle">C06 C07 C08</text></g>
+<path class="ln" d="M620,135 L420,64"/>
+</svg></div>
+</div>
+</section>

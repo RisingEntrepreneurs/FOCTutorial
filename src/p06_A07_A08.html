@@ -1,0 +1,248 @@
+
+<!-- ================= A07 ================= -->
+<section class="chap" id="A07" data-title="A07 拉普拉斯变换与传递函数">
+<h2 class="chap-h">A07 拉普拉斯变换与传递函数：RL 模型、时间常数、伯德图与延迟</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 7 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>电流环被控对象 1/(Ls+R)、PI 设计、滤波器设计、带宽与延迟评估</td></tr>
+<tr><th>输入 / 输出</th><td>输入：微分方程；输出：传递函数、阶跃响应、频率响应</td></tr>
+<tr><th>工程价值</th><td>把「调参靠试」变成「按带宽算参数」；解释为什么带宽受 PWM 频率和延迟限制</td></tr>
+<tr><th>上下游依赖</th><td>上游 A04~A06；下游 A08、C05、C08、C10、D01、D07</td></tr>
+<tr><th>适用角色</th><td>算法、标定工程师</td></tr>
+<tr><th>前置数学依赖</th><td>A04（jω）、A05、A06</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>在 s 域中微分变乘 s、积分变除 s，微分方程变成代数式，才能用「零极点对消」直接算出 PI 参数。</div>
+<div><b>② 量产怎么做</b>台架用电压阶跃测 τ 得 L；按目标带宽算 Kp、Ki；用扫频注入测闭环伯德图验收。</div>
+<div><b>③ 如何证明</b>阶跃 63.2% 时刻 = τ；闭环 −3 dB 频率 ≈ 设计带宽；相位裕度满足要求。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A05 导数、A06 积分、A04 中 j 的含义。</li>
+<li>只需掌握对应关系：d/dt ↔ s；∫dt ↔ 1/s；正弦稳态 s = jω。</li>
+<li>不满足：无法理解带宽、相位裕度；调参只能凭经验。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+RL 电路：v = R·i + L·di/dt  →（零初值拉氏变换）V(s) = (R + L·s)·I(s)
+传递函数：G(s) = I(s)/V(s) = 1/(L·s + R) = (1/R) / (τ·s + 1)，τ = L/R
+阶跃响应：i(t) = (V/R)·(1 − e^(−t/τ))；t = τ 时 63.2%，t = 3τ 时 95%，5τ 时 99.3%
+频率响应：|G(jω)| = 1/√(R² + (ωL)²)，∠G = −arctan(ωL/R)；转折频率 fc = R/(2πL)
+闭环：T(s) = C(s)G(s) / (1 + C(s)G(s))；带宽 ≈ |T| 下降 3 dB 的频率
+纯延迟 e^(−s·Td)：幅值不变，相位滞后 ω·Td（弧度）
+案例：τd = 45 µH/12 mΩ = 3.75 ms，fc,d = 42.4 Hz；τq = 6.25 ms <span class="tg tg-case">【案例假设】</span>
+     Td ≈ 1.5Ts = 75 µs → 1 kHz 处滞后 360°×1000×75e-6 = 27°</div>
+<div id="anim-A07"></div>
+<div class="anim-note"><b>动画在演示什么：</b>左（上）图：给 d 轴电感加电压阶跃时的电流响应，标出 τ 和 63.2%；右（下）图：同一对象的伯德图（幅值 dB、相位）。<br>
+<b>拖动滑块：</b>增大 L → τ 变大、响应变慢、转折频率左移；增大 R → 终值变小、响应变快。勾选「叠加 1.5Ts 延迟」，相位在高频急剧下跌——这就是电流环带宽不能无限提高的原因。<br>
+<b>正常：</b>一阶曲线无超调，相位从 0° 平滑趋向 −90°。<b>注意：</b>这是理想 RL 模型（L0 证据），实测存在逆变器死区和磁饱和，台架曲线会偏离。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>传递函数不能直接写进 MCU</b>：s 需离散化为 z 域差分方程（D01），例如低通 1/(τs+1) → A05 的 α 公式。</li>
+<li><b>台架电压阶跃法测 L</b>（标定模式，<span class="tg tg-bench">【台架重点】</span>）：转子锁定在 d 轴（先注入 id 对齐），在 d 轴施加小电压阶跃，记录 id，读 63.2% 时刻得 τ，由终值得 R = V/i∞，L = τ·R。</li>
+<li><b>扫频验收</b>：在 iq 给定叠加小幅正弦，扫 50 Hz ~ 3 kHz，记录幅值比与相位，得到闭环伯德图。</li>
+<li>结果写入标定表 <code>Cal_Ld_uH</code>、<code>Cal_Lq_uH</code>、<code>Cal_Rs_mOhm</code>（C11 参数辨识细化）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>理想阶跃：一阶指数，无超调。</li>
+<li>实测阶跃若开头有「台阶」或延迟：采样与 PWM 更新延迟、死区；若 τ 随电流幅值变化：电感饱和（Lq 随 iq 增大下降，IPMSM 常见）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 【伪代码】台架电压阶跃法辨识 Ld（标定模式下 1 kHz 后台处理，数据由 PWM 中断采集）*/
+#define STEP_N   (400u)              /* 400 × 50 µs = 20 ms ≥ 5τ */
+static q15_t s_idBuf[STEP_N];        /* PWM 中断中逐点写入 gFoc.id */
+
+void Ident_Ld_Process(float vStep_V)
+{
+    float iInf = Q15ToAmp(average(&amp;s_idBuf[STEP_N - 40u], 40u));   /* 取末尾均值作为终值 */
+    float i632 = 0.632f * iInf;
+    uint16_t k = first_index_ge(s_idBuf, STEP_N, AmpToQ15(i632));
+    float tau  = (float)k * FOC_TS;
+    float rEst = vStep_V / iInf;      /* 注意：含线缆 + MOS 导通电阻 + 死区影响 */
+    float lEst = tau * rEst;
+    Cal_Ld_uH  = lEst * 1.0e6f;
+    Cal_Rs_mOhm = rEst * 1.0e3f;
+}</code></pre>
+<p class="note">案例：施加 0.24 V，理论终值 20 A、τ = 3.75 ms（第 75 个采样点附近达 12.6 A）。电压给定 ≠ 实际电压：低压大电流时死区压降可达给定的相当比例，需死区补偿（C13）或改用更大电压并扣除。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>阶跃法测得 τ 远小于设计值</h5><dl>
+<dt>现象</dt><dd>测得 τ = 1.2 ms，设计 3.75 ms。</dd>
+<dt>可能根因</dt><dd>R 包含线缆、MOS、接插件电阻而偏大；死区导致实际电压偏低、终值偏小；转子未锁定（q 轴分量混入）；电感饱和。</dd>
+<dt>排查顺序</dt><dd>① LCR 表测线间电感对比 → ② 用示波器测实际相电压 → ③ 改变阶跃幅值看 τ 是否变化 → ④ 确认对齐。</dd>
+<dt>修复</dt><dd>死区补偿后重测；用 L = τ·R 时 R 取同一实验终值算出的总电阻；多幅值多次平均。</dd>
+<dt>验证</dt><dd>两种方法（阶跃 / 高频注入）结果差 &lt; 10%。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电流环带宽调不上去，一提高就振荡</h5><dl>
+<dt>现象</dt><dd>按 2 kHz 设计参数后 iq 振荡。</dd>
+<dt>可能根因</dt><dd>1.5Ts 延迟在 2 kHz 处滞后 54°，再加 PI 与滤波，相位裕度不足。</dd>
+<dt>排查</dt><dd>计算各环节相位滞后之和；扫频测开环。</dd>
+<dt>修复</dt><dd>带宽回到 PWM 频率 1/20 左右；减小采样滤波；改双采样双更新（需评估）。</dd>
+<dt>验证</dt><dd>阶跃超调 &lt; 10%，相位裕度 ≥ 45°。</dd></dl></div>
+<div class="issue"><h5>数学易错点：把 fc 与 ωc 混淆</h5><dl>
+<dt>现象</dt><dd>参数差 6.28 倍。</dd>
+<dt>根因</dt><dd>ωc = 2π·fc，单位 rad/s 与 Hz 混用。</dd>
+<dt>排查</dt><dd>检查所有公式单位。</dd>
+<dt>修复</dt><dd>代码注释写清单位。</dd>
+<dt>验证</dt><dd>实测带宽与设计一致。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>传递函数假设线性时不变：Ld、Lq 随电流饱和、Rs 随温度变化（铜电阻约 +0.39%/°C），参数需分工况标定。</li>
+<li>仿真模型忽略延迟：Simulink 连续模型的电流环带宽可以设很高，上台架即振荡——仿真必须加入 1.5Ts 延迟与 ZOH。</li>
+<li><span class="tg tg-red">【风险红线】</span>阶跃辨识电压过大：低阻电机 0.5 V 即可产生 40 A 以上电流，务必先小后大并开启过流保护。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A07" id="quiz-A07"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：G(s)=1/(Ls+R)、τ = L/R、63.2%、fc = R/(2πL)、延迟相位 ωTd。</li>
+<li>面试高频：「电流环带宽为什么取 PWM 频率的 1/10~1/20？」</li></ul></div>
+</section>
+
+<!-- ================= A08 ================= -->
+<section class="chap" id="A08" data-title="A08 PID 控制理论">
+<h2 class="chap-h">A08 PID 控制理论：PI 离散化、零极点对消、抗积分饱和与定点</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 8 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>dq 电流环、速度环、位置环、弱磁电压环、PLL</td></tr>
+<tr><th>输入 / 输出</th><td>输入：给定、反馈（误差 e）；输出：控制量（电压 / 电流给定）</td></tr>
+<tr><th>工程价值</th><td>FOC 中至少 2 个电流 PI + 1 个速度 PI；PI 的结构、限幅、抗饱和、定点精度决定控制品质</td></tr>
+<tr><th>上下游依赖</th><td>上游 A06、A07；下游 C05、C07、C08、D07</td></tr>
+<tr><th>适用角色</th><td>全部角色</td></tr>
+<tr><th>前置数学依赖</th><td>A05、A06、A07</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>电机参数不准、负载扰动、反电动势变化都需要闭环自动纠偏；I 项消除稳态误差。</div>
+<div><b>② 量产怎么做</b>位置式 PI + 条件积分抗饱和；参数按带宽 + 零极点对消计算后标定微调；标幺定点，Kp 用 Q12。</div>
+<div><b>③ 如何证明</b>台架 iq 阶跃：上升时间 ≈ 0.35/fbw、超调 &lt; 10%、无稳态误差；饱和退出无大超调。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A06 积分（I 项）、A05 微分（D 项）、A07 传递函数（参数计算）。</li>
+<li>标定参数：Cal_IdKp_q12 / Cal_IdKiTs_q15（q 轴同理）、电压限幅 Vmax（由 Vdc 实时算）。</li>
+<li>不满足：凭经验调参，换电机 / 换电压即失效；无抗饱和时低压大电流阶跃超调大。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+连续 PID：u(t) = Kp·e + Ki·∫e dt + Kd·de/dt
+零极点对消设计（电流环，对象 1/(Ls+R)）：
+   C(s) = Kp + Ki/s = Kp·(s + Ki/Kp)/s，令 Ki/Kp = R/L
+   开环 C·G = (Kp/L)/s → 闭环 T(s) = ωc/(s + ωc)，ωc = Kp/L
+   ⇒ Kp = ωc·L，Ki = ωc·R
+案例（ωc = 2π·1 kHz）<span class="tg tg-case">【案例假设】</span>：
+   d 轴 Kp = 0.283 V/A，Ki = 75.4 V/(A·s)；q 轴 Kp = 0.471 V/A，Ki = 75.4 V/(A·s)
+<span class="tg tg-disc">【离散实现】</span>位置式（后向矩形积分）：
+   I[k] = I[k−1] + Ki·Ts·e[k]，u[k] = sat(Kp·e[k] + I[k])
+增量式：Δu[k] = Kp·(e[k] − e[k−1]) + Ki·Ts·e[k]，u[k] = sat(u[k−1] + Δu[k])
+<span class="tg tg-fix">【定点实现】</span>标幺：Kp_pu = Kp·I_BASE/V_BASE，KiTs_pu = Ki·Ts·I_BASE/V_BASE
+   d：Kp_pu = 0.884 → Q12 = 3619；q：Kp_pu = 1.473 → Q12 = 6032（&gt; 1，不能用 Q15）
+   KiTs_pu = 75.4 × 50e-6 × 50/16 = 0.01178 → Q15 = 386
+抗积分饱和：① 积分器限幅 ② 条件积分（输出饱和且误差同向时冻结）③ 反算法 I += Kb·(u_sat − u)</div>
+<div id="anim-A08"></div>
+<div class="anim-note"><b>动画在演示什么：</b>离散 PI 控制案例 d 轴 RL 对象（Ts = 50 µs、可选 1 拍计算延迟），给定在 1 ms 阶跃到 20 A、10 ms 降到 5 A。上图电流，下图 PI 输出电压与限幅线。<br>
+<b>拖动滑块 / 按钮：</b>「零极点对消」恢复 1 kHz 设计值；「演示积分饱和」把电压限幅降到 1 V 并关闭抗饱和，可见大超调和下降沿拖尾，再勾选抗饱和对比；「演示延迟振荡」把 Kp 提高到 1.2，延迟使环路失稳并在限幅间持续振荡。<br>
+<b>正常：</b>超调 <b>正常：</b>上升约 0.35 ms、几乎无超调。lt; 5%，10→90% 上升时间在 0.35 ms 量级（连续一阶理论值 2.2/ωc = 0.35 ms；离散 + 量化步长下显示值会略小）。<b>异常：</b>超调 &gt; 20%、持续振荡、长时间贴限幅。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>误差</b>：e = ref − fb（Q15），注意 int32 计算防溢出。</li>
+<li><b>P 项</b>：Kp_q12 × e &gt;&gt; 12 → Q15，int32。</li>
+<li><b>I 项</b>：积分状态 int32 Q30，增量 KiTs_q15 × e（Q30），用 int64 求和再限幅。</li>
+<li><b>输出限幅</b>：限幅值来自电压圆（A02），每周期按实测 Vdc 更新。</li>
+<li><b>抗饱和</b>：输出饱和时只允许积分朝退饱和方向变化（条件积分）。</li>
+<li><b>中断约束</b>：PI 在 PWM 中断内执行；参数通过 XCP 修改时，Kp/Ki 写入需原子（int16 单次写入天然原子）。</li>
+<li><b>D 项</b>：电流环一般不用（采样含 PWM 纹波，D 放大噪声且相位已够）；速度/位置环如需 D，必须带低通（C08）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>设计值：iq 阶跃上升时间 ≈ 0.35/1 kHz = 0.35 ms，超调很小。</li>
+<li>Kp 过大：高频振荡（延迟引起）；Ki 过大（Ti 远小于 τ）：低频超调。</li>
+<li>电压饱和：电流上升斜率受限（di/dt = (Vmax − R·i)/L），无抗饱和时退出饱和后超调。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>typedef struct {
+    int16_t kp_q12;        /* Kp 标幺，Q12（范围 ±8）       */
+    int16_t kiTs_q15;      /* Ki·Ts 标幺，Q15              */
+    int32_t integ_q30;     /* 积分状态，Q30                 */
+    q15_t   outMax;        /* 输出上限（正数）              */
+    q15_t   outMin;        /* 输出下限（负数）              */
+} PI_tst;
+
+q15_t PI_Run(PI_tst *pi, q15_t err)
+{
+    int32_t p    = ((int32_t)pi-&gt;kp_q12 * (int32_t)err) &gt;&gt; 12;            /* Q15 */
+    int64_t iNew = (int64_t)pi-&gt;integ_q30 + ((int64_t)pi-&gt;kiTs_q15 * err);  /* Q30 */
+    int64_t iMax = (int64_t)pi-&gt;outMax &lt;&lt; 15;
+    int64_t iMin = (int64_t)pi-&gt;outMin &lt;&lt; 15;
+    int32_t u;
+
+    if (iNew &gt; iMax) { iNew = iMax; }          /* ① 积分器自身限幅 */
+    if (iNew &lt; iMin) { iNew = iMin; }
+
+    u = p + (int32_t)(iNew &gt;&gt; 15);
+
+    if (u &gt; pi-&gt;outMax) {                      /* ② 条件积分 */
+        u = pi-&gt;outMax;
+        if (err &lt; 0) { pi-&gt;integ_q30 = (int32_t)iNew; }   /* 只允许退饱和方向 */
+    } else if (u &lt; pi-&gt;outMin) {
+        u = pi-&gt;outMin;
+        if (err &gt; 0) { pi-&gt;integ_q30 = (int32_t)iNew; }
+    } else {
+        pi-&gt;integ_q30 = (int32_t)iNew;
+    }
+    return (q15_t)u;
+}
+
+/* 案例初始值（1 kHz 带宽，零极点对消）【案例假设】 */
+volatile int16_t Cal_IdKp_q12   = 3619;   /* 0.283 V/A */
+volatile int16_t Cal_IqKp_q12   = 6032;   /* 0.471 V/A */
+volatile int16_t Cal_IdKiTs_q15 = 386;    /* 75.4 V/(A·s) × 50 µs */
+volatile int16_t Cal_IqKiTs_q15 = 386;</code></pre>
+<p class="note">积分器初值预置（开环→闭环切换）与 dq 解耦前馈在 C05 中实现；此处 PI 为通用单元，速度环复用同一结构。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>低压冷启动 iq 阶跃大超调 + 啸叫</h5><dl>
+<dt>现象</dt><dd>9 V 母线下 30 A 阶跃首次超调约 50%，随后衰减振荡。</dd>
+<dt>可能根因</dt><dd>电压饱和期间积分持续累积（无抗饱和）；限幅值用 12 V 常量，实际电压更低；Kp 偏大叠加延迟。</dd>
+<dt>排查顺序</dt><dd>① 记录 vq 与限幅值、饱和时长 → ② 记录积分器状态 → ③ 不同 Vdc 下重复。</dd>
+<dt>修复</dt><dd>条件积分 / 反算抗饱和；Vmax 由实测 Vdc 计算；Kp 按实测 L 重标。</dd>
+<dt>验证</dt><dd>9~16 V 全电压范围阶跃超调 &lt; 10%。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>q 轴 Kp 标定后反而变小</h5><dl>
+<dt>现象</dt><dd>标定工程师把 Kp_q 改为 1.47 pu，电流环响应变得极慢。</dd>
+<dt>可能根因</dt><dd>变量是 Q15 存储，1.47 溢出成负数或被饱和为 0.99。</dd>
+<dt>排查</dt><dd>查 A2L 中变量的换算公式与数据类型。</dd>
+<dt>修复</dt><dd>改用 Q12，A2L 中 COMPU_METHOD 同步更新。</dd>
+<dt>验证</dt><dd>CANape 显示物理值与代码一致。</dd></dl></div>
+<div class="issue"><h5>数学易错点：Ki 单位与离散 KiTs 混淆</h5><dl>
+<dt>现象</dt><dd>积分作用强 20000 倍，电流环剧烈振荡。</dd>
+<dt>根因</dt><dd>把 Ki（V/(A·s)）直接当每拍增益使用，漏乘 Ts。</dd>
+<dt>排查</dt><dd>检查标定变量命名是否带 Ts。</dd>
+<dt>修复</dt><dd>命名强制 <code>KiTs</code>，A2L 换算中乘 Ts。</dd>
+<dt>验证</dt><dd>阶跃响应与仿真一致。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>运行中修改 Kp：位置式 PI 输出跳变；可在修改时重算积分器保证输出连续（bumpless）。</li>
+<li>d、q 两个 PI 共用限幅值：d 轴优先限幅后 q 轴的限幅是动态的，必须传入圆限幅后的实际剩余量。</li>
+<li>速度环 PI 的输出是 iq 给定，限幅为电流极限；电流环输出是电压——不同环的抗饱和信号不能混用。</li>
+<li><span class="tg tg-red">【风险红线】</span>积分器在故障关管后未清零，重新使能 PWM 瞬间输出满电压 → 过流冲击。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A08" id="quiz-A08"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：Kp = ωcL、Ki = ωcR、标幺换算与 Q12、条件积分抗饱和、为何电流环不用 D。</li>
+<li>综合卷 / 面试 / 标定三处都会出现：「按带宽算电流环参数」「低压超调怎么查」。</li></ul></div>
+</section>

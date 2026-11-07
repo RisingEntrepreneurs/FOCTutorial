@@ -1,0 +1,246 @@
+
+<!-- ================= A03 ================= -->
+<section class="chap" id="A03" data-title="A03 三角函数">
+<h2 class="chap-h">A03 三角函数：单位圆、电角度、三相 120°、和差角与查表</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 3 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>所有坐标变换的 sin/cos；电角度与机械角度换算；角度延迟补偿</td></tr>
+<tr><th>输入 / 输出</th><td>输入：角度 θ（uint16）；输出：sinθ、cosθ（Q15）</td></tr>
+<tr><th>工程价值</th><td>Park 每周期要 sin、cos 各一次；查表精度、角度格式、延迟补偿直接决定 dq 解耦质量</td></tr>
+<tr><th>上下游依赖</th><td>上游 A02；下游 A04、C02、C03、C04、C09、C10</td></tr>
+<tr><th>适用角色</th><td>全部角色</td></tr>
+<tr><th>前置数学依赖</th><td>A02（单位矢量的 x、y 分量即 cos、sin）</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>三相电流本身就是三条相差 120° 的余弦；Park 的「id 变直流」只能用和差角公式证明。</div>
+<div><b>② 量产怎么做</b>uint16 角度 + 1024 点正弦表 + 线性插值；cos 由 sin 移 90° 获得；高速时按 ωe·1.5Ts 做角度超前补偿。</div>
+<div><b>③ 如何证明</b>查表误差 &lt; 1 LSB 量级（离线对比）；正反转不同转速下 id 偏差基本不随转速变化。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A02 单位矢量。弧度：一整圈 = 2π rad = 360°。</li>
+<li>信号：旋变电角度 θe；电角速度 ωe（用于补偿）。</li>
+<li>不满足：角度格式混乱（度 / 弧度 / 码值）导致变换错误；忽略延迟导致高速力矩下降。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+单位圆：角度 θ 处单位矢量 = (cosθ, sinθ)；sin²θ + cos²θ = 1
+角频率：ω = 2πf；电角度 θe = p·θm，电角速度 ωe = p·ωm，电频率 fe = p·n/60
+   案例：3000 rpm → fe = 4×3000/60 = 200 Hz；8000 rpm → 533.3 Hz
+三相平衡电流：ia = I·cos(θ+γ)，ib = I·cos(θ+γ−120°)，ic = I·cos(θ+γ+120°)，ia+ib+ic = 0
+和差角公式：cos(a−b) = cos a·cos b + sin a·sin b
+            sin(a−b) = sin a·cos b − cos a·sin b
+用它证明 Park 的效果：设 iα = I·cos(θ+γ)，iβ = I·sin(θ+γ)
+   id =  iα·cosθ + iβ·sinθ = I·cos(θ+γ−θ) = I·cosγ   ← 与 θ 无关，直流！
+   iq = −iα·sinθ + iβ·cosθ = I·sin(θ+γ−θ) = I·sinγ</div>
+<div class="formula"><span class="tg tg-disc">【离散实现】</span>每 PWM 周期电角度增量 Δθ = ωe·Ts
+   案例 8000 rpm：Δθ = 2π·533.3·50 µs = 0.1676 rad ≈ 9.6°
+   采样→PWM 生效的等效延迟约 1.5Ts（中断计算 1Ts + PWM 中心对齐 0.5Ts）→ 约 14.4° 角度误差</div>
+<div id="anim-A03"></div>
+<div class="anim-note"><b>动画在演示什么：</b>左边单位圆上的矢量逆时针旋转（与全书正方向一致），它在水平轴的投影就是 cosθ（A 相电流形状），竖直投影是 sinθ。右边画出三相余弦及其和。<br>
+<b>拖动滑块：</b>「频率」改变旋转快慢；「C 相相位偏差」模拟三相不平衡——三相和不再为 0，这时「用 ic = −ia − ib 推算第三相」的假设失效。<br>
+<b>正常：</b>三相和曲线恒为 0。<b>异常：</b>和曲线出现正弦，提示相序/采样/硬件不平衡。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li><b>角度格式</b>：uint16 表示 0~2π，16384 = 90°；加法溢出天然取模，无需判断。</li>
+<li><b>查表</b>：1024 点 sin 表（2 KB Flash，末尾多存 1 点便于插值）；高 10 位作索引，低 6 位线性插值。</li>
+<li><b>cos</b>：cosθ = sin(θ + 90°)，即索引 +16384。</li>
+<li><b>电角度</b>：θe = (θm × p) 在 uint16 上直接乘 4 截断（自动取模），再减零位偏移 <code>Cal_ThetaOffset</code>（C09）。</li>
+<li><b>延迟补偿</b>：反 Park 使用 θ + 1.5·Δθ；Park 使用采样时刻角度。补偿量用标定系数可调。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>查表 sin 与浮点 sin 差值曲线：周期性小锯齿，幅度 ≤ 数 LSB。</li>
+<li>恒定 iq 给定，转速从 500 rpm 扫到 6000 rpm：未补偿时实测 id 偏离给定、力矩常数下降；补偿后基本平直。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>#define SIN_LUT_BITS   (10u)                     /* 1024 点 */
+#define SIN_FRAC_BITS  (16u - SIN_LUT_BITS)      /* 6 位插值 */
+extern const q15_t c_SinLut[(1u &lt;&lt; SIN_LUT_BITS) + 1u];  /* 离线生成，90° 处取 32767 */
+
+static inline q15_t FOC_Sin(uint16_t th)
+{
+    uint32_t idx  = (uint32_t)th &gt;&gt; SIN_FRAC_BITS;
+    int32_t  frac = (int32_t)(th &amp; ((1u &lt;&lt; SIN_FRAC_BITS) - 1u));
+    int32_t  y0   = c_SinLut[idx];
+    int32_t  y1   = c_SinLut[idx + 1u];
+    return (q15_t)(y0 + (((y1 - y0) * frac) &gt;&gt; SIN_FRAC_BITS));
+}
+static inline q15_t FOC_Cos(uint16_t th) { return FOC_Sin((uint16_t)(th + 16384u)); }
+
+/* 每 PWM 中断：机械角 → 电角 → 延迟补偿 */
+void FOC_AngleUpdate_Isr(void)
+{
+    uint16_t thE  = (uint16_t)((uint16_t)(gFoc.thetaM * FOC_POLE_PAIRS) - Cal_ThetaOffset);
+    int16_t  dTh  = (int16_t)(uint16_t)(thE - gFoc.thetaE);      /* 每 Ts 增量 */
+    gFoc.thetaEIncPerTs = dTh;                                    /* 后续应用滤波 */
+    gFoc.thetaE = thE;
+    gFoc.sinTh  = FOC_Sin(thE);
+    gFoc.cosTh  = FOC_Cos(thE);
+    /* 反 Park 用补偿角：θ + Cal_AngCompK × Δθ，Cal_AngCompK 标称 1.5（Q8：384）【案例假设】 */
+    gFoc.thetaEInvPark = (uint16_t)(thE + (uint16_t)(((int32_t)dTh * Cal_AngCompK_q8) &gt;&gt; 8));
+}</code></pre>
+<p class="note">离线生成表：<code>round(32767·sin(2π·k/1024))</code>，k = 0…1024（Python / MATLAB 均可）。实际工程中 Δθ 应取滤波后的速度换算值，避免旋变噪声被放大（A05）。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速力矩下降、id 出现负偏移</h5><dl>
+<dt>现象</dt><dd>6000 rpm 以上（未进弱磁）iq 给定不变，实测力矩随转速下降。</dd>
+<dt>可能根因</dt><dd>未做角度延迟补偿：6000 rpm 时 fe = 400 Hz，1.5Ts 延迟 ≈ 10.8° 电角度。</dd>
+<dt>排查顺序</dt><dd>扫转速记录 id/iq 实测与给定；计算偏差角 atan2 与转速是否成正比。</dd>
+<dt>修复</dt><dd>反 Park 角度加 ωe·1.5Ts 补偿，标定系数微调。</dd>
+<dt>验证</dt><dd>不同转速力矩常数一致（台架扭矩传感器）。</dd></dl></div>
+<div class="issue"><h5>数学易错点：度 / 弧度 / 码值混用</h5><dl>
+<dt>现象</dt><dd>仿真正常，代码移植后电机不转或乱转。</dd>
+<dt>可能根因</dt><dd>Simulink 用弧度，C 代码用 uint16，中间换算漏乘 65536/2π。</dd>
+<dt>排查</dt><dd>固定角度 90°，检查 sin 输出是否为 32767。</dd>
+<dt>修复</dt><dd>接口统一 uint16，仅在模型边界换算。</dd>
+<dt>验证</dt><dd>PIL 测试：0°/90°/180°/270° 四点输出。</dd></dl></div>
+<div class="issue"><h5>数学易错点：电角度 = 机械角度 × 极对数的溢出</h5><dl>
+<dt>现象</dt><dd>电角度在机械一圈内跳变。</dd>
+<dt>可能根因</dt><dd>先转 int32 再乘没有取低 16 位，或结果写入 int16 后符号扩展。</dd>
+<dt>排查</dt><dd>匀速转动观察 θe 是否为 4 个完整锯齿/机械圈。</dd>
+<dt>修复</dt><dd>uint16 乘法后强制截断 uint16。</dd>
+<dt>验证</dt><dd>θe 锯齿连续，跳变仅发生在 65535→0。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>sin 表 90° 写 32768 溢出成 −32768：表项必须饱和到 32767。</li>
+<li>插值时 <code>idx+1</code> 越界：表长必须是 1025。</li>
+<li>三相和为零只适用于星接无中线；三角形接法或带中线时需重新推导。</li>
+<li>速度来源的 Δθ 直接用原始差分，噪声经补偿放大到角度上，低速电流噪声变大。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A03" id="quiz-A03"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：fe = p·n/60、每周期 Δθ、uint16 角度、和差角证明 Park、1.5Ts 延迟补偿。</li>
+<li>面试高频：「为什么高速时需要角度补偿？补多少？」</li></ul></div>
+</section>
+
+<!-- ================= A04 ================= -->
+<section class="chap" id="A04" data-title="A04 复数">
+<h2 class="chap-h">A04 复数：欧拉公式、乘法即旋转、空间矢量与 dq 方程</h2>
+<p class="chap-sub">模块 A · 前置工程数学 · 第 4 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>Clarke（空间矢量定义）、Park / 反 Park（乘 e^∓jθ）、dq 电压方程的交叉耦合项</td></tr>
+<tr><th>输入 / 输出</th><td>输入：iα、iβ（实部、虚部）与 θ；输出：id、iq</td></tr>
+<tr><th>工程价值</th><td>用一行复数式统一 Clarke/Park/电压方程；看懂解耦项 ωL·i 从哪来</td></tr>
+<tr><th>上下游依赖</th><td>上游 A02、A03；下游 B03、C02、C03、C05 解耦、C10 观测器</td></tr>
+<tr><th>适用角色</th><td>算法工程师必修</td></tr>
+<tr><th>前置数学依赖</th><td>A02、A03</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>不学复数，dq 方程里的 −ωLq·iq、+ωLd·id 只能死记；用复数一步推出，并知道 Park 写反符号会发生什么。</div>
+<div><b>② 量产怎么做</b>代码中复数就是两个 int16（实部、虚部）+ 4 次乘法；Park/反 Park 共用一组 sin/cos。</div>
+<div><b>③ 如何证明</b>稳态 id、iq 为直流；角度误差 → dq 常值偏移；速度失配 → dq 慢速旋转；写反 → 2 倍频振荡。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>前置数学：A02 矢量、A03 三角。只需接受一个定义：j² = −1，j 表示「逆时针转 90°」。</li>
+<li>不满足：无法理解 Park 方向、解耦前馈的正负号。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+复数 z = x + j·y = |z|·e^(jφ)；|z| = √(x²+y²)，φ = atan2(y, x)
+欧拉公式：e^(jθ) = cosθ + j·sinθ
+乘法：z1·z2 = |z1||z2|·e^(j(φ1+φ2))   ← 模相乘、角相加 → 乘 e^(jθ) 就是逆时针转 θ
+空间矢量（幅值不变）：i_s = (2/3)(ia + a·ib + a²·ic) = iα + j·iβ，a = e^(j120°)，1 + a + a² = 0
+Park：i_dq = id + j·iq = i_s · e^(−jθ)      反 Park：v_s = v_dq · e^(+jθ)</div>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>dq 电压方程的来源（SPMSM 先令 Ld = Lq = L）
+静止坐标：v_s = R·i_s + dψ_s/dt，ψ_s = L·i_s + ψf·e^(jθ)
+代入 i_s = i_dq·e^(jθ)，对乘积求导：d(i_dq·e^(jθ))/dt = (di_dq/dt + jω·i_dq)·e^(jθ)
+两边约去 e^(jθ)：v_dq = R·i_dq + L·di_dq/dt + jω·L·i_dq + jω·ψf
+展开为 IPMSM 形式（Ld ≠ Lq）：
+   vd = R·id + Ld·did/dt − ω·Lq·iq
+   vq = R·iq + Lq·diq/dt + ω·Ld·id + ω·ψf
+来源：PMSM 矢量控制经典教材通用推导（如 R. Krishnan《Permanent Magnet Synchronous and Brushless DC Motor Drives》）</div>
+<div id="anim-A04"></div>
+<div class="anim-note"><b>动画在演示什么：</b>左图 αβ 平面中，电流矢量 i_s（橙）以电频率逆时针旋转；控制器使用的 dq 轴（紫 d̂ / 黄 q̂）按估计角 θ̂ 旋转，虚线是真实 d 轴。右图是 Park 输出 id、iq 的时间曲线。<br>
+<b>拖动滑块：</b>「角度偏差」使 dq 输出出现常值偏移（零位标定错误的典型）；「频率失配」使 dq 输出缓慢正弦摆动（速度估计不准）；勾选「Park 方向写反」，dq 变成 2 倍电频率振荡。<br>
+<b>正常：</b>id、iq 两条水平直线，数值 = I·cosγ、I·sinγ。<b>异常：</b>偏移、摆动、高频振荡分别对应三类根因。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>复数用结构体 {re, im} 表示，Q15。</li>
+<li>乘 e^(−jθ)：(re + j·im)(c − j·s) = (re·c + im·s) + j(im·c − re·s)，4 次乘、2 次加减。</li>
+<li>int32 累加，右移 15 位后饱和；输入矢量模长 ≤ 1 pu 时结果不会超限。</li>
+<li>Park 与反 Park 在同一中断里使用的角度可能不同（延迟补偿，A03），sin/cos 分别计算。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>正常稳态：id、iq 直流 + 小纹波（PWM 纹波、谐波）。</li>
+<li>纹波频率对应根因：1 倍 fe → 电流偏移；2 倍 fe → 两相增益不一致或 Park 写反；6 倍 fe → 死区 / 反电动势谐波。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>typedef struct { q15_t re; q15_t im; } CPLX_tst;
+
+/* z · e^(-jθ)：Park；|z| ≤ 1 pu 时结果不越界 */
+static inline CPLX_tst Cplx_RotNeg(CPLX_tst z, q15_t s, q15_t c)
+{
+    CPLX_tst r;
+    r.re = Q15_Sat(((int32_t)z.re * c + (int32_t)z.im * s) &gt;&gt; 15);
+    r.im = Q15_Sat(((int32_t)z.im * c - (int32_t)z.re * s) &gt;&gt; 15);
+    return r;
+}
+/* z · e^(+jθ)：反 Park */
+static inline CPLX_tst Cplx_RotPos(CPLX_tst z, q15_t s, q15_t c)
+{
+    CPLX_tst r;
+    r.re = Q15_Sat(((int32_t)z.re * c - (int32_t)z.im * s) &gt;&gt; 15);
+    r.im = Q15_Sat(((int32_t)z.im * c + (int32_t)z.re * s) &gt;&gt; 15);
+    return r;
+}
+
+void FOC_Park_Isr(void)
+{
+    CPLX_tst iab = { gFoc.iAlpha, gFoc.iBeta };
+    CPLX_tst idq = Cplx_RotNeg(iab, gFoc.sinTh, gFoc.cosTh);
+    gFoc.id = idq.re;
+    gFoc.iq = idq.im;
+}</code></pre>
+<p class="note">案例数值：iq = 20 A 给定、id = 0，3000 rpm 时 d 轴交叉耦合电压 ωLq·iq = 1256.6 × 75 µH × 20 A ≈ 1.88 V，约占 Vdc/√3 的 27%——这就是 C05 必须做解耦前馈的原因。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题 / 数学易错点</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>正反转力矩 / 最高转速不对称</h5><dl>
+<dt>现象</dt><dd>正转最高转速 7500 rpm，反转只有 6200 rpm；同 iq 给定两方向力矩不同。</dd>
+<dt>可能根因</dt><dd>旋变零位偏差 ε：实际电流在真实 dq 中带 ±sinε 的 d 分量，一个方向增磁、一个方向去磁。</dd>
+<dt>排查顺序</dt><dd>① 对拖测反电动势过零与 θe 过零对比 → ② d 轴直流注入锁定转子读旋变 → ③ 比较正反转 vd 稳态值。</dd>
+<dt>修复</dt><dd>重新零位标定写入 Cal_ThetaOffset（C09）。</dd>
+<dt>验证</dt><dd>空载对拖时 id = 0 控制下 vd ≈ 0；正反转对称。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>dq 电流 2 倍频大幅振荡，电机反转或抖动</h5><dl>
+<dt>现象</dt><dd>开环角度下 id、iq 呈 2fe 正弦。</dd>
+<dt>可能根因</dt><dd>Park 写成乘 e^(+jθ)，或 β 轴符号与角度方向相反（相序接反）。</dd>
+<dt>排查</dt><dd>开环拖动，检查 iα–iβ XY 图旋转方向是否与 θ 增方向一致（应同为逆时针）。</dd>
+<dt>修复</dt><dd>修正 Park 符号或交换两相 / 角度方向。</dd>
+<dt>验证</dt><dd>dq 为直流。</dd></dl></div>
+<div class="issue"><h5>数学易错点：对 e^(jθ) 求导漏项</h5><dl>
+<dt>现象</dt><dd>自写模型缺少交叉耦合项，仿真与台架高速段差异大。</dd>
+<dt>根因</dt><dd>d(e^(jθ))/dt = jω·e^(jθ)，乘积求导两项都要。</dd>
+<dt>排查</dt><dd>对比教材方程。</dd>
+<dt>修复</dt><dd>补齐 ±ωL·i 与 ωψf。</dd>
+<dt>验证</dt><dd>仿真 vd、vq 稳态值与台架记录吻合。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>Park 用的角度与采样时刻不对应（用了上一周期角度）→ 隐性 1Ts 角度误差。</li>
+<li>空间矢量系数 2/3（幅值不变）与 √(2/3)（功率不变）混用 → 电流幅值差 22%，转矩公式系数随之改变。</li>
+<li>-32768 × -32768 的乘积溢出边界：输入先限幅到 ±32767。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="A04" id="quiz-A04"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：欧拉公式、乘法即旋转、Park = ×e^(−jθ)、dq 方程交叉耦合项来源、三类 dq 异常与根因对应。</li>
+<li>高频出现于：零位标定、解耦前馈、面试「推导 dq 电压方程」。</li></ul></div>
+</section>

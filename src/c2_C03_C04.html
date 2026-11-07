@@ -1,0 +1,236 @@
+
+<!-- ================= C03 ================= -->
+<section class="chap" id="C03" data-title="C03 Park / 反 Park">
+<h2 class="chap-h">C03 Park 变换与反 Park：同步旋转坐标与延迟补偿</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 3 节（数学证明见 A03、A04）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>Park：Clarke 之后、电流环之前；反 Park：电流环之后、SVPWM 之前</td></tr>
+<tr><th>输入 / 输出</th><td>Park：iα、iβ、θe → id、iq；反 Park：vd、vq、θe,comp → vα、vβ</td></tr>
+<tr><th>工程价值</th><td>决定 dq 解耦质量与高速力矩精度；角度误差在这里直接变成控制误差</td></tr>
+<tr><th>上下游依赖</th><td>上游 C02、C09（角度）；下游 C05、C04</td></tr>
+<tr><th>适用角色</th><td>算法</td></tr>
+<tr><th>前置数学依赖</th><td>A03 和差角、A04 e^(±jθ)</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>让 PI 面对直流量；同时反 Park 把电流环输出的 dq 电压送回静止坐标供 SVPWM 使用。</div>
+<div><b>② 量产怎么做</b>sin/cos 查表插值（A03）；Park 用采样时刻角度，反 Park 用 θ + Kc·Δθ（Kc 标称 1.5）补偿角。</div>
+<div><b>③ 如何证明</b>稳态 dq 为直流；扫转速力矩常数不变；正反转对称。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>准确的电角度、正确的旋转方向（C09）；电角速度估计（用于补偿）。</li>
+<li>不满足：未补偿 → 高速力矩下降、产生意外 d 轴电流；补偿符号反 → 误差翻倍。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+Park：  id =  iα·cosθ + iβ·sinθ           反 Park：vα = vd·cosθc − vq·sinθc
+        iq = −iα·sinθ + iβ·cosθ                     vβ = vd·sinθc + vq·cosθc
+<span class="tg tg-disc">【离散实现】</span>延迟补偿：θc = θ[k] + Kc·ωe·Ts，Kc ≈ 1.5（B06 单采样单更新）
+   未补偿的角度误差 Δθ = 1.5·ωe·Ts：3000 rpm 5.4°，6000 rpm 10.8°，8000 rpm 14.4°
+   另一种等价思路：在 dq 中对电压做 e^(j·1.5·ωe·Ts) 旋转（同样效果）
+旋变自身相位滞后（解码 / 激磁滤波）也可合并到 Kc 中标定 <span class="tg tg-check">【待核对：以解码芯片手册与实测为准】</span></div>
+<div id="anim-C03"></div>
+<div class="anim-note"><b>动画在演示什么：</b>电流环输出的电压矢量 v_dq（固定在 dq 中）经反 Park 回到 αβ；由于延迟，电压真正作用时转子已经转过 1.5·Δθ。左图：虚线为采样时刻 dq 轴，实线为电压生效时的真实 dq 轴；右图：转速扫描下，未补偿 / 补偿后的实际电压角误差。<br>
+<b>拖动滑块：</b>增大转速，未补偿误差线性增大；调节补偿系数 Kc，Kc = 1.5 时误差归零；Kc 符号反（负值）误差翻倍。<br>
+<b>正常：</b>补偿后误差 ≈ 0 且与转速无关。<b>异常：</b>误差随转速线性增长。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>角度更新（A03 FOC_AngleUpdate_Isr）：θe、sin、cos、Δθ。</li>
+<li>Park：Cplx_RotNeg(iαβ, sinθ, cosθ)（A04）。</li>
+<li>电流环（C05）得 vd、vq，并经电压圆限幅（A02）。</li>
+<li>反 Park：用 θc 重新查表 sin/cos → Cplx_RotPos。</li>
+<li>标定量：<code>Cal_AngCompK_q8</code>（标称 384 = 1.5）；Δθ 使用滤波后转速换算，避免噪声。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>Simulink 模型必须包含 1.5Ts 延迟（D05），否则补偿无效果可看。</li>
+<li>台架：固定 iq，扫转速测力矩；补偿后力矩常数平直；vd 稳态值接近 −ωe·Lq·iq（id = 0 时）。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>volatile int16_t Cal_AngCompK_q8 = 384;     /* 1.5 × 256 【案例假设，需台架标定】*/
+
+void FOC_InvPark_Isr(void)
+{
+    q15_t s = FOC_Sin(gFoc.thetaEInvPark);  /* A03 中计算的补偿角 */
+    q15_t c = FOC_Cos(gFoc.thetaEInvPark);
+    CPLX_tst vdq = { gFoc.vd, gFoc.vq };
+    CPLX_tst vab = Cplx_RotPos(vdq, s, c);
+    gFoc.vAlpha = vab.re;
+    gFoc.vBeta  = vab.im;
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>高速时电流环在 dq 中出现慢速振荡</h5><dl>
+<dt>现象</dt><dd>6000 rpm 以上 id、iq 低频摆动。</dd>
+<dt>可能根因</dt><dd>补偿使用原始差分速度（噪声大）或补偿方向错误。</dd>
+<dt>排查</dt><dd>观察 thetaEIncPerTs 噪声；Kc 设为 0 / 1.5 / −1.5 对比。</dd>
+<dt>修复</dt><dd>补偿用滤波速度；修正符号。</dd>
+<dt>验证</dt><dd>高速 dq 平稳。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>正转补偿正常，反转更差</h5><dl>
+<dt>现象</dt><dd>反转时力矩下降比未补偿还多。</dd>
+<dt>可能根因</dt><dd>补偿量用了转速绝对值。</dd>
+<dt>排查</dt><dd>检查 Δθ 是否为有符号量。</dd>
+<dt>修复</dt><dd>使用带符号 Δθ。</dd>
+<dt>验证</dt><dd>正反转对称。</dd></dl></div>
+<div class="issue"><h5>易错点：Park 也用了补偿角</h5><dl>
+<dt>现象</dt><dd>dq 电流测量出现与转速成正比的角度偏差。</dd>
+<dt>根因</dt><dd>采样时刻电流应该用采样时刻角度变换。</dd>
+<dt>排查</dt><dd>代码审查。</dd>
+<dt>修复</dt><dd>Park 用 θ[k]，反 Park 用 θc。</dd>
+<dt>验证</dt><dd>扫速测试。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>旋变解码存在跟踪环滞后（随转速变化），需与 PWM 延迟合并标定，不能只按 1.5Ts 理论值。</li>
+<li>弱磁区电压饱和时补偿更关键：电压方向偏差会直接变成力矩误差。</li>
+<li>sin/cos 查表两次（Park 与反 Park）的执行时间要计入中断预算。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C03" id="quiz-C03"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：Park / 反 Park 公式与符号、补偿角计算与使用位置、补偿速度来源。</li>
+<li>面试 / 标定高频：「高速力矩下降怎么查？」</li></ul></div>
+</section>
+
+<!-- ================= C04 ================= -->
+<section class="chap" id="C04" data-title="C04 SVPWM">
+<h2 class="chap-h">C04 SVPWM：扇区判断、时间计算、零矢量分配、过调制与死区效应</h2>
+<p class="chap-sub">模块 C · 核心 FOC 链路 · 第 4 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>反 Park 之后、PWM 寄存器之前</td></tr>
+<tr><th>输入 / 输出</th><td>输入：vα、vβ、Vdc；输出：三相占空比 dutyA/B/C（Q15）→ 比较寄存器</td></tr>
+<tr><th>工程价值</th><td>母线电压利用率比 SPWM 高约 15.5%；12 V 系统中直接决定弱磁起点与最高转速</td></tr>
+<tr><th>上下游依赖</th><td>上游 C03；下游 PWM 硬件、C13 死区补偿、B06 采样窗口</td></tr>
+<tr><th>适用角色</th><td>算法、底层</td></tr>
+<tr><th>前置数学依赖</th><td>A02 矢量合成、A03 三角</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>逆变器只有 8 个开关状态（6 个有效矢量 + 2 个零矢量），任意方向、幅值的电压矢量要用相邻两个有效矢量 + 零矢量在一个周期内按时间加权合成。</div>
+<div><b>② 量产怎么做</b>两种等价实现：扇区法（教科书）或 min-max 零序注入法（代码短、无扇区判断，量产常用）；七段式对称、中心对齐。</div>
+<div><b>③ 如何证明</b>三相占空比呈「马鞍波」；线电压基波幅值与给定一致；线性区内 |v| ≤ Vdc/√3 时无削顶。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>实测 Vdc（每周期更新）；中心对齐 PWM；死区配置（C13 补偿）。</li>
+<li>不满足：Vdc 用常量 → 电源波动时电压幅值误差；电压超出六边形 → 过调制未定义行为。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（幅值不变约定）
+6 个有效基本矢量幅值 2Vdc/3，相邻 60°；构成六边形，内切圆半径 = Vdc/√3
+扇区判断：U1 = vβ，U2 = (√3·vα − vβ)/2，U3 = (−√3·vα − vβ)/2
+   N = (U1&gt;0) + 2·(U2&gt;0) + 4·(U3&gt;0)；N → 扇区：3→Ⅰ，1→Ⅱ，5→Ⅲ，4→Ⅳ，6→Ⅴ，2→Ⅵ
+扇区内作用时间（θ' 为扇区内角度，0~60°）：
+   T1 = √3·Ts·|v|/Vdc·sin(60° − θ')，T2 = √3·Ts·|v|/Vdc·sin θ'，T0 = Ts − T1 − T2
+<span class="tg tg-disc">【离散实现】</span>min-max 零序注入（与七段式对称 SVPWM 等价）：
+   va,vb,vc = 反 Clarke(vα, vβ)
+   v0 = −(max + min)/2
+   dutyX = 0.5 + (vX + v0)/Vdc
+线性区：|v| ≤ Vdc/√3 时所有 duty ∈ [0, 1]；SPWM 仅 Vdc/2，提升 2/√3 ≈ 1.155
+过调制（来源：Holtz、Bolognani 等经典文献中的两区间法；量产常简化）：
+   以六步方波基波 2Vdc/π 为基准定义调制度 M = |v|/(2Vdc/π)：
+   线性区：M ≤ π/(2√3) ≈ 0.907（即 |v| ≤ Vdc/√3）
+   区间Ⅰ：0.907 &lt; M ≤ 0.952，保持参考角度，超出六边形的部分截到边界（并补偿幅值损失）
+   区间Ⅱ：0.952 &lt; M ≤ 1，逐步在顶点保持，M = 1 即六步运行
+   简化做法：直接把矢量按比例缩到六边形边界（最小相位误差法），谐波增加但实现简单</div>
+<div id="anim-C04"></div>
+<div class="anim-note"><b>动画在演示什么：</b>左图为电压六边形与 6 个扇区，参考电压矢量逆时针旋转，当前扇区高亮，显示相邻两矢量的分量 T1、T2；右图为一个电周期内三相占空比（min-max 实现，马鞍形）以及当前点。<br>
+<b>拖动滑块：</b>调制幅值 |v|/(Vdc/√3) 超过 1 进入过调制：勾选「六边形截断」时矢量被截到边界（右图出现平顶），不勾选时占空比超出 [0,1]（红色，表示实际会被硬件削顶）。<br>
+<b>正常：</b>线性区内马鞍波、duty ∈ [0,1]。<b>异常：</b>超出范围、扇区跳变异常。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>反 Clarke 得 va、vb、vc（Q15）。</li>
+<li>求 max、min，v0 = −(max+min)/2。</li>
+<li>duty = 0.5 + (vx + v0) × (1/vdcPu)：除法用每周期一次的 1/Vdc 倒数（慢任务或每周期算一次），中断内只乘。</li>
+<li>过调制处理：若 max − min &gt; vdcPu（超出六边形），按比例缩放 (vx + v0)。</li>
+<li>duty 限幅到 [Dmin, Dmax]（保证 B06 低边采样窗口与驱动自举）。</li>
+<li>转换为比较值：CMP = duty × PWM 周期计数（中心对齐时注意极性约定）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>相电压（对 Vdc 负端）PWM 平均值为马鞍形；线电压平均值为正弦。</li>
+<li>过调制区：马鞍波平顶，相电流出现 5、7 次谐波。</li>
+<li>扇区编号随角度依次 Ⅰ→Ⅵ（正转），反转相反。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>#define Q15_SQRT3_2   (28378)                 /* √3/2 */
+#define DUTY_MAX_Q15  (30801)                 /* 94%：低边采样窗口 【案例假设】 */
+#define DUTY_MIN_Q15  (983)                   /* 3% */
+
+static inline int16_t max3(int16_t a, int16_t b, int16_t c) { int16_t m = (a &gt; b) ? a : b; return (m &gt; c) ? m : c; }
+static inline int16_t min3(int16_t a, int16_t b, int16_t c) { int16_t m = (a &lt; b) ? a : b; return (m &lt; c) ? m : c; }
+
+void FOC_Svpwm_Isr(void)
+{
+    int32_t va = gFoc.vAlpha;
+    int32_t vb = (-(int32_t)gFoc.vAlpha + 2 * (((int32_t)gFoc.vBeta * Q15_SQRT3_2) &gt;&gt; 15)) / 2;
+    int32_t vc = -va - vb;
+    int32_t v0 = -((max3((int16_t)va, (int16_t)vb, (int16_t)vc) + min3((int16_t)va, (int16_t)vb, (int16_t)vc)) / 2);
+    int32_t span = max3((int16_t)va, (int16_t)vb, (int16_t)vc) - min3((int16_t)va, (int16_t)vb, (int16_t)vc);
+    int32_t k_q15 = 32767;                                  /* 过调制缩放系数 */
+    if (span &gt; gFoc.vdcPu) {                                /* 超出六边形 → 最小相位误差截断 */
+        k_q15 = ((int32_t)gFoc.vdcPu &lt;&lt; 15) / span;
+    }
+    /* duty = 0.5 + k·(vx + v0)/Vdc；invVdc_q12 = 1/vdcPu（Q12，慢任务更新）*/
+    gFoc.dutyA = FOC_DutyCalc(va + v0, k_q15);
+    gFoc.dutyB = FOC_DutyCalc(vb + v0, k_q15);
+    gFoc.dutyC = FOC_DutyCalc(vc + v0, k_q15);
+    Pwm_WriteDuty(gFoc.dutyA, gFoc.dutyB, gFoc.dutyC);      /* 写影子寄存器 */
+}
+
+static q15_t FOC_DutyCalc(int32_t vx, int32_t k_q15)
+{
+    int32_t x = (vx * k_q15) &gt;&gt; 15;
+    int32_t d = 16384 + ((x * gFoc.invVdc_q12) &gt;&gt; 12);     /* 0.5 + x/Vdc */
+    if (d &gt; DUTY_MAX_Q15) { d = DUTY_MAX_Q15; }
+    if (d &lt; DUTY_MIN_Q15) { d = DUTY_MIN_Q15; }
+    return (q15_t)d;
+}</code></pre>
+<p class="note">代码中 vb 按 (−vα + 2·(√3/2)·vβ)/2 = −vα/2 + (√3/2)·vβ 计算；量产代码以单元测试覆盖 6 个扇区中心与边界点为准。FOC_DutyCalc 应在 FOC_Svpwm_Isr 之前声明（此处为阅读顺序）。</p>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>电机在某个角度位置「卡顿」</h5><dl>
+<dt>现象</dt><dd>开环拖动时每电周期一次卡顿，位置固定。</dd>
+<dt>可能根因</dt><dd>扇区表错一项（如 N=5 映射错）、某扇区 T1/T2 互换。</dd>
+<dt>排查</dt><dd>扫 θ 0~360° 记录扇区号与三相 duty，与理论对比。</dd>
+<dt>修复</dt><dd>改用 min-max 法或修正扇区表；单元测试 6 扇区。</dd>
+<dt>验证</dt><dd>duty 马鞍波连续，无跳变。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>接近最高转速时电流畸变、噪声大</h5><dl>
+<dt>现象</dt><dd>弱磁深处相电流平顶、啸叫。</dd>
+<dt>可能根因</dt><dd>无意中进入过调制（电压限幅大于六边形 / 使用方形限幅）。</dd>
+<dt>排查</dt><dd>记录 |v| 与 Vdc/√3、duty 是否触限。</dd>
+<dt>修复</dt><dd>明确过调制策略与上限；弱磁预留电压裕量（C07）。</dd>
+<dt>验证</dt><dd>谐波和噪声满足要求。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>母线电压跌落时电流冲击</h5><dl>
+<dt>现象</dt><dd>车辆启动瞬间 Vdc 跌到 9 V，电流出现尖峰。</dd>
+<dt>可能根因</dt><dd>1/Vdc 更新慢，占空比按旧电压算，实际电压偏小；或 Vdc 滤波过重。</dd>
+<dt>排查</dt><dd>同时记录 Vdc、invVdc、电流。</dd>
+<dt>修复</dt><dd>每周期更新 Vdc 补偿；滤波时间常数缩短。</dd>
+<dt>验证</dt><dd>电压跌落试验电流平稳。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>中心对齐 PWM 的比较值极性（高有效 / 低有效、上下计数）与 duty 定义必须核对：错了等于电压反向。</li>
+<li>duty 上限过高破坏低边采样窗口（B06），下限过低破坏自举电容充电（若使用自举驱动）。</li>
+<li>过调制区电流环增益实际下降（电压饱和），需配合抗饱和（A08）。</li>
+<li><span class="tg tg-red">【风险红线】</span>更新 PWM 寄存器时若未使用影子 / 同步加载，可能在周期中途改变占空比产生窄脉冲，甚至违反死区。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="C04" id="quiz-C04"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：六边形与内切圆 Vdc/√3、扇区判断、T1/T2、min-max 等价、过调制两区间、占空比限幅原因。</li>
+<li>面试高频：「SVPWM 比 SPWM 电压利用率高多少？为什么？」——15.5%，零序注入使相电压峰值降低。</li></ul></div>
+</section>

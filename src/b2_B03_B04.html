@@ -1,0 +1,209 @@
+
+<!-- ================= B03 ================= -->
+<section class="chap" id="B03" data-title="B03 坐标系">
+<h2 class="chap-h">B03 坐标系：三相静止 abc、两相静止 αβ、同步旋转 dq</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 3 节（C02 / C03 给出完整实现，本节建立整体认识）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>采样之后、电流环之前（Clarke、Park）；电流环之后、SVPWM 之前（反 Park）</td></tr>
+<tr><th>输入 / 输出</th><td>abc 三相量 ⇄ αβ 两相交流量 ⇄ dq 两相直流量</td></tr>
+<tr><th>工程价值</th><td>把三个耦合的正弦量变成两个独立的直流量，PI 才能做到无稳态误差</td></tr>
+<tr><th>上下游依赖</th><td>上游 A02~A04；下游 C02、C03、C04</td></tr>
+<tr><th>适用角色</th><td>全部</td></tr>
+<tr><th>前置数学依赖</th><td>A02 投影、A03 和差角、A04 复数旋转</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>PI 跟踪正弦给定必然有幅值衰减和相位滞后（且随频率变大）；变换到 dq 后给定是常数，PI 积分即可消除误差。</div>
+<div><b>② 量产怎么做</b>Clarke 用两相电流（第三相不参与，ic = −ia − ib 隐含）；Park / 反 Park 共用每周期一次查表的 sin/cos。</div>
+<div><b>③ 如何证明</b>CANape 同屏观察：abc 正弦、αβ 圆形 XY 图、dq 水平直线；任一层异常即可定位到对应变换。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>信号：两相电流（C01 校准后）、电角度 θe（C09）。</li>
+<li>约定：全书统一的 α 轴、β 方向、Park 符号（导读第三节）。</li>
+<li>不满足：约定不一致（尤其从不同厂商例程拷代码）→ 方向反、dq 振荡。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>（幅值不变）
+Clarke： iα = (2/3)·(ia − ib/2 − ic/2) = ia（当 ia+ib+ic = 0）
+         iβ = (2/3)·(√3/2)·(ib − ic)   = (ia + 2·ib)/√3
+Park：   id =  iα·cosθ + iβ·sinθ
+         iq = −iα·sinθ + iβ·cosθ
+反 Park：vα = vd·cosθ − vq·sinθ
+         vβ = vd·sinθ + vq·cosθ
+反 Clarke（SVPWM 的 min-max 实现会用到）：
+         va = vα；vb = −vα/2 + (√3/2)·vβ；vc = −vα/2 − (√3/2)·vβ</div>
+<div id="anim-B03"></div>
+<div class="anim-note"><b>动画在演示什么：</b>同一组正弦三相电流在三个坐标系中的样子：左为三相时域波形，中为 αβ 平面矢量（轨迹为圆），右为 dq 输出（直流）。三个视图严格使用上面公式和全书方向约定。<br>
+<b>拖动滑块：</b>改变电流幅值和电流角 γ，dq 两条直线随之平移；「B 相增益误差」使 αβ 轨迹变成椭圆、dq 出现 2 倍频纹波；「A 相偏移」使圆心偏移、dq 出现 1 倍频纹波。<br>
+<b>正常：</b>圆 + 直线。<b>异常：</b>椭圆 / 偏心 / 纹波，对应 C01 采样问题。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>顺序：采样换算 → Clarke → 读取 sin/cos → Park → 电流环 → 反 Park（补偿角）→ SVPWM。</li>
+<li>Clarke 定点：<code>iBeta = (ia + 2·ib) × (1/√3)</code>，1/√3 的 Q15 为 18919；中间量 int32。</li>
+<li>Park/反 Park 定点见 A04 <code>Cplx_RotNeg / Cplx_RotPos</code>。</li>
+<li>每一步结果写入 gFoc 结构体，便于 XCP 测量（D08）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>正常：iα 与 ia 重合；iβ 超前 iα 90°（正转）；dq 稳态直流。</li>
+<li>反转（θ 减小）：iβ 滞后 iα 90°，XY 圆顺时针，dq 仍为直流。</li>
+<li>不同异常对应纹波频率：1×fe 偏移、2×fe 增益 / 写反、6×fe 死区 / 谐波。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>#define Q15_INV_SQRT3   (18919)        /* 1/√3 = 0.57735 */
+
+void FOC_Clarke_Isr(void)
+{
+    int32_t b = ((int32_t)gFoc.ia + 2 * (int32_t)gFoc.ib) * Q15_INV_SQRT3;
+    gFoc.iAlpha = gFoc.ia;
+    gFoc.iBeta  = Q15_Sat(b &gt;&gt; 15);
+}
+/* 完整中断链路（C 模块逐一展开）*/
+void FOC_FastLoop_Isr(void)
+{
+    FOC_CurrentConvert_Isr();   /* A01 / C01 */
+    FOC_AngleUpdate_Isr();      /* A03 / C09 */
+    FOC_Clarke_Isr();           /* C02 */
+    FOC_Park_Isr();             /* C03 */
+    FOC_CurrentLoop_Isr();      /* C05 */
+    FOC_InvPark_Isr();          /* C03 */
+    FOC_Svpwm_Isr();            /* C04 */
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>XY 图是椭圆</h5><dl>
+<dt>现象</dt><dd>iα–iβ 轨迹为倾斜椭圆，dq 有 2 倍频纹波。</dd>
+<dt>可能根因</dt><dd>A、B 相增益不一致（采样电阻 / 运放增益偏差）。</dd>
+<dt>排查</dt><dd>直流注入法分别标定两相增益（C01）。</dd>
+<dt>修复</dt><dd>写入 Cal_IaGainCorr / Cal_IbGainCorr。</dd>
+<dt>验证</dt><dd>XY 图为圆，2 倍频纹波消失。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>XY 圆旋转方向与转向相反</h5><dl>
+<dt>现象</dt><dd>正转时 XY 图顺时针。</dd>
+<dt>可能根因</dt><dd>相序接反、β 公式符号错误、角度方向反。</dd>
+<dt>排查</dt><dd>开环正向拖动，同时看 θe 是否增加、XY 是否逆时针。</dd>
+<dt>修复</dt><dd>统一相序或软件交换 B、C 相（同时注意 PWM 映射）。</dd>
+<dt>验证</dt><dd>两者方向一致后 dq 为直流。</dd></dl></div>
+<div class="issue"><h5>易错点：拷贝厂商例程的坐标约定</h5><dl>
+<dt>现象</dt><dd>混用两个例程后 dq 符号混乱。</dd>
+<dt>根因</dt><dd>有的库 Park 输出 iq 符号或 β 方向定义不同；有的用功率不变系数。</dd>
+<dt>排查</dt><dd>用 0°/90° 固定角度 + 已知输入做单元测试。</dd>
+<dt>修复</dt><dd>在一个头文件写死约定。</dd>
+<dt>验证</dt><dd>单元测试全部通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>Park 与反 Park 的角度时刻不同（延迟补偿，A03），不能为了省时间共用一组 sin/cos。</li>
+<li>Clarke 用三相电流时（三电阻采样），三相和不为零的误差会被平均掉，但要处理采样窗口不足时的相选择（C01）。</li>
+<li>反 Clarke 用于 SVPWM 时，电压基值需与 Vdc 关联，否则调制比错误。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B03" id="quiz-B03"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：三组公式、圆 / 直线判据、纹波频率与根因对应。</li>
+<li>高频出现：台架定位采样问题、面试「为什么要做坐标变换」。</li></ul></div>
+</section>
+
+<!-- ================= B04 ================= -->
+<section class="chap" id="B04" data-title="B04 矢量控制思想">
+<h2 class="chap-h">B04 矢量控制思想：把交流电机当成直流电机控制</h2>
+<p class="chap-sub">模块 B · 基础扫盲 · 第 4 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>整体思想：dq 电流环即「励磁电流 + 电枢电流」两个独立控制通道</td></tr>
+<tr><th>输入 / 输出</th><td>输入：idRef（磁场通道）、iqRef（转矩通道）；输出：电磁转矩</td></tr>
+<tr><th>工程价值</th><td>理解为何 FOC 的力矩响应快、线性好，以及为何角度精度是一切的前提</td></tr>
+<tr><th>上下游依赖</th><td>上游 B02、B03；下游 C05、C06、C07</td></tr>
+<tr><th>适用角色</th><td>全部</td></tr>
+<tr><th>前置数学依赖</th><td>A02 投影、A04 复数</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>直流电机靠换向器保证电枢磁场与主磁场始终正交，力矩 ∝ 电枢电流。PMSM 没有换向器，FOC 用「角度 + Park」做电子换向。</div>
+<div><b>② 量产怎么做</b>用旋变角度实时把电流矢量放在 q 轴附近（或 MTPA 角）；id 与 iq 各自一个 PI，并加解耦前馈消除交叉影响。</div>
+<div><b>③ 如何证明</b>恒 iq 下扫转速，力矩常数恒定；改变 iq 力矩线性变化（扭矩传感器）。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>准确的电角度（误差每 10° 电角度，SPMSM 力矩损失约 1.5%，且产生 d 轴分量）。</li>
+<li>电流环能够独立控制 id、iq（C05 解耦）。</li>
+<li>不满足：角度错 → 「电子换向」错位 → 力矩下降甚至反向（误差 &gt; 90° 时）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>
+直流电机：Te = Kt·Ia（换向器保证 90°）
+PMSM（SPMSM）：Te = 1.5·p·ψf·|is|·sinβ，β 为电流矢量与 d 轴夹角
+   β = 90°（纯 q 轴）时转矩最大 → 对应直流电机的「正交」
+角度误差 ε 时：实际 iq = |is|·cos ε，实际 id = −|is|·sin ε（符号取决于误差方向）
+   ε = 10° → 力矩损失 1 − cos10° = 1.5%；ε = 90° → 力矩为 0；ε &gt; 90° → 力矩反向</div>
+<div id="anim-B04"></div>
+<div class="anim-note"><b>动画在演示什么：</b>转子（磁链 ψf 方向即真实 d 轴，灰色）逆时针旋转；控制器按「控制器认为的角度」把电流矢量 is（橙）放在 q 轴上。柱条显示实际转矩占最大值的比例。<br>
+<b>拖动滑块：</b>「角度误差 ε」模拟零位标定错误：电流不再与磁链正交，转矩下降；ε 超过 90° 时转矩变负（电机反向 / 抱死）。「电流角 β」相当于主动给 id。<br>
+<b>正常：</b>ε = 0 时电流与 ψf 始终正交，转矩 100%。<b>异常：</b>转矩不足、反向。</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>给定生成：力矩模式下，iqRef 来自上层力矩需求；idRef 来自 MTPA（C06）或弱磁（C07）。</li>
+<li>两个 PI 独立：d 轴 PI 输出 vd，q 轴 PI 输出 vq。</li>
+<li>解耦前馈：vd += −ωe·Lq·iq，vq += ωe·(Ld·id + ψf)（C05）。</li>
+<li>角度：采样时刻角度用于 Park，补偿后角度用于反 Park（A03）。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>iq 阶跃，id 基本不动（解耦良好）；若 id 随 iq 阶跃产生明显扰动 → 解耦不足或角度误差。</li>
+<li>相电流幅值 ∝ 力矩需求，频率跟随转速。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 1 ms 任务：力矩需求 → dq 电流给定（MTPA / 弱磁在 C06 / C07 展开）*/
+void FOC_RefGen_1ms(float teReq_Nm)
+{
+    q15_t iqRef = FOC_TorqueToIqRef(teReq_Nm);          /* B01 */
+    q15_t idRef = FOC_MtpaIdRef(iqRef);                 /* C06 查表 */
+    idRef = FOC_FieldWeakenAdjust(idRef);               /* C07 电压闭环 */
+    FOC_CurrentLimit(&amp;idRef, &amp;iqRef, Cal_IsMax_q15);   /* 电流圆限幅：id 优先 */
+    gFoc.idRef = idRef;
+    gFoc.iqRef = iqRef;
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>上电闭环后电机反向或「抱死」</h5><dl>
+<dt>现象</dt><dd>给正 iq，电机反转或堵住不动且电流很大。</dd>
+<dt>可能根因</dt><dd>角度误差接近 180°（零位错 / 方向反）或接近 90°（无转矩，大电流）。</dd>
+<dt>排查</dt><dd>开环对齐法确认零位；检查 θe 方向与相序。</dd>
+<dt>修复</dt><dd>零位标定、方向统一（C09、D06）。</dd>
+<dt>验证</dt><dd>正 iq 正转，力矩常数正确。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>iq 阶跃时 id 跟着跳</h5><dl>
+<dt>现象</dt><dd>id 出现与 iq 阶跃同步的尖峰，转速越高越明显。</dd>
+<dt>可能根因</dt><dd>交叉耦合 ωL·i 未前馈解耦。</dd>
+<dt>排查</dt><dd>不同转速做阶跃对比。</dd>
+<dt>修复</dt><dd>加入解耦前馈（C05）。</dd>
+<dt>验证</dt><dd>高速阶跃时 id 扰动显著减小。</dd></dl></div>
+<div class="issue"><h5>易错点：认为「电流对准 q 轴就是最优」</h5><dl>
+<dt>现象</dt><dd>IPMSM 用 id = 0，大电流时效率和力矩都偏低。</dd>
+<dt>根因</dt><dd>忽略磁阻转矩。</dd>
+<dt>排查</dt><dd>扫电流角找最大力矩点。</dd>
+<dt>修复</dt><dd>MTPA（C06）。</dd>
+<dt>验证</dt><dd>同力矩电流下降。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>「直流电机类比」只在 dq 稳态成立；动态中 dq 交叉耦合和反电动势是扰动，需要前馈。</li>
+<li>只验证正转：零位误差正反转影响相反，必须正反转都验证。</li>
+<li><span class="tg tg-red">【风险红线】</span>角度方向接反时闭环是正反馈，电流瞬间冲到限值：首次闭环务必小电流、限幅、过流保护使能。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="B04" id="quiz-B04"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：电子换向思想、角度误差 → 力矩 cos ε、超过 90° 反向、解耦。</li>
+<li>面试高频：「FOC 为什么能把交流电机当直流电机控制？」</li></ul></div>
+</section>
