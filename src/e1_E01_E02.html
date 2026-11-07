@@ -1,0 +1,236 @@
+
+<!-- ================= E01 ================= -->
+<section class="chap" id="E01" data-title="E01 故障根因库">
+<h2 class="chap-h">E01 典型故障现象根因库：电流振荡、启动抖动、低速不稳、高速失步、力矩脉动、噪声大、发热异常</h2>
+<p class="chap-sub">模块 E · 故障与调试实战 · 第 1 节（汇总全书各节「高频调试问题」，按现象索引）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>问题定位入口：从「现象」反查「根因」与对应章节</td></tr>
+<tr><th>输入 / 输出</th><td>输入：台架 / 整车现象、频率、工况；输出：候选根因排序、排查动作、验证信号</td></tr>
+<tr><th>工程价值</th><td>多数量产问题都能在这张表里找到原型；按频率阶次与工况相关性快速缩小范围</td></tr>
+<tr><th>上下游依赖</th><td>依赖 A~D 全部；与 E04 定位流程配合</td></tr>
+<tr><th>适用角色</th><td>全部，尤其台架与整车调试</td></tr>
+<tr><th>前置数学依赖</th><td>A03 频率换算、B03 纹波阶次</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>同一现象（如「抖」）可能来自 10 种根因；没有系统化索引，调试常陷入「改参数碰运气」。</div>
+<div><b>② 量产怎么做</b>团队维护问题库：现象 → 判别信号 → 根因 → 修复 → 验证；新问题闭环后入库。</div>
+<div><b>③ 如何证明</b>每条根因都有可复现的验证信号（频谱阶次、对比实验），修复前后数据对比。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>D08 的标准测量信号组可用；能计算电频率 fe = p·n/60 与机械频率 fm = n/60。</li>
+<li>能做对比实验：开 / 关某功能、改变转速 / 电流 / 温度 / 电压。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>阶次判别（最有效的定位工具）：
+   测得脉动 / 纹波频率 fr，计算 kₑ = fr/fe（电阶次）、kₘ = fr/fm = kₑ·p（机械阶次）
+   kₑ = 1：电流偏移；kₑ = 2：两相增益不一致 / 负序 / Park 方向；kₑ = 6：死区、反电动势 5/7 次谐波
+   kₘ 与旋变极对数相关（1 对极旋变：kₘ = 1、2）：旋变偏置 / 不平衡；kₘ 与极槽配合相关：齿槽转矩
+   与转速无关的固定频率：控制环振荡（电流环 ~ 数百 Hz~kHz、速度环 ~ 数十 Hz、弱磁环）、机械谐振
+工况相关性：随温度 → 偏移温漂 / ψf / Rs；随电压 → 限幅 / 弱磁 / 死区补偿；随电流 → 饱和 / 采样窗口</div>
+<div id="anim-E01"></div>
+<div class="anim-note"><b>动画在演示什么：</b>模拟 iq（或力矩）频谱：勾选若干故障源，按当前转速计算各自频率并叠加。频谱下方标出 1×、2×、6× 电频率与机械阶次刻度。<br>
+<b>拖动滑块：</b>改变转速，与转速成比例的谱线随之移动，而电流环振荡、机械谐振等固定频率谱线不动——这就是区分「阶次类」与「环路 / 结构类」问题的方法。<br>
+<b>使用：</b>台架上测到的频谱，可用同样的方式标阶次后对照下表定位。</div>
+
+<h4 class="sub">根因速查表</h4>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>现象</th><th>判别信号</th><th>候选根因（按常见程度）</th><th>章节</th></tr>
+<tr><td rowspan="3">电流振荡 / 啸叫</td><td>固定高频（数百 Hz~kHz），与转速弱相关</td><td>电流环 Kp 过大、延迟、Lq 饱和、前馈 ωe 噪声</td><td>A08 C05 D07</td></tr>
+<tr><td>只在高速 / 电压饱和时</td><td>抗饱和失效、弱磁环振荡、方形限幅过调制</td><td>A02 C07</td></tr>
+<tr><td>随机尖刺</td><td>采样窗口、开关沿干扰、回绕溢出</td><td>B06 D02</td></tr>
+<tr><td rowspan="3">启动抖动 / 无法闭环</td><td>开环正常、闭环失控</td><td>电流符号、零位、方向、极对数</td><td>D06 C09</td></tr>
+<tr><td>I/F 失步</td><td>电流不足、加速过快、电压饱和</td><td>D06</td></tr>
+<tr><td>无感切入冲击</td><td>观测未收敛、积分器未预置、切换转速过低</td><td>C10 C05</td></tr>
+<tr><td rowspan="3">低速不稳 / 颗粒感</td><td>1×fe</td><td>电流偏移（含温漂）</td><td>C01</td></tr>
+<tr><td>6×fe</td><td>死区未补偿 / 过补偿</td><td>C13</td></tr>
+<tr><td>台阶状速度</td><td>测速量化、滤波</td><td>A05 C08</td></tr>
+<tr><td rowspan="3">高速失步 / 力矩崩溃</td><td>|v| 贴限幅</td><td>弱磁不足、Vdc 未实时、iq 未受电压椭圆约束</td><td>C07</td></tr>
+<tr><td>力矩随转速下降</td><td>延迟补偿缺失 / 符号错、旋变跟踪滞后</td><td>C03 C09</td></tr>
+<tr><td>无感模式</td><td>观测相位补偿、PLL 带宽</td><td>C10</td></tr>
+<tr><td rowspan="3">力矩脉动</td><td>2×fe</td><td>两相增益差</td><td>C01 B03</td></tr>
+<tr><td>机械 1、2 阶（1 对极旋变）</td><td>旋变偏置 / 幅值不平衡</td><td>C09</td></tr>
+<tr><td>极槽相关机械阶次</td><td>齿槽转矩、反电动势谐波</td><td>C13 B02</td></tr>
+<tr><td rowspan="2">噪声大</td><td>宽频</td><td>采样噪声经高增益放大、D 项、开关频率附近谐振</td><td>C01 C08</td></tr>
+<tr><td>特定阶次</td><td>见力矩脉动各项；过调制谐波</td><td>C04</td></tr>
+<tr><td rowspan="3">发热异常</td><td>同力矩电流偏大</td><td>零位误差、未用 MTPA、ψf 偏小、Clarke 系数</td><td>C06 C09 B02</td></tr>
+<tr><td>MOS 发热</td><td>开关损耗（频率 / 驱动）、死区过大、电流纹波</td><td>C13</td></tr>
+<tr><td>弱磁区</td><td>过深弱磁（id 过负）</td><td>C07</td></tr>
+</table></div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（支持定位的软件功能）</h3>
+<ol><li>冻结帧：故障时保存前后若干周期的 id/iq/vd/vq/θ/Vdc/转速（环形缓冲）。</li>
+<li>功能开关标定量：解耦、死区补偿、延迟补偿、弱磁、MTPA 均可单独关闭，便于对比实验。</li>
+<li>片上频谱或相关分析（D07）：直接输出特定阶次的幅值。</li>
+<li>运行统计：最大电流、最大 |v|、最大中断执行时间、故障计数。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>D05 模型中逐项注入故障（偏移、增益、死区、零位误差），建立「故障 → 频谱」参照图，供台架比对。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 阶次计算辅助（1 ms 任务，供 CANape 显示）*/
+void Diag_OrderHelper_1ms(void)
+{
+    float n  = (float)gFoc.spdRpmFilt;
+    gDbg.fe_Hz  = (float)FOC_POLE_PAIRS * n / 60.0f;     /* 1 阶电频率 */
+    gDbg.f2e_Hz = 2.0f * gDbg.fe_Hz;
+    gDbg.f6e_Hz = 6.0f * gDbg.fe_Hz;
+    gDbg.fm_Hz  = n / 60.0f;                             /* 1 阶机械频率 */
+}
+
+/* 冻结帧环形缓冲：主中断写入，故障时停止 */
+#define FF_N (64u)
+typedef struct { q15_t id, iq, vd, vq; uint16_t th; q15_t vdc; } FF_tst;
+static FF_tst s_ff[FF_N]; static uint8_t s_ffIdx; static uint8_t s_ffFreeze;
+void Diag_FreezeLog_Isr(void)
+{
+    if (s_ffFreeze == 0u) {
+        FF_tst *e = &amp;s_ff[s_ffIdx];
+        e-&gt;id = gFoc.id; e-&gt;iq = gFoc.iq; e-&gt;vd = gFoc.vd; e-&gt;vq = gFoc.vq;
+        e-&gt;th = gFoc.thetaE; e-&gt;vdc = gFoc.vdcPu;
+        s_ffIdx = (uint8_t)((s_ffIdx + 1u) % FF_N);
+    }
+}
+void Diag_FreezeFrame(void) { s_ffFreeze = 1u; }   /* C12 中调用 */</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题（跨模块综合案例）</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>「抖」——同一个字，三种根因</h5><dl>
+<dt>现象</dt><dd>驾驶员反馈方向盘「抖」。</dd>
+<dt>可能根因</dt><dd>① 固定频率 ~800 Hz：电流环振荡；② 随转速变化 6×fe：死区；③ 约 20 Hz 固定：速度 / 上层控制或机械谐振。</dd>
+<dt>排查顺序</dt><dd>先测频率 → 判断是否随转速变化 → 按表定位。</dd>
+<dt>修复</dt><dd>按对应章节处理。</dd>
+<dt>验证</dt><dd>对应谱线下降。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>只在高温 + 低压 + 高速同时出现的问题</h5><dl>
+<dt>现象</dt><dd>单独工况都正常，组合工况失步。</dd>
+<dt>可能根因</dt><dd>ψf 下降 + 可用电压下降 + 弱磁裕量不足叠加；或 Rs 增大使观测器偏差。</dd>
+<dt>排查</dt><dd>做工况矩阵（温度 × 电压 × 转速），记录 |v| 裕量。</dd>
+<dt>修复</dt><dd>弱磁电压闭环 + Vdc 实时；参数温度修正。</dd>
+<dt>验证</dt><dd>工况矩阵全通过。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>修复一个问题引出另一个</h5><dl>
+<dt>现象</dt><dd>加死区补偿后小电流噪声变大（C13）；降 Kp 消除啸叫后低压超调变大。</dd>
+<dt>可能根因</dt><dd>修复只针对单一工况验证。</dd>
+<dt>排查</dt><dd>每次修改后跑回归套件（D07）。</dd>
+<dt>修复</dt><dd>建立工况覆盖的验证矩阵。</dd>
+<dt>验证</dt><dd>回归全部通过。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>只用耳朵和手感描述问题，不测频率：无法定位。</li>
+<li>一次改多个参数：无法知道哪个起作用。</li>
+<li>用标定「掩盖」硬件或零位问题（如正反转不同增益）：换一台就复现。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="E01" id="quiz-E01"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：阶次换算、阶次 → 根因映射、工况相关性、固定频率 vs 阶次类问题、对比实验方法。</li></ul></div>
+</section>
+
+<!-- ================= E02 ================= -->
+<section class="chap" id="E02" data-title="E02 示波器抓取要点">
+<h2 class="chap-h">E02 示波器抓取要点：相电流、αβ、dq、SVPWM、角度误差</h2>
+<p class="chap-sub">模块 E · 故障与调试实战 · 第 2 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>测量手段：硬件信号（示波器）+ 软件内部量（XCP / DAC 输出）</td></tr>
+<tr><th>输入 / 输出</th><td>输入：探头、触发设置；输出：可解释的波形证据</td></tr>
+<tr><th>工程价值</th><td>XCP 看不到 PWM 开关细节与采样时刻，示波器看不到 dq 内部量——两者必须结合</td></tr>
+<tr><th>上下游依赖</th><td>服务 E01、E04、D06</td></tr>
+<tr><th>适用角色</th><td>台架工程师</td></tr>
+<tr><th>前置数学依赖</th><td>B06 时序、A03 频率</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>很多问题（采样时刻、死区、窄脉冲、振铃）只在纳秒~微秒尺度可见。</div>
+<div><b>② 量产怎么做</b>固定测点清单与示波器设置模板；内部量通过 DAC / PWM 调试输出或 XCP DAQ 与示波器时间对齐。</div>
+<div><b>③ 如何证明</b>截图附带设置（时基、触发、探头衰减、带宽限制），可复现。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>电流探头（带宽、量程满足 50 A 级与开关纹波）、高压 / 差分电压探头、隔离或差分测量（避免地环路短路）。</li>
+<li><span class="tg tg-red">【风险红线】</span>普通无源探头的地夹接到相线或高边会短路：测相电压用差分探头。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>测什么</th><th>测点 / 来源</th><th>示波器设置</th><th>看什么</th></tr>
+<tr><td>相电流</td><td>电流探头卡相线（两相或三相）</td><td>时基覆盖 2~5 个电周期；带宽限制按需</td><td>正弦度、幅值、过零平台（死区）、削顶（饱和）</td></tr>
+<tr><td>采样时刻</td><td>ADC 触发 GPIO / PDB 输出 + 下管栅极</td><td>单个 PWM 周期，触发在 PWM 中心</td><td>采样点是否在低边导通窗口中部、远离振铃</td></tr>
+<tr><td>中断执行</td><td>中断入口 / 出口 GPIO</td><td>余辉 / 无限持续，统计最大宽度</td><td>WCET、抖动</td></tr>
+<tr><td>相电压 / PWM</td><td>差分探头测相对负母线</td><td>单周期 + 长时基</td><td>死区、窄脉冲、马鞍波（滤波后）</td></tr>
+<tr><td>母线电压</td><td>差分探头</td><td>AC 耦合看纹波，DC 看跌落</td><td>大电流纹波、负载突变跌落、关管回馈过压</td></tr>
+<tr><td>αβ / dq / 角度误差</td><td>XCP DAQ，或 DAC 输出</td><td>XY 模式（iα–iβ）</td><td>圆度、圆心、旋转方向；dq 纹波阶次</td></tr>
+<tr><td>反电动势</td><td>对拖时 PWM 关，差分测线电压</td><td>与 θe 同屏（DAC）</td><td>零位、谐波、ψf</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>采样时刻相关的动态演示见 B06 动画；XY 判据见 B03 动画。</p>
+<div class="formula"><span class="tg tg-theory">【理论公式】</span>DAC / PWM 调试输出：将内部变量（如 iq 或 θe）按 Q15 映射到 DAC 0~3.3 V
+   v_dac = 1.65 V + x_q15/32768 × 1.65 V；带宽受 DAC 更新率（主中断）限制
+频谱分析：FFT 长度 N、采样率 fs → 分辨率 fs/N；分析阶次需整周期截取或加窗</div>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>预留调试 GPIO（中断入口出口、ADC 触发、故障）。</li>
+<li>预留 DAC 或 PWM+RC 调试输出通道，可通过标定量选择输出变量（id、iq、θe、角度误差）。</li>
+<li>示波器设置模板化（保存为 setup 文件），截图命名规则：日期_工况_信号。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>正常：相电流正弦、iα–iβ 圆、dq 直线（低纹波）、ADC 触发在 PWM 中心。</li>
+<li>每种异常波形与 E01 表格对应。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>/* 调试 DAC 输出：标定量选择变量（若 MCU 无 DAC，可用 PWM + RC 滤波替代）*/
+volatile uint8_t Cal_DbgDacSel = 0u;   /* 0:iq 1:id 2:thetaE 3:obs 角度误差 */
+void Dbg_DacOut_Isr(void)
+{
+    int32_t x;
+    switch (Cal_DbgDacSel) {
+    case 0:  x = gFoc.iq; break;
+    case 1:  x = gFoc.id; break;
+    case 2:  x = (int32_t)gFoc.thetaE - 32768; break;
+    default: x = (int16_t)(uint16_t)(gFoc.thetaEObs - gFoc.thetaE) * 8; break;   /* 放大 8 倍 */
+    }
+    Dac_Write12((uint16_t)(2048 + (x &gt;&gt; 4)));     /* Q15 → 12 位，中心 2048 */
+}</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>测量时一接探头就过流</h5><dl>
+<dt>现象</dt><dd>接上示波器探头地夹后控制器故障。</dd>
+<dt>可能根因</dt><dd>地夹接在非地电位（相线 / 高边），通过示波器地短路。</dd>
+<dt>排查</dt><dd>检查探头接法。</dd>
+<dt>修复</dt><dd>差分 / 隔离探头。</dd>
+<dt>验证</dt><dd>—</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>示波器电流与 XCP 电流对不上</h5><dl>
+<dt>现象</dt><dd>幅值相同但相位差明显，或 XCP 波形「锯齿」。</dd>
+<dt>可能根因</dt><dd>DAQ 降采样 / 时间戳；电流探头延迟；Clarke 系数。</dd>
+<dt>排查</dt><dd>用 DAC 输出与探头同屏比较。</dd>
+<dt>修复</dt><dd>按需提高 DAQ 频率；校正延迟。</dd>
+<dt>验证</dt><dd>同屏一致。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>频谱阶次判断错误</h5><dl>
+<dt>现象</dt><dd>根据频谱判断为 6 阶，修死区无效。</dd>
+<dt>可能根因</dt><dd>转速波动导致谱线展宽；分辨率不足；把机械阶次当电阶次。</dd>
+<dt>排查</dt><dd>恒速、整周期截取；同时计算 fe 与 fm。</dd>
+<dt>修复</dt><dd>重新判定阶次。</dd>
+<dt>验证</dt><dd>对比实验确认。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>带宽限制打开导致看不到振铃 / 尖刺。</li>
+<li>电流探头未消磁、未调零：直流偏移误判为软件偏移问题。</li>
+<li>截图不记录工况（转速、电流、温度、电压），事后无法复盘。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="E02" id="quiz-E02"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：测点清单、差分探头红线、采样时刻测量、DAC 调试输出、频谱分辨率与阶次。</li></ul></div>
+</section>

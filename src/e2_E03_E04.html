@@ -1,0 +1,213 @@
+
+<!-- ================= E03 ================= -->
+<section class="chap" id="E03" data-title="E03 仿真 vs 台架差异">
+<h2 class="chap-h">E03 仿真 vs 台架差异来源</h2>
+<p class="chap-sub">模块 E · 故障与调试实战 · 第 3 节（证据等级体系见 X3）</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>模型可信度评估：解释「仿真好、台架差」</td></tr>
+<tr><th>输入 / 输出</th><td>输入：同工况仿真与实测曲线；输出：差异归因与模型修正</td></tr>
+<tr><th>工程价值</th><td>知道差异来源，才能决定是修模型、修参数还是修代码</td></tr>
+<tr><th>上下游依赖</th><td>D05、X3</td></tr>
+<tr><th>适用角色</th><td>算法、模型</td></tr>
+<tr><th>前置数学依赖</th><td>A07、D01</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>仿真是设计工具；若不理解它与现实的差距，就会把仿真结果误当成产品性能。</div>
+<div><b>② 量产怎么做</b>逐项补齐非理想因素，并对每个补齐项用台架数据校验；剩余差异记录在案。</div>
+<div><b>③ 如何证明</b>同工况叠加对比：阶跃、扫频、外特性、脉动频谱的差异在约定容差内。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>仿真与台架工况严格一致（Vdc、温度、转速、负载、参数版本、软件版本）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>差异来源</th><th>仿真常见简化</th><th>台架表现</th><th>如何补齐 / 校验</th></tr>
+<tr><td>控制延迟</td><td>连续控制器、零延迟</td><td>相位裕度下降、振荡</td><td>离散 + 1 拍延迟 + ZOH（B06）</td></tr>
+<tr><td>参数</td><td>常数 Ld、Lq、ψf、Rs</td><td>饱和、温度变化</td><td>实测查表（C11）</td></tr>
+<tr><td>逆变器</td><td>理想平均电压</td><td>死区、压降、6 阶纹波</td><td>平均模型加死区（C13）</td></tr>
+<tr><td>采样</td><td>理想无噪声</td><td>噪声、偏移、增益、量化</td><td>注入噪声与误差</td></tr>
+<tr><td>角度</td><td>理想角度</td><td>零位误差、解码谐波、跟踪滞后</td><td>角度误差模型（C09）</td></tr>
+<tr><td>数值</td><td>double 浮点</td><td>Q 格式截断、溢出</td><td>定点模型 / SIL（D02）</td></tr>
+<tr><td>电源</td><td>理想恒压</td><td>内阻、跌落、纹波</td><td>电源内阻模型</td></tr>
+<tr><td>机械</td><td>刚性单惯量</td><td>谐振、间隙、摩擦</td><td>双惯量 / 摩擦模型</td></tr>
+<tr><td>时序</td><td>无执行时间</td><td>中断抖动、超时</td><td>PIL 测量</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>各差异项的动态效果分别在 A07（延迟相位）、A08（延迟振荡）、C13（死区）、D02（定点）、D07（参数偏差）动画中演示。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤（建立「对比闭环」）</h3>
+<ol><li>台架记录文件与仿真输入格式统一（时间、给定、工况）。</li>
+<li>用台架实测给定作为仿真输入，输出叠加对比。</li>
+<li>差异超出容差时，按上表从「延迟 → 参数 → 逆变器 → 采样 → 角度」顺序补齐。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>补齐延迟后，电流环阶跃超调应接近台架；补齐死区后，低速 6 阶纹波应出现。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code>% 【伪代码 / MATLAB】台架数据回放到模型并对比
+bench = readtable('bench_step_20A_2000rpm.csv');           % 时间、iqRef、iq、vq、Vdc、spd
+simIn = timeseries(bench.iqRef, bench.t);
+P.Vdc = mean(bench.Vdc);   P.Lq = interp1(LqTab.iq, LqTab.Lq, 20);   % 实测饱和电感
+out   = sim('eps_foc_model', 'StopTime', num2str(bench.t(end)));
+err   = interp1(out.t, out.iq, bench.t) - bench.iq;
+fprintf('RMS 误差 %.2f A，超调 仿真 %.1f%% / 台架 %.1f%%\n', rms(err), os(out.iq), os(bench.iq));</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>仿真外特性比台架高 20%</h5><dl>
+<dt>现象</dt><dd>仿真最高转速与弱磁区力矩明显高于实测。</dd>
+<dt>可能根因</dt><dd>仿真 Vdc 理想、无电源内阻；未计 Rs 压降与死区；电压裕量系数不同。</dd>
+<dt>排查</dt><dd>对比同点 |v| 与 Vdc。</dd>
+<dt>修复</dt><dd>模型加电源内阻、死区、实际 Vmax 系数。</dd>
+<dt>验证</dt><dd>外特性差异 &lt; 5%。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>台架力矩脉动仿真中看不到</h5><dl>
+<dt>现象</dt><dd>台架低速 6 阶脉动，仿真平滑。</dd>
+<dt>可能根因</dt><dd>模型无死区、无反电动势谐波、无齿槽。</dd>
+<dt>排查</dt><dd>逐项加入。</dd>
+<dt>修复</dt><dd>补齐后用于评估补偿算法。</dd>
+<dt>验证</dt><dd>频谱阶次对应。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>观测器仿真收敛、台架低速发散</h5><dl>
+<dt>现象</dt><dd>无感在仿真中 50 rpm 可用，台架 300 rpm 都不稳。</dd>
+<dt>可能根因</dt><dd>仿真用实际电压而非给定电压、无死区、无采样噪声、参数理想。</dd>
+<dt>排查</dt><dd>仿真中改用给定电压 + 死区 + 噪声。</dd>
+<dt>修复</dt><dd>重新评估最低可用转速。</dd>
+<dt>验证</dt><dd>仿真与台架最低转速一致。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>为了让仿真「对上」台架而随意调整模型参数（过拟合），失去预测能力。</li>
+<li>仿真软件版本、参数版本与台架软件版本不对应。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="E03" id="quiz-E03"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：九类差异来源、补齐优先级、回放对比方法、避免过拟合。</li></ul></div>
+</section>
+
+<!-- ================= E04 ================= -->
+<section class="chap" id="E04" data-title="E04 定位流程">
+<h2 class="chap-h">E04 定位流程：采样 → 角度 → 变换 → PID → SVPWM → 观测器</h2>
+<p class="chap-sub">模块 E · 故障与调试实战 · 第 4 节</p>
+
+<div class="part"><h3>第一部分：小节基础</h3>
+<div class="tbl-wrap"><table>
+<tr><th>链路位置</th><td>系统化排查顺序：沿数据流从上游到下游</td></tr>
+<tr><th>输入 / 输出</th><td>输入：异常现象；输出：定位到具体环节</td></tr>
+<tr><th>工程价值</th><td>上游错误会在下游被放大和变形；按数据流顺序检查，每一步都有明确的通过判据</td></tr>
+<tr><th>上下游依赖</th><td>汇总 C 模块；配合 E01、E02、X1</td></tr>
+<tr><th>适用角色</th><td>全部</td></tr>
+<tr><th>前置数学依赖</th><td>—</td></tr>
+</table></div>
+<div class="three">
+<div><b>① 为什么需要</b>电流环振荡可能是采样尖刺、角度噪声、参数、SVPWM 窗口任一环节导致；从下游调参通常是错误方向。</div>
+<div><b>② 量产怎么做</b>标准化 6 步检查表，每步 1~3 个判据信号，台架可在 30 分钟内完成一轮。</div>
+<div><b>③ 如何证明</b>每步检查结果记录，定位结论有对比实验支撑。</div>
+</div>
+</div>
+
+<div class="part"><h3>第二部分：前置条件</h3>
+<ul><li>D08 测量信号、E02 示波器测点、功能开关标定量（E01）。</li></ul>
+</div>
+
+<div class="part"><h3>第三部分：核心原理与公式</h3>
+<div class="tbl-wrap">
+<svg class="flow-svg" viewBox="0 0 980 120" role="img" aria-label="定位流程">
+<g data-link="C01"><rect class="bx math" x="5" y="20" width="140" height="50" rx="6"/><text x="75" y="40" text-anchor="middle">① 采样</text><text class="sm" x="75" y="58" text-anchor="middle">偏移/增益/时刻/饱和</text></g>
+<path class="ln" d="M145,45 L165,45"/>
+<g data-link="C09"><rect class="bx math" x="166" y="20" width="140" height="50" rx="6"/><text x="236" y="40" text-anchor="middle">② 角度</text><text class="sm" x="236" y="58" text-anchor="middle">方向/零位/跳变/延迟</text></g>
+<path class="ln" d="M306,45 L326,45"/>
+<g data-link="C03"><rect class="bx math" x="327" y="20" width="140" height="50" rx="6"/><text x="397" y="40" text-anchor="middle">③ 变换</text><text class="sm" x="397" y="58" text-anchor="middle">XY 圆/dq 直流</text></g>
+<path class="ln" d="M467,45 L487,45"/>
+<g data-link="C05"><rect class="bx math" x="488" y="20" width="140" height="50" rx="6"/><text x="558" y="40" text-anchor="middle">④ PID</text><text class="sm" x="558" y="58" text-anchor="middle">阶跃/饱和/前馈</text></g>
+<path class="ln" d="M628,45 L648,45"/>
+<g data-link="C04"><rect class="bx math" x="649" y="20" width="140" height="50" rx="6"/><text x="719" y="40" text-anchor="middle">⑤ SVPWM</text><text class="sm" x="719" y="58" text-anchor="middle">duty/窗口/死区</text></g>
+<path class="ln" d="M789,45 L809,45"/>
+<g data-link="C10"><rect class="bx math" x="810" y="20" width="160" height="50" rx="6"/><text x="890" y="40" text-anchor="middle">⑥ 观测器</text><text class="sm" x="890" y="58" text-anchor="middle">与旋变对比/切换</text></g>
+<text class="sm" x="5" y="100">点击方框跳转对应章节。每一步通过后再进入下一步；未通过时在该步内部解决，不向下游调参。</text>
+</svg></div>
+<div class="tbl-wrap"><table class="copyable">
+<tr><th>步骤</th><th>检查项</th><th>通过判据</th><th>常用对比实验</th></tr>
+<tr><td>① 采样</td><td>静止偏移、ADC 原始码、示波器采样点、三相和</td><td>静止 &lt; 0.1 A；采样在窗口中部；无饱和</td><td>PWM 关 / 开；不同占空比</td></tr>
+<tr><td>② 角度</td><td>θe 方向与锯齿数、零位、Δθ 平滑度、解码故障位</td><td>每机械圈 p 个锯齿；正反对称；无跳变</td><td>I/F 下对比开环角</td></tr>
+<tr><td>③ 变换</td><td>iα–iβ XY、dq 纹波阶次</td><td>圆、逆时针（正转）、dq 直流</td><td>开环拖动观察</td></tr>
+<tr><td>④ PID</td><td>阶跃、扫频、积分器、vSat</td><td>超调 &lt; 10%，相位裕度 ≥ 45°</td><td>关前馈 / Kp 减半</td></tr>
+<tr><td>⑤ SVPWM</td><td>duty 马鞍波、上下限、死区补偿</td><td>线性区内、窗口充足、6 阶小</td><td>开 / 关死区补偿</td></tr>
+<tr><td>⑥ 观测器</td><td>θobs − θres 误差、PLL 速度、切换</td><td>误差满足指标、切换平滑</td><td>改变 PLL 带宽、参数 ±20%</td></tr>
+</table></div>
+<p><span class="tg tg-none">【暂无可交互动画】</span>端到端数据流的交互动画见 X1；本节为排查流程。</p>
+</div>
+
+<div class="part"><h3>第四部分：嵌入式实现步骤</h3>
+<ol><li>把 6 步检查表做成台架脚本（CANape 宏 / Python + XCP 库）自动记录判据数值。</li>
+<li>输出检查报告：每步通过 / 不通过 + 截图 + 数值。</li></ol>
+</div>
+
+<div class="part"><h3>第五部分：仿真与波形预期</h3>
+<ul><li>每步对应的「正常波形」见各章第五部分；本流程只规定顺序和判据。</li></ul>
+</div>
+
+<div class="part"><h3>第六部分：EPS 案例实现</h3>
+<pre><code># 【伪代码 / Python】台架自动检查脚本骨架（XCP 访问库与接口以所用工具为准）
+def step1_sampling(xcp):
+    xcp.write('Cal_BenchPwmOff', 1); time.sleep(0.5)
+    ia = xcp.read_avg('gFoc.ia', n=200) * 50 / 32768
+    ib = xcp.read_avg('gFoc.ib', n=200) * 50 / 32768
+    return abs(ia) &lt; 0.1 and abs(ib) &lt; 0.1, {'ia': ia, 'ib': ib}
+
+def step2_angle(xcp):
+    xcp.write('Cal_BenchMode', IF_DRAG); time.sleep(2.0)
+    d = xcp.read_series('gBench.angDiff', seconds=1.0)
+    drift = (d[-1] - d[0]) * 360 / 65536
+    return abs(drift) &lt; 5, {'drift_deg': drift}
+
+for name, fn in [('采样', step1_sampling), ('角度', step2_angle)]:   # … 依次 6 步
+    ok, data = fn(xcp)
+    report.add(name, ok, data)
+    if not ok:
+        break                                                         # 不通过即停止，不进入下游</code></pre>
+</div>
+
+<div class="part"><h3>第七部分：高频调试问题</h3>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>新样件「电流环振荡」</h5><dl>
+<dt>现象</dt><dd>新硬件版本上电流环振荡，老版本正常。</dd>
+<dt>可能根因</dt><dd>按流程：①采样 RC 改变（相位）/ 增益改变 → 实际 Kp 改变。</dd>
+<dt>排查</dt><dd>步骤 ① 发现增益比老版本大 30%（采样电阻改值）。</dd>
+<dt>修复</dt><dd>更新采样换算与增益标定。</dd>
+<dt>验证</dt><dd>步骤 ④ 阶跃合格。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>软件升级后正反转不对称</h5><dl>
+<dt>现象</dt><dd>新软件反转力矩下降。</dd>
+<dt>可能根因</dt><dd>步骤 ②：延迟补偿取了绝对值（C03）或零位标定量被默认值覆盖（D07）。</dd>
+<dt>排查</dt><dd>对比标定数据与代码差异。</dd>
+<dt>修复</dt><dd>修正。</dd>
+<dt>验证</dt><dd>正反对称。</dd></dl></div>
+<div class="issue"><h5><span class="tg tg-fault">【高频故障】</span>调了三天 PI 仍振荡</h5><dl>
+<dt>现象</dt><dd>反复调电流环参数无效。</dd>
+<dt>可能根因</dt><dd>跳过 ①②③ 直接在 ④ 调参；实际是采样尖刺。</dd>
+<dt>排查</dt><dd>回到步骤 ①。</dd>
+<dt>修复</dt><dd>修正采样时刻。</dd>
+<dt>验证</dt><dd>默认参数即稳定。</dd></dl></div>
+</div>
+
+<div class="part"><h3>第八部分：工程踩坑</h3>
+<ul><li>「先调参数看看」是最常见的反模式。</li>
+<li>并行修改多个环节，结论不可追溯。</li></ul>
+</div>
+
+<div class="part"><h3>第九部分：本章习题组</h3><div class="quiz" data-sec="E04" id="quiz-E04"></div></div>
+<div class="part"><h3>第十部分：本章考核小结</h3>
+<ul><li>核心考点：6 步顺序与判据、不向下游调参原则、对比实验、自动化检查。</li></ul></div>
+</section>
+
+<!-- ================= 模块 E 综合自测 ================= -->
+<section class="chap" id="E-test" data-title="模块 E 章节综合自测卷">
+<h2 class="chap-h">模块 E 章节综合自测卷</h2>
+<p class="chap-sub">从 E01~E04 题库随机抽取 10 道客观题 + 2 道主观题，交卷统一判分。</p>
+<div class="exam" data-scope="E" data-nobj="10" data-nsub="2" data-key="examE"></div>
+</section>
